@@ -1,0 +1,1249 @@
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import {
+  decryptPrivateKeyJwk,
+  decryptSignedMessage,
+  decryptStringWithPassword,
+  encryptPrivateKeyJwk,
+  encryptSignedMessage,
+  encryptStringWithPassword,
+  generateRsaKeyPair,
+  importRsaPrivateKeyJwk,
+  publicJwkFromPrivateJwk,
+} from '../utils/signedCrypto'
+
+export type SignedChat = {
+  id: string
+  type: 'personal' | 'group'
+  name?: string
+  otherUserId?: string
+  otherUsername?: string
+  otherPublicKey?: string
+}
+
+export type SignedChatMember = {
+  userId: string
+  username: string
+  publicKey: string
+}
+
+export type SignedMessage = {
+  id: string
+  chatId: string
+  senderId: string
+  encryptedData: string
+}
+
+export type SignedDecryptedMessage = {
+  id: string
+  chatId: string
+  atIso: string
+  modifiedAtIso?: string | null
+  fromUsername: string
+  text: string
+  replyToId?: string | null
+}
+
+function apiBase() {
+  return ''
+}
+
+function wsSignedUrl(token: string) {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${location.host}/signed?token=${encodeURIComponent(token)}`
+}
+
+const LS_KEYS = 'lrcom-signed-keys'
+const LS_LEGACY_KEY = 'lrcom-signed-key'
+const SS_TOKEN = 'lrcom-signed-token'
+const SS_USER = 'lrcom-signed-user'
+const SS_LAST_USERNAME = 'lrcom-signed-last-username'
+
+type StoredKeyV2 = {
+  v: 2
+  encryptedUsername: string
+  encryptedPrivateKey: string
+}
+
+type LegacyStoredKeyV1 = {
+  username: string
+  publicKeyJwk: string
+  encryptedPrivateKey: string
+}
+
+type StoredUser = {
+  userId: string
+  username: string
+}
+
+export const useSignedStore = defineStore('signed', () => {
+  const token = ref<string | null>(null)
+  const userId = ref<string | null>(null)
+  const username = ref<string | null>(null)
+  const publicKeyJwk = ref<string | null>(null)
+  const privateKey = ref<CryptoKey | null>(null)
+
+  const lastUsername = ref<string>('')
+
+  const ws = ref<WebSocket | null>(null)
+  const wsShouldReconnect = ref(false)
+  const wsReconnectAttempt = ref(0)
+  let wsReconnectTimer: number | null = null
+
+  const turnConfig = ref<any | null>(null)
+
+  const inboundHandlers: Array<(type: string, obj: Record<string, unknown>) => void> = []
+  const disconnectHandlers: Array<() => void> = []
+
+  const view = ref<'contacts' | 'chat' | 'settings'>('contacts')
+  const activeChatId = ref<string | null>(null)
+
+  const chats = ref<SignedChat[]>([])
+  const unreadByChatId = ref<Record<string, number>>({})
+
+  const membersByChatId = ref<Record<string, SignedChatMember[]>>({})
+
+  const messagesByChatId = ref<Record<string, SignedDecryptedMessage[]>>({})
+
+  const messagesOldestIdByChatId = ref<Record<string, string>>({})
+  const messagesHasMoreByChatId = ref<Record<string, boolean>>({})
+  const messagesLoadingMoreByChatId = ref<Record<string, boolean>>({})
+
+  const onlineByUserId = ref<Record<string, boolean>>({})
+  const busyByUserId = ref<Record<string, boolean>>({})
+  let presenceTimer: number | null = null
+
+  const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
+
+  function clearPresenceTimer() {
+    if (presenceTimer != null) {
+      try {
+        window.clearInterval(presenceTimer)
+      } catch {
+        // ignore
+      }
+      presenceTimer = null
+    }
+  }
+
+  async function refreshPresence() {
+    if (!token.value || !userId.value) return
+
+    const ids = new Set<string>()
+    for (const c of chats.value) {
+      if (c.type === 'personal' && c.otherUserId) ids.add(c.otherUserId)
+      if (c.type === 'group') {
+        const members = membersByChatId.value[c.id]
+        if (Array.isArray(members)) {
+          for (const m of members) {
+            if (m?.userId) ids.add(String(m.userId))
+          }
+        }
+      }
+    }
+
+    const list = Array.from(ids)
+    if (!list.length) {
+      onlineByUserId.value = {}
+      return
+    }
+
+    try {
+      const j = await fetchJson('/api/signed/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ userIds: list }),
+      })
+
+      const online = new Set<string>(Array.isArray(j?.onlineUserIds) ? j.onlineUserIds.map(String) : [])
+      const busy = new Set<string>(Array.isArray(j?.busyUserIds) ? j.busyUserIds.map(String) : [])
+      const next: Record<string, boolean> = {}
+      const nextBusy: Record<string, boolean> = {}
+      for (const id of list) next[id] = online.has(id)
+      for (const id of list) nextBusy[id] = busy.has(id)
+      onlineByUserId.value = next
+      busyByUserId.value = nextBusy
+    } catch {
+      // ignore
+    }
+  }
+
+  function startPresencePolling() {
+    clearPresenceTimer()
+    // Polling keeps this simple and avoids leaking global online lists.
+    presenceTimer = window.setInterval(() => {
+      void refreshPresence()
+    }, 10000)
+    void refreshPresence()
+  }
+
+  function getChatOnlineState(chatId: string): 'online' | 'offline' | 'busy' | null {
+    const c = chats.value.find((x) => x.id === chatId)
+    if (!c) return null
+    if (c.type === 'personal') {
+      const id = c.otherUserId
+      if (!id) return null
+      if (busyByUserId.value[id]) return 'busy'
+      return onlineByUserId.value[id] ? 'online' : 'offline'
+    }
+
+    // Group: best-effort based on cached members only.
+    const members = membersByChatId.value[chatId]
+    if (!Array.isArray(members) || !members.length) return null
+    let anyOnline = false
+    let anyBusy = false
+    for (const m of members) {
+      if (!m?.userId) continue
+      const id = String(m.userId)
+      if (busyByUserId.value[id]) anyBusy = true
+      if (onlineByUserId.value[id]) anyOnline = true
+    }
+    if (anyBusy) return 'busy'
+    return anyOnline ? 'online' : 'offline'
+  }
+
+  const otherChatsUnread = computed(() => {
+    let n = 0
+    const active = activeChatId.value
+    for (const [cid, count] of Object.entries(unreadByChatId.value)) {
+      if (active && cid === active) continue
+      n += count
+    }
+    return n
+  })
+
+  function authHeaders() {
+    const h: Record<string, string> = {}
+    if (token.value) h.Authorization = `Bearer ${token.value}`
+    return h
+  }
+
+  function clearWsReconnectTimer() {
+    if (wsReconnectTimer != null) {
+      try {
+        window.clearTimeout(wsReconnectTimer)
+      } catch {
+        // ignore
+      }
+      wsReconnectTimer = null
+    }
+  }
+
+  async function syncAfterConnect() {
+    // Best-effort: resync unread counts and refresh current chat.
+    if (!token.value) return
+    try {
+      await refreshChats()
+    } catch {
+      // ignore
+    }
+
+    const cid = activeChatId.value
+    if (view.value === 'chat' && cid) {
+      try {
+        // Pull more history on reconnect in case we missed WS events.
+        await loadMessages(cid, 200)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  function scheduleWsReconnect() {
+    if (!wsShouldReconnect.value) return
+    if (!token.value) return
+    if (!privateKey.value) return
+
+    const maxAttempts = 3
+    if (wsReconnectAttempt.value >= maxAttempts) return
+
+    clearWsReconnectTimer()
+    const attempt = wsReconnectAttempt.value + 1
+    wsReconnectAttempt.value = attempt
+
+    wsReconnectTimer = window.setTimeout(() => {
+      void connectWs()
+    }, 1000)
+  }
+
+  function loadKeyEntries(): StoredKeyV2[] {
+    try {
+      const raw = localStorage.getItem(LS_KEYS)
+      if (!raw) return []
+      const arr = JSON.parse(raw)
+      if (!Array.isArray(arr)) return []
+      const out: StoredKeyV2[] = []
+      for (const it of arr) {
+        if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
+          out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
+        }
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
+  function saveKeyEntries(next: StoredKeyV2[]) {
+    try {
+      localStorage.setItem(LS_KEYS, JSON.stringify(next))
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadLegacyKeyMaterial(): LegacyStoredKeyV1 | null {
+    try {
+      const raw = localStorage.getItem(LS_LEGACY_KEY)
+      if (!raw) return null
+      const k = JSON.parse(raw)
+      if (!k?.username || !k?.publicKeyJwk || !k?.encryptedPrivateKey) return null
+      return { username: String(k.username), publicKeyJwk: String(k.publicKeyJwk), encryptedPrivateKey: String(k.encryptedPrivateKey) }
+    } catch {
+      return null
+    }
+  }
+
+  function clearAllKeyMaterial() {
+    try {
+      localStorage.removeItem(LS_KEYS)
+      localStorage.removeItem(LS_LEGACY_KEY)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string; extraEntropy?: Uint8Array }) {
+    const encryptedUsername = await encryptStringWithPassword({ plaintext: params.username, password: params.password, extraEntropy: params.extraEntropy })
+
+    const cur = loadKeyEntries()
+    const kept: StoredKeyV2[] = []
+    for (const e of cur) {
+      try {
+        const u = await decryptStringWithPassword({ encrypted: e.encryptedUsername, password: params.password })
+        if (u === params.username) continue
+      } catch {
+        // If it can't be decrypted with this password, keep it.
+      }
+      kept.push(e)
+    }
+
+    kept.push({ v: 2, encryptedUsername, encryptedPrivateKey: params.encryptedPrivateKey })
+    saveKeyEntries(kept)
+
+    // Remove legacy plaintext storage once password is known.
+    try {
+      localStorage.removeItem(LS_LEGACY_KEY)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function findEncryptedPrivateKeyForLogin(params: { username: string; password: string }) {
+    const list = loadKeyEntries()
+    for (const e of list) {
+      try {
+        const u = await decryptStringWithPassword({ encrypted: e.encryptedUsername, password: params.password })
+        if (u === params.username) return e.encryptedPrivateKey
+      } catch {
+        // ignore
+      }
+    }
+
+    const legacy = loadLegacyKeyMaterial()
+    if (legacy && legacy.username === params.username) return legacy.encryptedPrivateKey
+    return null
+  }
+
+  function storeSession(u: StoredUser, t: string) {
+    try {
+      sessionStorage.setItem(SS_TOKEN, t)
+      sessionStorage.setItem(SS_USER, JSON.stringify(u))
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadSession(): { u: StoredUser; t: string } | null {
+    try {
+      const t = sessionStorage.getItem(SS_TOKEN)
+      const rawU = sessionStorage.getItem(SS_USER)
+      if (!t || !rawU) return null
+      const u = JSON.parse(rawU) as StoredUser
+      if (!u?.userId || !u?.username) return null
+      return { u, t }
+    } catch {
+      return null
+    }
+  }
+
+  function clearSession() {
+    try {
+      sessionStorage.removeItem(SS_TOKEN)
+      sessionStorage.removeItem(SS_USER)
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadLastUsername(): string {
+    try {
+      const v = sessionStorage.getItem(SS_LAST_USERNAME)
+      return (v ?? '').trim()
+    } catch {
+      return ''
+    }
+  }
+
+  function storeLastUsername(u: string) {
+    const v = (u ?? '').trim()
+    lastUsername.value = v
+    try {
+      if (v) sessionStorage.setItem(SS_LAST_USERNAME, v)
+      else sessionStorage.removeItem(SS_LAST_USERNAME)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function unlock(params: { password: string }) {
+    const u = (username.value ?? '').trim()
+    if (!u) throw new Error('Username required')
+    if (!params.password) throw new Error('Password required')
+
+    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
+    if (!encryptedPrivateKey) throw new Error('No local key found')
+
+    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
+    publicKeyJwk.value = publicJwkFromPrivateJwk(privateJwk)
+
+    // Now that the password is known, ensure we persist only the low-profile entry.
+    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+
+    // After unlock: load server state and connect realtime.
+    if (token.value) {
+      await refreshChats()
+      await connectWs()
+    }
+  }
+
+  async function fetchJson(path: string, init?: RequestInit) {
+    const r = await fetch(`${apiBase()}${path}`, init)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      if (r.status === 401) {
+        // Token expired / server restarted (tokens are in-memory). Cleanly reset signed session.
+        try {
+          logout()
+        } catch {
+          // ignore
+        }
+        throw new Error('Unauthorized')
+      }
+      const msg = typeof j?.error === 'string' ? j.error : 'Request failed'
+      throw new Error(msg)
+    }
+    return j
+  }
+
+  function registerInboundHandler(handler: (type: string, obj: Record<string, unknown>) => void) {
+    inboundHandlers.push(handler)
+  }
+
+  function registerDisconnectHandler(handler: () => void) {
+    disconnectHandlers.push(handler)
+  }
+
+  function sendWs(obj: unknown) {
+    try {
+      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return
+      ws.value.send(JSON.stringify(obj))
+    } catch {
+      // ignore
+    }
+  }
+
+  async function ensureTurnConfig() {
+    if (turnConfig.value) return turnConfig.value
+    try {
+      const j = await fetchJson('/turn')
+      turnConfig.value = j
+      return j
+    } catch {
+      // ignore
+      return null
+    }
+  }
+
+  async function connectWs() {
+    wsShouldReconnect.value = true
+    clearWsReconnectTimer()
+    disconnectWs()
+    if (!token.value) return
+
+    const sock = new WebSocket(wsSignedUrl(token.value))
+    ws.value = sock
+
+    sock.addEventListener('open', () => {
+      wsReconnectAttempt.value = 0
+      startPresencePolling()
+      void syncAfterConnect()
+    })
+
+    sock.addEventListener('close', () => {
+      ws.value = null
+      clearPresenceTimer()
+      for (const h of disconnectHandlers) {
+        try {
+          h()
+        } catch {
+          // ignore
+        }
+      }
+      scheduleWsReconnect()
+    })
+
+    sock.addEventListener('error', () => {
+      // no logs
+      clearPresenceTimer()
+      scheduleWsReconnect()
+    })
+
+    sock.addEventListener('message', async (ev) => {
+      let obj: any
+      try {
+        obj = JSON.parse(String(ev.data))
+      } catch {
+        return
+      }
+      if (!obj || typeof obj.type !== 'string') return
+
+      if (obj.type === 'signedMessage') {
+        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+        const id = typeof obj.id === 'string' ? obj.id : null
+        const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+        const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+        if (!chatId || !id || !senderId || !encryptedData) return
+
+        if (privateKey.value && userId.value) {
+          try {
+            const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+            const msg: SignedDecryptedMessage = {
+              id,
+              chatId,
+              atIso: plain.atIso,
+              modifiedAtIso: plain.modifiedAtIso,
+              fromUsername: plain.fromUsername,
+              text: plain.text,
+              replyToId: plain.replyToId,
+            }
+
+            const cur = messagesByChatId.value[chatId] ?? []
+            if (cur.some((m) => m.id === id)) return
+            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [...cur, msg] }
+
+            // Unread bump if not currently viewing this chat.
+            if (!(view.value === 'chat' && activeChatId.value === chatId)) {
+              unreadByChatId.value = {
+                ...unreadByChatId.value,
+                [chatId]: (unreadByChatId.value[chatId] ?? 0) + 1,
+              }
+            }
+          } catch {
+            // ignore decrypt failures
+          }
+        }
+      }
+
+      if (obj.type === 'signedMessageDeleted') {
+        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+        const id = typeof obj.id === 'string' ? obj.id : null
+        if (!chatId || !id) return
+
+        const cur = messagesByChatId.value[chatId] ?? []
+        if (cur.length) {
+          messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => m.id !== id) }
+        }
+        // Best-effort refresh counts; deletion may clear unread for others via cascade.
+        void refreshChats()
+      }
+
+      if (obj.type === 'signedMessageUpdated') {
+        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+        const id = typeof obj.id === 'string' ? obj.id : null
+        const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+        const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+        if (!chatId || !id || !senderId || !encryptedData) return
+
+        if (privateKey.value && userId.value) {
+          try {
+            const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+            const cur = messagesByChatId.value[chatId] ?? []
+            const next = cur.map((m) =>
+              m.id === id
+                ? {
+                    ...m,
+                    atIso: plain.atIso,
+                    modifiedAtIso: plain.modifiedAtIso,
+                    fromUsername: plain.fromUsername,
+                    text: plain.text,
+                    replyToId: plain.replyToId,
+                  }
+                : m,
+            )
+            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      if (obj.type === 'signedChatDeleted') {
+        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+        if (chatId) removeChatLocal(chatId)
+      }
+
+      if (obj.type === 'signedChatsChanged') {
+        // Best-effort: refresh the chat list when membership changes or a new
+        // chat is created on the other side.
+        void refreshChats()
+      }
+
+      // Forward all inbound messages to registered handlers (e.g. voice calls).
+      for (const h of inboundHandlers) {
+        try {
+          h(String(obj.type), obj as Record<string, unknown>)
+        } catch {
+          // ignore
+        }
+      }
+    })
+  }
+
+  function disconnectWs() {
+    // Callers can disable reconnect by setting wsShouldReconnect=false before disconnect.
+    try {
+      ws.value?.close()
+    } catch {
+      // ignore
+    }
+    ws.value = null
+    clearPresenceTimer()
+    for (const h of disconnectHandlers) {
+      try {
+        h()
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  async function refreshChats() {
+    const j = await fetchJson('/api/signed/chats', { headers: { ...authHeaders() } })
+    const nextChats: SignedChat[] = Array.isArray(j.chats) ? j.chats : []
+    chats.value = nextChats
+
+    const unread: Record<string, number> = {}
+    if (Array.isArray(j.unread)) {
+      for (const u of j.unread) {
+        if (u && typeof u.chatId === 'string' && typeof u.count === 'number') unread[u.chatId] = u.count
+      }
+    }
+    unreadByChatId.value = unread
+  }
+
+  function getChat(chatId: string): SignedChat | null {
+    const c = chats.value.find((x) => x.id === chatId)
+    return c ?? null
+  }
+
+  async function fetchChatMembers(chatId: string) {
+    const j = await fetchJson(`/api/signed/chats/members?chatId=${encodeURIComponent(chatId)}`, {
+      headers: { ...authHeaders() },
+    })
+
+    const list: SignedChatMember[] = Array.isArray(j.members)
+      ? j.members
+          .filter((m: any) => m && typeof m.userId === 'string' && typeof m.username === 'string' && typeof m.publicKey === 'string')
+          .map((m: any) => ({ userId: String(m.userId), username: String(m.username), publicKey: String(m.publicKey) }))
+      : []
+
+    membersByChatId.value = { ...membersByChatId.value, [chatId]: list }
+    return list
+  }
+
+  async function ensureChatMembers(chatId: string) {
+    const cached = membersByChatId.value[chatId]
+    if (Array.isArray(cached) && cached.length) return cached
+    return fetchChatMembers(chatId)
+  }
+
+  async function openChat(chatId: string) {
+    activeChatId.value = chatId
+    view.value = 'chat'
+
+    await loadMessages(chatId)
+
+    // Best-effort: prefetch group members so we can encrypt to all.
+    try {
+      const chat = getChat(chatId)
+      if (chat?.type === 'group') await ensureChatMembers(chatId)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function markMessagesRead(chatId: string, messageIds: string[]) {
+    if (!token.value) return
+    const ids = Array.isArray(messageIds) ? messageIds.map(String).filter(Boolean) : []
+    if (!ids.length) return
+    try {
+      const j = await fetchJson('/api/signed/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ chatId, messageIds: ids }),
+      })
+      const next = typeof j?.unreadCount === 'number' ? j.unreadCount : null
+      if (next != null) unreadByChatId.value = { ...unreadByChatId.value, [chatId]: Math.max(0, next) }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function listUnreadMessageIds(chatId: string, limit = 500) {
+    const j = await fetchJson(`/api/signed/messages/unread?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(limit))}`, {
+      headers: { ...authHeaders() },
+    })
+    return Array.isArray(j?.messageIds) ? j.messageIds.map(String) : []
+  }
+
+  async function deleteMessage(chatId: string, messageId: string) {
+    await fetchJson('/api/signed/messages/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId, messageId }),
+    })
+  }
+
+  async function updateMessage(chatId: string, messageId: string, encryptedData: string) {
+    await fetchJson('/api/signed/messages/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId, messageId, encryptedData }),
+    })
+  }
+
+  async function updateMessageText(chatId: string, messageId: string, text: string) {
+    const t = text.trim()
+    if (!t) return
+    if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
+
+    const chat = chats.value.find((c) => c.id === chatId)
+    if (!chat) throw new Error('Chat not found')
+
+    const cur = messagesByChatId.value[chatId] ?? []
+    const existing = cur.find((m) => m.id === messageId) ?? null
+    const atIso = existing?.atIso ?? new Date().toISOString()
+    const modifiedAtIso = new Date().toISOString()
+    const replyToId = existing?.replyToId ?? null
+
+    let recipients: Array<{ userId: string; publicKeyJwk: string }> = []
+
+    if (chat.type === 'personal') {
+      if (!chat.otherUserId || !chat.otherPublicKey) throw new Error('Chat not ready')
+      recipients = [
+        { userId: userId.value, publicKeyJwk: publicKeyJwk.value },
+        { userId: chat.otherUserId, publicKeyJwk: chat.otherPublicKey },
+      ]
+    } else {
+      const members = await ensureChatMembers(chatId)
+      recipients = members.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey }))
+      if (!recipients.length) throw new Error('No recipients')
+    }
+
+    const encryptedData = await encryptSignedMessage({
+      plaintext: { text: t, atIso, fromUsername: username.value, replyToId, modifiedAtIso },
+      recipients,
+    })
+
+    await updateMessage(chatId, messageId, encryptedData)
+
+    // Optimistic local patch (WS update is best-effort).
+    const next = cur.map((m) =>
+      m.id === messageId
+        ? { ...m, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId }
+        : m,
+    )
+    messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
+  }
+
+  async function deleteChat(chatId: string) {
+    await fetchJson('/api/signed/chats/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId }),
+    })
+
+    removeChatLocal(chatId)
+  }
+
+  function removeChatLocal(chatId: string) {
+    chats.value = chats.value.filter((c) => c.id !== chatId)
+    const { [chatId]: _u, ...restUnread } = unreadByChatId.value
+    unreadByChatId.value = restUnread
+    const { [chatId]: _m, ...restMsgs } = messagesByChatId.value
+    messagesByChatId.value = restMsgs
+    const { [chatId]: _mm, ...restMembers } = membersByChatId.value
+    membersByChatId.value = restMembers
+    if (activeChatId.value === chatId) {
+      activeChatId.value = null
+      view.value = 'contacts'
+    }
+    void refreshPresence()
+  }
+
+  function goHome() {
+    view.value = 'contacts'
+  }
+
+  function openSettings() {
+    view.value = 'settings'
+  }
+
+  async function createPersonalChat(friendUsername: string) {
+    const u = friendUsername.trim()
+    if (!u) throw new Error('Username required')
+
+    const j = await fetchJson('/api/signed/chats/create-personal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ username: u }),
+    })
+
+    await refreshChats()
+
+    if (j?.chat?.id) {
+      await openChat(String(j.chat.id))
+    }
+
+  }
+
+  async function createGroupChat(name: string) {
+    const n = name.trim()
+    if (!n) throw new Error('Name required')
+
+    const j = await fetchJson('/api/signed/chats/create-group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ name: n }),
+    })
+
+    await refreshChats()
+    if (j?.chat?.id) await openChat(String(j.chat.id))
+  }
+
+  async function addGroupMember(chatId: string, memberUsername: string) {
+    const u = memberUsername.trim()
+    if (!u) throw new Error('Username required')
+
+    const j = await fetchJson('/api/signed/chats/add-member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId, username: u }),
+    })
+
+    // Best-effort: update cached members.
+    const member = j?.member
+    if (member && typeof member.userId === 'string' && typeof member.username === 'string' && typeof member.publicKey === 'string') {
+      const cur = membersByChatId.value[chatId] ?? []
+      const exists = cur.some((m) => m.userId === String(member.userId))
+      if (!exists) {
+        membersByChatId.value = {
+          ...membersByChatId.value,
+          [chatId]: [...cur, { userId: String(member.userId), username: String(member.username), publicKey: String(member.publicKey) }],
+        }
+      }
+    } else {
+      // If response isn't usable, just refetch.
+      try {
+        await fetchChatMembers(chatId)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  async function loadMessages(chatId: string, limit = 50) {
+    const lim = Math.max(1, Math.min(200, Number(limit) || 50))
+
+    const j = await fetchJson(`/api/signed/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}`, {
+      headers: { ...authHeaders() },
+    })
+
+    const list: SignedMessage[] = Array.isArray(j.messages) ? j.messages : []
+
+    if (!privateKey.value || !userId.value) {
+      messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [] }
+      const { [chatId]: _o, ...restOldest } = messagesOldestIdByChatId.value
+      messagesOldestIdByChatId.value = restOldest
+      messagesHasMoreByChatId.value = { ...messagesHasMoreByChatId.value, [chatId]: false }
+      return { count: 0, hasMore: false, oldestId: null as string | null }
+    }
+
+    const out: SignedDecryptedMessage[] = []
+    for (const m of list) {
+      try {
+        const plain = await decryptSignedMessage({
+          encryptedData: m.encryptedData,
+          myUserId: userId.value,
+          myPrivateKey: privateKey.value,
+        })
+        out.push({
+          id: m.id,
+          chatId,
+          atIso: plain.atIso,
+          modifiedAtIso: plain.modifiedAtIso,
+          fromUsername: plain.fromUsername,
+          text: plain.text,
+          replyToId: plain.replyToId,
+        })
+      } catch {
+        // ignore undecryptable messages
+      }
+    }
+
+    // API returns newest-first; render oldest-first.
+    out.reverse()
+    messagesByChatId.value = { ...messagesByChatId.value, [chatId]: out }
+
+    const oldestId = out[0]?.id ? String(out[0].id) : null
+    if (oldestId) messagesOldestIdByChatId.value = { ...messagesOldestIdByChatId.value, [chatId]: oldestId }
+    else {
+      const { [chatId]: _o, ...restOldest } = messagesOldestIdByChatId.value
+      messagesOldestIdByChatId.value = restOldest
+    }
+
+    const hasMore = list.length >= lim
+    messagesHasMoreByChatId.value = { ...messagesHasMoreByChatId.value, [chatId]: hasMore }
+
+    return { count: out.length, hasMore, oldestId }
+  }
+
+  async function loadMoreMessages(chatId: string, limit = 50) {
+    const lim = Math.max(1, Math.min(200, Number(limit) || 50))
+    if (!chatId) return { added: 0, hasMore: false }
+    if (!privateKey.value || !userId.value) return { added: 0, hasMore: false }
+
+    if (messagesLoadingMoreByChatId.value[chatId]) {
+      return { added: 0, hasMore: Boolean(messagesHasMoreByChatId.value[chatId]) }
+    }
+    if (messagesHasMoreByChatId.value[chatId] === false) return { added: 0, hasMore: false }
+
+    const before = messagesOldestIdByChatId.value[chatId]
+    if (!before) return { added: 0, hasMore: false }
+
+    messagesLoadingMoreByChatId.value = { ...messagesLoadingMoreByChatId.value, [chatId]: true }
+    try {
+      const j = await fetchJson(
+        `/api/signed/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}&before=${encodeURIComponent(before)}`,
+        { headers: { ...authHeaders() } },
+      )
+
+      const list: SignedMessage[] = Array.isArray(j.messages) ? j.messages : []
+
+      const decoded: SignedDecryptedMessage[] = []
+      for (const m of list) {
+        try {
+          const plain = await decryptSignedMessage({
+            encryptedData: m.encryptedData,
+            myUserId: userId.value,
+            myPrivateKey: privateKey.value,
+          })
+          decoded.push({
+            id: m.id,
+            chatId,
+            atIso: plain.atIso,
+            modifiedAtIso: plain.modifiedAtIso,
+            fromUsername: plain.fromUsername,
+            text: plain.text,
+            replyToId: plain.replyToId,
+          })
+        } catch {
+          // ignore
+        }
+      }
+
+      // API returns newest-first; convert to oldest-first.
+      decoded.reverse()
+
+      const cur = messagesByChatId.value[chatId] ?? []
+      const existing = new Set(cur.map((x) => x.id))
+      const nextChunk = decoded.filter((m) => !existing.has(m.id))
+
+      if (nextChunk.length) {
+        messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [...nextChunk, ...cur] }
+        const nextOldest = nextChunk[0]?.id
+        if (nextOldest) messagesOldestIdByChatId.value = { ...messagesOldestIdByChatId.value, [chatId]: String(nextOldest) }
+      }
+
+      const hasMore = list.length >= lim
+      messagesHasMoreByChatId.value = { ...messagesHasMoreByChatId.value, [chatId]: hasMore }
+      return { added: nextChunk.length, hasMore }
+    } finally {
+      const { [chatId]: _l, ...rest } = messagesLoadingMoreByChatId.value
+      messagesLoadingMoreByChatId.value = rest
+    }
+  }
+
+  async function sendMessage(chatId: string, text: string, opts?: { replyToId?: string | null }) {
+    const t = text.trim()
+    if (!t) return
+    if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
+
+    const chat = chats.value.find((c) => c.id === chatId)
+    if (!chat) throw new Error('Chat not found')
+
+    const atIso = new Date().toISOString()
+    const replyToId = typeof opts?.replyToId === 'string' ? opts?.replyToId : null
+
+    let recipients: Array<{ userId: string; publicKeyJwk: string }> = []
+
+    if (chat.type === 'personal') {
+      if (!chat.otherUserId || !chat.otherPublicKey) throw new Error('Chat not ready')
+      recipients = [
+        { userId: userId.value, publicKeyJwk: publicKeyJwk.value },
+        { userId: chat.otherUserId, publicKeyJwk: chat.otherPublicKey },
+      ]
+    } else {
+      const members = await ensureChatMembers(chatId)
+      recipients = members.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey }))
+      if (!recipients.length) throw new Error('No recipients')
+    }
+
+    const encryptedData = await encryptSignedMessage({
+      plaintext: { text: t, atIso, fromUsername: username.value, replyToId, modifiedAtIso: null },
+      recipients,
+    })
+
+    const j = await fetchJson('/api/signed/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId, encryptedData }),
+    })
+
+    const msgId = typeof j.messageId === 'string' ? j.messageId : null
+    if (!msgId) return
+
+    // Append optimistically (it will also arrive via WS, but WS is best-effort).
+    const cur = messagesByChatId.value[chatId] ?? []
+    if (cur.some((m) => m.id === msgId)) return
+    messagesByChatId.value = {
+      ...messagesByChatId.value,
+      [chatId]: [...cur, { id: msgId, chatId, atIso, modifiedAtIso: null, fromUsername: username.value, text: t, replyToId }],
+    }
+  }
+
+  async function register(params: { username: string; password: string; expirationDays: number; extraEntropy?: Uint8Array }) {
+    const u = params.username.trim()
+    if (!u) throw new Error('Username required')
+    if (u.length < 3 || u.length > 64) throw new Error('Username must be between 3 and 64 characters')
+
+    if (!params.password) throw new Error('Password required')
+    if (params.password.length < 8) throw new Error('Password must be at least 8 characters')
+
+    const exp = Number(params.expirationDays)
+    if (!Number.isFinite(exp) || exp < 7 || exp > 365) {
+      throw new Error('Expiration days must be between 7 and 365')
+    }
+
+    // Check name availability before generating/storing key material.
+    const check = await fetchJson('/api/auth/check-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u }),
+    })
+    if (check && check.exists === true) {
+      throw new Error('Username already exists')
+    }
+
+    storeLastUsername(u)
+
+    const { publicJwk, privateJwk } = await generateRsaKeyPair()
+    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password, extraEntropy: params.extraEntropy })
+
+    const j = await fetchJson('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: u,
+        password: params.password,
+        publicKey: publicJwk,
+        expirationDays: exp,
+      }),
+    })
+
+    token.value = typeof j.token === 'string' ? j.token : null
+    userId.value = typeof j.userId === 'string' ? j.userId : null
+    username.value = typeof j.username === 'string' ? j.username : u
+    publicKeyJwk.value = publicJwk
+
+    privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
+
+    // Persist key material only after server registration succeeds.
+    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey, extraEntropy: params.extraEntropy })
+
+    if (token.value && userId.value && username.value) {
+      storeSession({ userId: userId.value, username: username.value }, token.value)
+    }
+
+    await refreshChats()
+    await connectWs()
+    view.value = 'contacts'
+  }
+
+  async function login(params: { username: string; password: string }) {
+    const u = params.username.trim()
+    if (!u) throw new Error('Username required')
+    if (!params.password) throw new Error('Password required')
+
+    storeLastUsername(u)
+
+    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
+    if (!encryptedPrivateKey) throw new Error('No local key found')
+
+    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    const priv = await importRsaPrivateKeyJwk(privateJwk)
+
+    const publicJwk = publicJwkFromPrivateJwk(privateJwk)
+
+    const j = await fetchJson('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: params.password, publicKey: publicJwk }),
+    })
+
+    token.value = typeof j.token === 'string' ? j.token : null
+    userId.value = typeof j.userId === 'string' ? j.userId : null
+    username.value = typeof j.username === 'string' ? j.username : u
+    publicKeyJwk.value = publicJwk
+    privateKey.value = priv
+
+    if (token.value && userId.value && username.value) {
+      storeSession({ userId: userId.value, username: username.value }, token.value)
+    }
+
+    // Migrate/ensure low-profile local storage now that we have the password.
+    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+
+    await refreshChats()
+    await connectWs()
+    view.value = 'contacts'
+  }
+
+  function logout(wipeSessionStorage = false) {
+    wsShouldReconnect.value = false
+    clearWsReconnectTimer()
+    clearPresenceTimer()
+    disconnectWs()
+    token.value = null
+    userId.value = null
+    username.value = null
+    publicKeyJwk.value = null
+    privateKey.value = null
+    chats.value = []
+    unreadByChatId.value = {}
+    messagesByChatId.value = {}
+    membersByChatId.value = {}
+    activeChatId.value = null
+    view.value = 'contacts'
+
+    if (wipeSessionStorage) {
+      try {
+        sessionStorage.clear()
+      } catch {
+        // ignore
+      }
+      lastUsername.value = ''
+    } else {
+      clearSession()
+    }
+  }
+
+  async function deleteAccount() {
+    // Requires an active signed session.
+    if (!token.value) throw new Error('Not logged in')
+
+    await fetchJson('/api/signed/account/delete', {
+      method: 'POST',
+      headers: { ...authHeaders() },
+    })
+
+    // Clear all local traces for this signed identity.
+    // Without a stable plaintext identifier, prefer privacy: remove all stored signed keys.
+    clearAllKeyMaterial()
+    storeLastUsername('')
+    logout(true)
+  }
+
+  // Attempt to restore token+user on refresh. Private key still requires password.
+  const restored = loadSession()
+  if (restored) {
+    token.value = restored.t
+    userId.value = restored.u.userId
+    username.value = restored.u.username
+    publicKeyJwk.value = null
+  }
+
+  // For convenience in setup screen.
+  lastUsername.value = loadLastUsername()
+
+  return {
+    token,
+    userId,
+    username,
+    publicKeyJwk,
+    privateKey,
+    ws,
+    turnConfig,
+    signedIn,
+    lastUsername,
+    view,
+    activeChatId,
+    chats,
+    unreadByChatId,
+    membersByChatId,
+    messagesByChatId,
+    onlineByUserId,
+    busyByUserId,
+    otherChatsUnread,
+    register,
+    login,
+    logout,
+    deleteAccount,
+    refreshChats,
+    openChat,
+    goHome,
+    openSettings,
+    createPersonalChat,
+    createGroupChat,
+    addGroupMember,
+    loadMoreMessages,
+    sendMessage,
+    markMessagesRead,
+    listUnreadMessageIds,
+    deleteMessage,
+    updateMessage,
+    updateMessageText,
+    deleteChat,
+    refreshPresence,
+    getChatOnlineState,
+    ensureTurnConfig,
+    sendWs,
+    registerInboundHandler,
+    registerDisconnectHandler,
+    connectWs,
+    disconnectWs,
+    unlock,
+  }
+})

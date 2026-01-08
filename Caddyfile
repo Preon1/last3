@@ -1,0 +1,21 @@
+# Public site (set LRCOM_DOMAIN in your .env). The default keeps the file
+# parseable if the env var is missing.
+{$LRCOM_DOMAIN:localhost} {
+  # Disable all access logs (no connection tracking, no IPs logged)
+  log {
+    output discard
+  }
+
+  # Request RSA 4096-bit certs from Let's Encrypt (instead of ECDSA).
+  tls {
+    key_type rsa4096
+  }
+
+  # Proxy everything (HTTP + WebSocket) to the app running HTTPS inside the network.
+  reverse_proxy https://lrcom:8443 {
+    transport http {
+      # The app uses an internal/self-signed cert by default.
+      tls_insecure_skip_verify
+    }
+  }
+}

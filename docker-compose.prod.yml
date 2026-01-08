@@ -1,0 +1,35 @@
+services:
+  # Reverse proxy: terminates HTTPS (Let's Encrypt) on :443 and proxies to lrcom.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    logging:
+      driver: none
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Set these in your .env on the server.
+      - LRCOM_DOMAIN=${LRCOM_DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - lrcom
+
+  # App: keep it internal; Caddy exposes it publicly.
+  lrcom:
+    restart: unless-stopped
+    ports: []
+    expose:
+      - "8443"
+
+  # TURN: still needs to be reachable by clients.
+  coturn:
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
