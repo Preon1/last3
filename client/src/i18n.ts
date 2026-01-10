@@ -95,6 +95,8 @@ export const messages = {
       memberPlaceholder: 'Username',
       noChats: 'No chats yet. Add a friend by username.',
       youSignedInAs: 'Signed in as',
+      hiddenMode: 'Hidden mode',
+      hiddenModeHelp: 'When enabled, others will not see your online/busy status.',
       deleteAccount: 'Delete account',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',

@@ -76,12 +76,14 @@ type LegacyStoredKeyV1 = {
 type StoredUser = {
   userId: string
   username: string
+  hiddenMode?: boolean
 }
 
 export const useSignedStore = defineStore('signed', () => {
   const token = ref<string | null>(null)
   const userId = ref<string | null>(null)
   const username = ref<string | null>(null)
+  const hiddenMode = ref<boolean>(false)
   const publicKeyJwk = ref<string | null>(null)
   const privateKey = ref<CryptoKey | null>(null)
 
@@ -1110,6 +1112,7 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = typeof j.token === 'string' ? j.token : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
+    hiddenMode.value = Boolean(j?.hiddenMode)
     publicKeyJwk.value = publicJwk
 
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
@@ -1118,7 +1121,7 @@ export const useSignedStore = defineStore('signed', () => {
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey, extraEntropy: params.extraEntropy })
 
     if (token.value && userId.value && username.value) {
-      storeSession({ userId: userId.value, username: username.value }, token.value)
+      storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
     }
 
     await refreshChats()
@@ -1150,11 +1153,12 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = typeof j.token === 'string' ? j.token : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
+    hiddenMode.value = Boolean(j?.hiddenMode)
     publicKeyJwk.value = publicJwk
     privateKey.value = priv
 
     if (token.value && userId.value && username.value) {
-      storeSession({ userId: userId.value, username: username.value }, token.value)
+      storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
     }
 
     // Migrate/ensure low-profile local storage now that we have the password.
@@ -1173,6 +1177,7 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = null
     userId.value = null
     username.value = null
+    hiddenMode.value = false
     publicKeyJwk.value = null
     privateKey.value = null
     chats.value = []
@@ -1216,7 +1221,29 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = restored.t
     userId.value = restored.u.userId
     username.value = restored.u.username
+    hiddenMode.value = Boolean(restored.u.hiddenMode)
     publicKeyJwk.value = null
+  }
+
+  async function updateHiddenMode(next: boolean) {
+    if (!token.value) throw new Error('Not logged in')
+    const prev = hiddenMode.value
+    hiddenMode.value = Boolean(next)
+    try {
+      const j = await fetchJson('/api/signed/account/hidden-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ hiddenMode: hiddenMode.value }),
+      })
+      hiddenMode.value = Boolean(j?.hiddenMode)
+
+      if (token.value && userId.value && username.value) {
+        storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
+      }
+    } catch (e) {
+      hiddenMode.value = prev
+      throw e
+    }
   }
 
   // For convenience in setup screen.
@@ -1226,6 +1253,7 @@ export const useSignedStore = defineStore('signed', () => {
     token,
     userId,
     username,
+    hiddenMode,
     publicKeyJwk,
     privateKey,
     ws,
@@ -1245,6 +1273,7 @@ export const useSignedStore = defineStore('signed', () => {
     login,
     logout,
     deleteAccount,
+    updateHiddenMode,
     refreshChats,
     openChat,
     goHome,

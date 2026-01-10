@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   public_key TEXT NOT NULL,
   expiration_days INTEGER NOT NULL CHECK (expiration_days >= 7 AND expiration_days <= 365),
-  remove_date TIMESTAMP NOT NULL
+  remove_date TIMESTAMP NOT NULL,
+  hidden_mode BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX idx_users_username ON users(username);

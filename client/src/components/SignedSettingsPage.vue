@@ -11,7 +11,7 @@ const signed = useSignedStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username } = storeToRefs(signed)
+const { username, hiddenMode } = storeToRefs(signed)
 
 function onCycleLanguage() {
   cycleLocale()
@@ -35,6 +35,16 @@ async function onDeleteAccount() {
     // ignore
   }
 }
+
+async function onToggleHiddenMode(ev: Event) {
+  const target = ev.target as HTMLInputElement | null
+  if (!target) return
+  try {
+    await signed.updateHiddenMode(Boolean(target.checked))
+  } catch {
+    // ignore
+  }
+}
 </script>
 
 <template>
@@ -47,6 +57,19 @@ async function onDeleteAccount() {
       </div>
 
       <div class="settings-actions">
+        <label class="secondary" style="display:flex; gap: 10px; align-items:center; justify-content:space-between;">
+          <span>
+            <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.hiddenModeHelp') }}</div>
+          </span>
+          <input
+            type="checkbox"
+            :checked="Boolean(hiddenMode)"
+            @change="onToggleHiddenMode"
+            :aria-label="String(t('signed.hiddenMode'))"
+          />
+        </label>
+
         <button class="secondary" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
           {{ themeLabel }}
         </button>

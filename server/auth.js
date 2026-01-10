@@ -1,5 +1,5 @@
+import crypto from 'crypto'
 import bcrypt from 'bcrypt'
-import { v7 as uuidv7 } from 'uuid'
 import { query, transaction } from './db.js'
 
 const SALT_ROUNDS = 12
@@ -72,7 +72,7 @@ export async function registerUser({ username, password, publicKey, expirationDa
   const result = await query(
     `INSERT INTO users (username, password_hash, public_key, expiration_days, remove_date)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, username, public_key, expiration_days, remove_date`,
+     RETURNING id, username, public_key, expiration_days, remove_date, hidden_mode`,
     [username, passwordHash, normalizedPublicKey, expirationDays, removeDate]
   )
 
@@ -85,7 +85,7 @@ export async function registerUser({ username, password, publicKey, expirationDa
 export async function loginUser({ username, password, publicKey }) {
   // Get user
   const userResult = await query(
-    'SELECT id, username, password_hash, public_key, expiration_days, remove_date FROM users WHERE username = $1',
+    'SELECT id, username, password_hash, public_key, expiration_days, remove_date, hidden_mode FROM users WHERE username = $1',
     [username]
   )
 
@@ -115,13 +115,13 @@ export async function loginUser({ username, password, publicKey }) {
     }
   }
 
-  // Update remove date (reset expiration)
-  const newRemoveDate = new Date()
-  newRemoveDate.setDate(newRemoveDate.getDate() + user.expiration_days)
-  
+  // Update remove date (reset expiration) with jitter to reduce timing inference.
+  const jitterSeconds = crypto.randomInt(0, 86401)
   await query(
-    'UPDATE users SET remove_date = $1 WHERE id = $2',
-    [newRemoveDate, user.id]
+    `UPDATE users
+     SET remove_date = NOW() + (expiration_days * INTERVAL '1 day') + ($2::int * INTERVAL '1 second')
+     WHERE id = $1`,
+    [user.id, jitterSeconds],
   )
 
   // Get user's chats
@@ -145,6 +145,7 @@ export async function loginUser({ username, password, publicKey }) {
   return {
     userId: user.id,
     username: user.username,
+    hiddenMode: Boolean(user.hidden_mode),
     chats: chatsResult.rows,
     unreadMessages: unreadResult.rows,
   }

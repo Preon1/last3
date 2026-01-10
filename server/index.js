@@ -6,7 +6,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
-import { initDatabase, query } from './db.js';
+import { initDatabase, query, runMigrations } from './db.js';
 import { registerUser, loginUser, getUserByUsername } from './auth.js';
 import { issueToken, getUserIdForToken, requireSignedAuth, parseAuthTokenFromReq, revokeToken } from './signedSession.js';
 import {
@@ -160,6 +160,7 @@ app.post('/api/auth/register', async (req, res) => {
       token,
       userId: user.id,
       username: user.username,
+      hiddenMode: Boolean(user.hidden_mode),
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -185,6 +186,20 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const hiddenMode = req.body?.hiddenMode;
+    if (typeof hiddenMode !== 'boolean') return res.status(400).json({ error: 'hiddenMode boolean required' });
+
+    await query('UPDATE users SET hidden_mode = $2 WHERE id = $1', [userId, hiddenMode]);
+
+    res.json({ success: true, hiddenMode });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -241,10 +256,28 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
 
     const raw = req.body?.userIds;
     const ids = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+
+    // Hidden-mode users should not appear online/busy to others.
+    const hidden = new Set();
+    if (ids.length) {
+      try {
+        const r = await query(
+          'SELECT id::text AS id FROM users WHERE id = ANY($1::uuid[]) AND hidden_mode = true',
+          [ids],
+        );
+        for (const row of r?.rows ?? []) {
+          if (row?.id) hidden.add(String(row.id));
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const online = [];
     const busy = [];
     for (const id of ids) {
       if (!id || id === me) continue;
+      if (hidden.has(id)) continue;
       const ws = signedSockets.get(id);
       if (ws && ws.readyState === 1) online.push(id);
       const su = signedUsers.get(id);
@@ -1125,38 +1158,43 @@ setInterval(() => {
 }, Math.min(10000, Math.max(1000, Math.floor(STALE_WS_MS / 3))));
 
 // Initialize database connection
-try {
-  initDatabase();
-} catch (error) {
-  void error;
-  process.exit(1);
-}
+async function start() {
+  try {
+    initDatabase();
+    await runMigrations();
+  } catch (error) {
+    void error;
+    process.exit(1);
+  }
 
-if (SIGNED_CLEANUP_ENABLED) {
-  const interval = Number.isFinite(SIGNED_CLEANUP_INTERVAL_MS)
-    ? Math.max(60 * 1000, SIGNED_CLEANUP_INTERVAL_MS)
-    : 24 * 60 * 60 * 1000;
+  if (SIGNED_CLEANUP_ENABLED) {
+    const interval = Number.isFinite(SIGNED_CLEANUP_INTERVAL_MS)
+      ? Math.max(60 * 1000, SIGNED_CLEANUP_INTERVAL_MS)
+      : 24 * 60 * 60 * 1000;
 
-  const initialDelay = Number.isFinite(SIGNED_CLEANUP_INITIAL_DELAY_MS)
-    ? Math.max(0, SIGNED_CLEANUP_INITIAL_DELAY_MS)
-    : 30 * 1000;
+    const initialDelay = Number.isFinite(SIGNED_CLEANUP_INITIAL_DELAY_MS)
+      ? Math.max(0, SIGNED_CLEANUP_INITIAL_DELAY_MS)
+      : 30 * 1000;
 
-  const run = async () => {
-    try {
-      await signedCleanupExpiredUsers();
-    } catch {
-      // No logs (privacy policy)
-    }
-  };
+    const run = async () => {
+      try {
+        await signedCleanupExpiredUsers();
+      } catch {
+        // No logs (privacy policy)
+      }
+    };
 
-  setTimeout(() => {
-    void run();
-    setInterval(() => {
+    setTimeout(() => {
       void run();
-    }, interval);
-  }, initialDelay);
+      setInterval(() => {
+        void run();
+      }, interval);
+    }, initialDelay);
+  }
+
+  server.listen(PORT, HOST, () => {
+    // No logs (policy: no connection tracking, IPs, or device info)
+  });
 }
 
-server.listen(PORT, HOST, () => {
-  // No logs (policy: no connection tracking, IPs, or device info)
-});
+void start();

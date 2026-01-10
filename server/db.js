@@ -1,4 +1,7 @@
 import pg from 'pg'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const { Pool } = pg
 
@@ -50,6 +53,45 @@ export async function transaction(callback) {
   } catch (error) {
     await client.query('ROLLBACK')
     throw error
+  } finally {
+    client.release()
+  }
+}
+
+export async function runMigrations() {
+  const pool = getPool()
+  const client = await pool.connect()
+
+  try {
+    await client.query(
+      'CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())',
+    )
+
+    const appliedRes = await client.query('SELECT id FROM schema_migrations')
+    const applied = new Set(appliedRes.rows.map((r) => String(r.id)))
+
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
+    let files = []
+    try {
+      files = fs.readdirSync(dir)
+    } catch {
+      files = []
+    }
+
+    const sqlFiles = files
+      .filter((f) => typeof f === 'string' && /^\d+_.*\.sql$/.test(f))
+      .sort()
+    for (const file of sqlFiles) {
+      if (applied.has(file)) continue
+      const full = path.join(dir, file)
+      const sql = fs.readFileSync(full, 'utf8')
+      if (!sql.trim()) {
+        await client.query('INSERT INTO schema_migrations (id) VALUES ($1)', [file])
+        continue
+      }
+      await client.query(sql)
+      await client.query('INSERT INTO schema_migrations (id) VALUES ($1)', [file])
+    }
   } finally {
     client.release()
   }
