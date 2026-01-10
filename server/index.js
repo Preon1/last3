@@ -224,6 +224,21 @@ app.get('/api/signed/chats', requireSignedAuth, async (req, res) => {
 app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
   try {
     const me = String(req._signedUserId);
+
+    // Refresh account expiration on activity (presence poll).
+    // Add random jitter (0..86400s) to reduce ability to infer exact activity time.
+    try {
+      const jitterSeconds = crypto.randomInt(0, 86401);
+      await query(
+        `UPDATE users
+         SET remove_date = NOW() + (expiration_days * INTERVAL '1 day') + ($2::int * INTERVAL '1 second')
+         WHERE id = $1`,
+        [me, jitterSeconds],
+      );
+    } catch {
+      // ignore
+    }
+
     const raw = req.body?.userIds;
     const ids = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
     const online = [];
