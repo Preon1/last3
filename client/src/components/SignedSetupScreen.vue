@@ -9,7 +9,6 @@ import { useSignedStore } from '../stores/signed'
 const emit = defineEmits<{
   (e: 'login', v: { username: string; password: string }): void
   (e: 'register', v: { username: string; password: string; expirationDays: number; extraEntropy?: Uint8Array }): void
-  (e: 'switchAnonymous'): void
 }>()
 
 const ui = useUiStore()
@@ -182,7 +181,6 @@ function toggleMode() {
           <button class="secondary" type="button" :aria-label="String(t('common.language'))" @click="onCycleLanguage">
             {{ t('common.language') }}: {{ t(`lang.${String(locale)}`) }}
           </button>
-          <button class="secondary" type="button" @click="emit('switchAnonymous')">{{ t('signed.switchAnonymous') }}</button>
         </div>
       </form>
     </div>

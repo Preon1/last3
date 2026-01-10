@@ -26,7 +26,9 @@ const { inApp, status } = storeToRefs(session)
 const signedIn = computed(() => signed.signedIn)
 const signedUnlocked = computed(() => Boolean(signed.privateKey))
 
-const setupMode = ref<'unsigned' | 'signed'>('unsigned')
+// Signed-only UI: legacy unsigned mode remains in the codebase for now,
+// but we no longer expose it in the login/setup screen.
+const setupMode = ref<'unsigned' | 'signed'>('signed')
 
 const didShowNotificationsPromptThisLogin = ref(false)
 
@@ -85,14 +87,7 @@ watch(
         v-else
         @login="onSignedLogin"
         @register="onSignedRegister"
-        @switchAnonymous="setupMode = 'unsigned'"
       />
-
-      <div v-if="setupMode === 'unsigned'" class="setup" style="position: fixed; inset: 0; pointer-events: none;">
-        <div style="position: absolute; left: 12px; bottom: 12px; pointer-events: auto;">
-          <button class="secondary" type="button" @click="setupMode = 'signed'">{{ $t('signed.login') }}</button>
-        </div>
-      </div>
     </template>
 
     <SignedUnlockScreen v-else-if="signedIn && !signedUnlocked" @logout="() => signed.logout(true)" />
