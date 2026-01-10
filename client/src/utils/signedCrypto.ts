@@ -175,7 +175,6 @@ export async function encryptSignedMessage(params: {
   plaintext: {
     text: string
     atIso: string
-    fromUsername: string
     replyToId?: string | null
     modifiedAtIso?: string | null
   }
@@ -227,7 +226,6 @@ export async function decryptSignedMessage(params: {
   const parsed = JSON.parse(decUtf8(pt)) as {
     text: unknown
     atIso: unknown
-    fromUsername: unknown
     replyToId?: unknown
     modifiedAtIso?: unknown
   }
@@ -235,7 +233,6 @@ export async function decryptSignedMessage(params: {
   return {
     text: typeof parsed?.text === 'string' ? parsed.text : '',
     atIso: typeof parsed?.atIso === 'string' ? parsed.atIso : new Date().toISOString(),
-    fromUsername: typeof parsed?.fromUsername === 'string' ? parsed.fromUsername : '',
     replyToId: typeof parsed?.replyToId === 'string' ? parsed.replyToId : null,
     modifiedAtIso: typeof parsed?.modifiedAtIso === 'string' ? parsed.modifiedAtIso : null,
   }

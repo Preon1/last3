@@ -31,12 +31,14 @@ export type SignedMessage = {
   id: string
   chatId: string
   senderId: string
+  senderUsername?: string
   encryptedData: string
 }
 
 export type SignedDecryptedMessage = {
   id: string
   chatId: string
+  senderId: string
   atIso: string
   modifiedAtIso?: string | null
   fromUsername: string
@@ -523,18 +525,24 @@ export const useSignedStore = defineStore('signed', () => {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null
         const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+        const senderUsername = typeof obj.senderUsername === 'string' ? obj.senderUsername : null
         const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
         if (!chatId || !id || !senderId || !encryptedData) return
 
         if (privateKey.value && userId.value) {
           try {
             const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+            const displayName =
+              senderUsername ??
+              membersByChatId.value[chatId]?.find((m) => String(m.userId) === String(senderId))?.username ??
+              String(senderId)
             const msg: SignedDecryptedMessage = {
               id,
               chatId,
               atIso: plain.atIso,
               modifiedAtIso: plain.modifiedAtIso,
-              fromUsername: plain.fromUsername,
+              senderId,
+              fromUsername: displayName,
               text: plain.text,
               replyToId: plain.replyToId,
             }
@@ -573,12 +581,17 @@ export const useSignedStore = defineStore('signed', () => {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null
         const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+        const senderUsername = typeof obj.senderUsername === 'string' ? obj.senderUsername : null
         const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
         if (!chatId || !id || !senderId || !encryptedData) return
 
         if (privateKey.value && userId.value) {
           try {
             const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+            const displayName =
+              senderUsername ??
+              membersByChatId.value[chatId]?.find((m) => String(m.userId) === String(senderId))?.username ??
+              String(senderId)
             const cur = messagesByChatId.value[chatId] ?? []
             const next = cur.map((m) =>
               m.id === id
@@ -586,7 +599,8 @@ export const useSignedStore = defineStore('signed', () => {
                     ...m,
                     atIso: plain.atIso,
                     modifiedAtIso: plain.modifiedAtIso,
-                    fromUsername: plain.fromUsername,
+                    senderId,
+                    fromUsername: displayName,
                     text: plain.text,
                     replyToId: plain.replyToId,
                   }
@@ -763,7 +777,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     const encryptedData = await encryptSignedMessage({
-      plaintext: { text: t, atIso, fromUsername: username.value, replyToId, modifiedAtIso },
+      plaintext: { text: t, atIso, replyToId, modifiedAtIso },
       recipients,
     })
 
@@ -772,7 +786,7 @@ export const useSignedStore = defineStore('signed', () => {
     // Optimistic local patch (WS update is best-effort).
     const next = cur.map((m) =>
       m.id === messageId
-        ? { ...m, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId }
+        ? { ...m, senderId: userId.value as string, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId }
         : m,
     )
     messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
@@ -899,12 +913,17 @@ export const useSignedStore = defineStore('signed', () => {
           myUserId: userId.value,
           myPrivateKey: privateKey.value,
         })
+        const displayName =
+          typeof m.senderUsername === 'string'
+            ? m.senderUsername
+            : membersByChatId.value[chatId]?.find((mm) => String(mm.userId) === String(m.senderId))?.username ?? String(m.senderId)
         out.push({
           id: m.id,
           chatId,
+          senderId: String(m.senderId),
           atIso: plain.atIso,
           modifiedAtIso: plain.modifiedAtIso,
-          fromUsername: plain.fromUsername,
+          fromUsername: displayName,
           text: plain.text,
           replyToId: plain.replyToId,
         })
@@ -960,12 +979,17 @@ export const useSignedStore = defineStore('signed', () => {
             myUserId: userId.value,
             myPrivateKey: privateKey.value,
           })
+          const displayName =
+            typeof m.senderUsername === 'string'
+              ? m.senderUsername
+              : membersByChatId.value[chatId]?.find((mm) => String(mm.userId) === String(m.senderId))?.username ?? String(m.senderId)
           decoded.push({
             id: m.id,
             chatId,
+            senderId: String(m.senderId),
             atIso: plain.atIso,
             modifiedAtIso: plain.modifiedAtIso,
-            fromUsername: plain.fromUsername,
+            fromUsername: displayName,
             text: plain.text,
             replyToId: plain.replyToId,
           })
@@ -1022,7 +1046,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     const encryptedData = await encryptSignedMessage({
-      plaintext: { text: t, atIso, fromUsername: username.value, replyToId, modifiedAtIso: null },
+      plaintext: { text: t, atIso, replyToId, modifiedAtIso: null },
       recipients,
     })
 
@@ -1040,7 +1064,7 @@ export const useSignedStore = defineStore('signed', () => {
     if (cur.some((m) => m.id === msgId)) return
     messagesByChatId.value = {
       ...messagesByChatId.value,
-      [chatId]: [...cur, { id: msgId, chatId, atIso, modifiedAtIso: null, fromUsername: username.value, text: t, replyToId }],
+      [chatId]: [...cur, { id: msgId, chatId, senderId: userId.value, atIso, modifiedAtIso: null, fromUsername: username.value, text: t, replyToId }],
     }
   }
 

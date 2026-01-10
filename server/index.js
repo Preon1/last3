@@ -363,6 +363,9 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
     if (!chatId || !encryptedData) return res.status(400).json({ error: 'chatId and encryptedData required' });
 
+    const senderUsernameRes = await query('SELECT username FROM users WHERE id = $1 LIMIT 1', [senderId]);
+    const senderUsername = String(senderUsernameRes?.rows?.[0]?.username ?? '');
+
     const { messageId, memberIds } = await signedSendMessage({ senderId, chatId, encryptedData });
 
     // Best-effort realtime notify to signed sockets.
@@ -371,6 +374,7 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       chatId,
       id: messageId,
       senderId,
+      senderUsername,
       encryptedData,
     };
     for (const uid of memberIds) {
@@ -428,7 +432,10 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, encryptedData };
+    const senderUsernameRes = await query('SELECT username FROM users WHERE id = $1 LIMIT 1', [userId]);
+    const senderUsername = String(senderUsernameRes?.rows?.[0]?.username ?? '');
+
+    const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, senderUsername, encryptedData };
     for (const uid of r.memberIds) {
       const ws = signedSockets.get(uid);
       if (ws && ws.readyState === 1) sendBestEffort(ws, payload);

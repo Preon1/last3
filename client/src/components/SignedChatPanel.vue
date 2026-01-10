@@ -7,7 +7,7 @@ import { useSignedStore } from '../stores/signed'
 const signed = useSignedStore()
 const { t } = useI18n()
 
-const { activeChatId, messagesByChatId, chats, username } = storeToRefs(signed)
+const { activeChatId, messagesByChatId, chats, userId, membersByChatId } = storeToRefs(signed)
 
 const chatInput = ref('')
 const chatMessagesEl = ref<HTMLDivElement | null>(null)
@@ -140,24 +140,27 @@ const editBusy = ref(false)
 const replyingToId = ref<string | null>(null)
 const replyingToLabel = ref<string>('')
 
-function isMineMessage(fromUsername: string) {
-  return Boolean(username.value && fromUsername === username.value)
+function isMineMessage(senderId: string) {
+  return Boolean(userId.value && senderId === userId.value)
 }
 
-function startEdit(m: { id: string; text: string; fromUsername: string }) {
-  if (!isMineMessage(m.fromUsername)) return
+function startEdit(m: { id: string; text: string; senderId: string }) {
+  if (!isMineMessage(m.senderId)) return
   if (editBusy.value) return
   if (editingId.value && editingId.value !== m.id) return
   editingId.value = m.id
   editingText.value = m.text
 }
 
-function startReply(m: { id: string; text: string; fromUsername: string }) {
+function startReply(m: { id: string; text: string; fromUsername: string; senderId: string }) {
   if (editBusy.value) return
   if (editingId.value) return
   replyingToId.value = m.id
+  const cid = activeChatId.value
+  const memberName = cid ? membersByChatId.value[cid]?.find((x) => x.userId === m.senderId)?.username : null
+  const senderName = memberName || m.fromUsername
   const preview = (m.text ?? '').trim().slice(0, 80)
-  replyingToLabel.value = preview ? `${m.fromUsername}: ${preview}` : String(m.fromUsername)
+  replyingToLabel.value = preview ? `${senderName}: ${preview}` : String(senderName)
 }
 
 function cancelReply() {
@@ -184,8 +187,8 @@ async function saveEdit(chatId: string, messageId: string) {
   }
 }
 
-async function deleteMsg(chatId: string, messageId: string, fromUsername: string) {
-  if (!isMineMessage(fromUsername)) return
+async function deleteMsg(chatId: string, messageId: string, senderId: string) {
+  if (!isMineMessage(senderId)) return
   if (editBusy.value) return
   if (editingId.value) return
   if (!window.confirm(String(t('confirm.deleteMessage')))) return
@@ -299,8 +302,10 @@ function resolveReplyPreview(replyToId: string) {
   const list = messagesByChatId.value[cid] ?? []
   const found = list.find((x) => x.id === replyToId)
   if (!found) return ''
+  const memberName = membersByChatId.value[cid]?.find((x) => x.userId === found.senderId)?.username
+  const senderName = memberName || found.fromUsername
   const preview = (found.text ?? '').trim().slice(0, 80)
-  return preview ? `${found.fromUsername}: ${preview}` : String(found.fromUsername)
+  return preview ? `${senderName}: ${preview}` : String(senderName)
 }
 
 async function onAddMember() {
@@ -394,7 +399,7 @@ function onMessagesScroll() {
           </span>
 
           <div
-            v-if="isMineMessage(m.fromUsername) && editingId !== m.id"
+            v-if="isMineMessage(m.senderId) && editingId !== m.id"
             style="margin-left: auto; display: flex; gap: 8px; align-items: center;"
           >
             <button
@@ -420,7 +425,7 @@ function onMessagesScroll() {
               type="button"
               style="margin-left: 0;"
               :disabled="editBusy || editingId !== null"
-              @click="deleteMsg(m.chatId, m.id, m.fromUsername)"
+              @click="deleteMsg(m.chatId, m.id, m.senderId)"
             >
               {{ t('common.delete') }}
             </button>

@@ -299,15 +299,17 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
 
   const params = beforeId ? [chatId, userId, beforeId, lim] : [chatId, userId, lim]
   const sql = beforeId
-    ? `SELECT m.id, m.encrypted_data, m.sender_id
+     ? `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
        FROM messages m
        INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $2
+       INNER JOIN users u ON u.id = m.sender_id
        WHERE m.chat_id = $1 AND m.id < $3
        ORDER BY m.id DESC
        LIMIT $4`
-    : `SELECT m.id, m.encrypted_data, m.sender_id
+     : `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
        FROM messages m
        INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $2
+       INNER JOIN users u ON u.id = m.sender_id
        WHERE m.chat_id = $1
        ORDER BY m.id DESC
        LIMIT $3`
@@ -317,6 +319,7 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
     id: String(row.id),
     chatId: String(chatId),
     senderId: String(row.sender_id),
+    senderUsername: String(row.sender_username ?? ''),
     encryptedData: String(row.encrypted_data),
   }))
 }
