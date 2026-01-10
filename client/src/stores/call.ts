@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useSessionStore } from './session'
 import { useSignedStore } from './signed'
 import { notify, vibrate } from '../utils/notify'
 import { i18n } from '../i18n'
@@ -40,7 +39,6 @@ function micErrorToStatus(err: unknown) {
 }
 
 export const useCallStore = defineStore('call', () => {
-  const session = useSessionStore()
   const signed = useSignedStore()
 
   function isSignedActive() {
@@ -48,7 +46,7 @@ export const useCallStore = defineStore('call', () => {
   }
 
   function myId() {
-    return isSignedActive() ? signed.userId : session.myId
+    return isSignedActive() ? signed.userId : null
   }
 
   async function ensureTurn() {
@@ -62,13 +60,12 @@ export const useCallStore = defineStore('call', () => {
   }
 
   function getTurnConfig(): TurnConfig | null {
-    const cfg = isSignedActive() ? (signed.turnConfig as any) : (session.turnConfig as any)
+    const cfg = isSignedActive() ? (signed.turnConfig as any) : null
     return (cfg ?? null) as TurnConfig | null
   }
 
   function send(obj: unknown) {
     if (isSignedActive()) signed.sendWs(obj)
-    else session.send(obj)
   }
 
   const roomId = ref<string | null>(null)
@@ -784,19 +781,8 @@ export const useCallStore = defineStore('call', () => {
     if (handlerInstalled) return
     handlerInstalled = true
 
-    session.registerInboundHandler((type, obj) => {
-      void handleInbound(type, obj)
-    })
-
     signed.registerInboundHandler((type, obj) => {
       void handleInbound(type, obj)
-    })
-
-    session.registerDisconnectHandler(() => {
-      // WebSocket disconnect, mark as intentional to avoid reconnect loop
-      intentionalHangup = true
-      resetCallState()
-      status.value = ''
     })
 
     signed.registerDisconnectHandler(() => {
