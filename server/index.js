@@ -642,6 +642,10 @@ const signedUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
 const STALE_WS_MS = Number(process.env.STALE_WS_MS ?? 45000);
 const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);
 
+// WS heartbeat (server ping/pong) to detect dead TCP connections without
+// requiring the client to actively send WS messages.
+const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 30000);
+
 function sendBestEffort(ws, obj) {
   if (!ws || ws.readyState !== 1) return;
   try {
@@ -836,6 +840,14 @@ wss.on('connection', async (ws, req) => {
         return;
       }
 
+      const uid = String(signedUserId);
+
+      // Mark alive; updated via 'pong'.
+      ws.isAlive = true;
+      ws.on('pong', () => {
+        ws.isAlive = true;
+      });
+
       let signedName = '';
       try {
         const r = await query('SELECT username FROM users WHERE id = $1', [String(signedUserId)]);
@@ -844,8 +856,13 @@ wss.on('connection', async (ws, req) => {
         signedName = '';
       }
 
-      const signedUser = {
-        id: String(signedUserId),
+      const prev = signedUsers.get(uid);
+      const prevWs = prev?.ws;
+
+      // Reuse the existing per-user state on reconnect (preserves call state,
+      // receipts, etc), but replace the socket reference.
+      const signedUser = prev ?? {
+        id: uid,
         name: signedName,
         ws,
         lastMsgAt: Date.now(),
@@ -855,10 +872,20 @@ wss.on('connection', async (ws, req) => {
         _clientReceiptQueue: null,
       };
 
-      ws._lrcomSignedUserId = String(signedUserId);
-      signedSockets.set(String(signedUserId), ws);
-      signedUsers.set(String(signedUserId), signedUser);
-      sendBestEffort(ws, { type: 'signedHello', userId: String(signedUserId) });
+      signedUser.name = signedName || signedUser.name;
+      signedUser.ws = ws;
+      signedUser.lastMsgAt = Date.now();
+
+      ws._lrcomSignedUserId = uid;
+      signedSockets.set(uid, ws);
+      signedUsers.set(uid, signedUser);
+
+      // Close any prior socket for this user to avoid stacking.
+      if (prevWs && prevWs !== ws) {
+        try { prevWs.close(); } catch { /* ignore */ }
+      }
+
+      sendBestEffort(ws, { type: 'signedHello', userId: uid });
 
       ws.on('message', async (data) => {
         signedUser.lastMsgAt = Date.now();
@@ -1117,12 +1144,18 @@ wss.on('connection', async (ws, req) => {
       });
 
       ws.on('close', () => {
-        signedSockets.delete(String(signedUserId));
-        const u = signedUsers.get(String(signedUserId));
-        if (u) {
-          if (u.roomId) signedLeaveRoom(u);
+        // Guard against an older socket closing after a newer socket has
+        // connected for the same user.
+        const curSock = signedSockets.get(uid);
+        if (curSock === ws) {
+          signedSockets.delete(uid);
         }
-        signedUsers.delete(String(signedUserId));
+
+        const curUser = signedUsers.get(uid);
+        if (curUser && curUser.ws === ws) {
+          if (curUser.roomId) signedLeaveRoom(curUser);
+          signedUsers.delete(uid);
+        }
       });
 
       ws.on('error', () => {
@@ -1140,22 +1173,24 @@ wss.on('connection', async (ws, req) => {
   try { ws.close(); } catch { /* ignore */ }
 });
 
-// Terminate stale signed sockets (e.g. mobile network drop without close event).
+// Terminate dead signed sockets (e.g. laptop sleep / mobile drop) using server
+// ping/pong heartbeat. This avoids disconnecting healthy-but-idle clients.
 setInterval(() => {
-  const now = Date.now();
-  for (const u of signedUsers.values()) {
+  for (const ws of signedSockets.values()) {
     try {
-      if (!u?.ws || u.ws.readyState !== 1) continue;
-      const last = typeof u.lastMsgAt === 'number' ? u.lastMsgAt : now;
-      if (now - last > STALE_WS_MS) {
-        if (typeof u.ws.terminate === 'function') u.ws.terminate();
-        else u.ws.close();
+      if (!ws || ws.readyState !== 1) continue;
+      if (ws.isAlive === false) {
+        if (typeof ws.terminate === 'function') ws.terminate();
+        else ws.close();
+        continue;
       }
+      ws.isAlive = false;
+      if (typeof ws.ping === 'function') ws.ping();
     } catch {
       // ignore
     }
   }
-}, Math.min(10000, Math.max(1000, Math.floor(STALE_WS_MS / 3))));
+}, Math.max(5000, WS_HEARTBEAT_MS));
 
 // Initialize database connection
 async function start() {
