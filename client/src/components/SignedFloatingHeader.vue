@@ -270,6 +270,14 @@ async function onAddMember() {
   addMemberBusy.value = true
   try {
     await signed.addGroupMember(cid, u)
+
+    // Requirement: send an automated message after successful member add.
+    try {
+      await signed.sendMessage(cid, 'I added a new user to this chat.')
+    } catch {
+      // ignore
+    }
+
     addMemberReport.value = String(t('signed.memberAddedOk'))
     addMemberUsername.value = ''
   } catch (e: any) {
