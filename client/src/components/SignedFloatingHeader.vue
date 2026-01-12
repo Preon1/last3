@@ -267,6 +267,13 @@ async function onAddMember() {
   if (!cid) return
   const u = addMemberUsername.value.trim()
   if (!u) return
+
+  // Avoid adding yourself.
+  if (signed.username && u.toLowerCase() === String(signed.username).toLowerCase()) {
+    addMemberReport.value = String(t('signed.cannotChatWithSelf'))
+    return
+  }
+
   addMemberBusy.value = true
   try {
     // Ensure we check against an up-to-date member list.
@@ -295,6 +302,10 @@ async function onAddMember() {
     addMemberUsername.value = ''
   } catch (e: any) {
     const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    if (msg === 'self') {
+      addMemberReport.value = String(t('signed.cannotChatWithSelf'))
+      return
+    }
     const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
     if (isIntrovert) {
       addMemberReport.value = msg === 'introvert' ? String(t('toast.introvertBody')) : msg

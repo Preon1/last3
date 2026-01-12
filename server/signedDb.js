@@ -358,6 +358,8 @@ export async function signedAddGroupMember(userId, chatId, username) {
   const other = otherRes.rows[0]
   const otherUserId = String(other.id)
 
+  if (String(otherUserId) === String(userId)) return { ok: false, reason: 'self' }
+
   // Introvert mode: user cannot be added to chats by others.
   if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
 
