@@ -14,10 +14,7 @@ RUN apk add --no-cache openssl libstdc++
 WORKDIR /app
 
 COPY server/package.json ./server/package.json
-RUN apk add --no-cache --virtual .build-deps python3 make g++ \
-	&& cd server \
-	&& npm_config_build_from_source=true npm install --omit=dev \
-	&& apk del .build-deps
+RUN cd server && npm install --omit=dev
 
 COPY server ./server
 COPY --from=client-build /app/client/dist ./client/dist

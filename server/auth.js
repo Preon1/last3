@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import { query, transaction } from './db.js'
 
 const SALT_ROUNDS = 12

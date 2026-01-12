@@ -9,7 +9,7 @@
     "delete-user": "node scripts/delete-user.js"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "pg": "^8.13.1",
     "uuid": "^11.0.3",
