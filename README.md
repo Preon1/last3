@@ -196,3 +196,28 @@ Tradeoff: fewer relay ports means fewer simultaneous TURN-relayed calls. Rough r
 
 - No user authentication (by design).
 - No identity verification beyond TLS to the server (so don’t treat the displayed name as strongly authenticated).
+
+## Admin: delete a signed user (CLI)
+
+If you need to remove a signed user from the server (same effect as the user clicking **Settings → Delete account**), you can run:
+
+```bash
+cd server
+
+# Show help
+node scripts/delete-user.js --help
+
+# Dry run (no DB changes)
+node scripts/delete-user.js --username alice --dry-run
+
+# Delete (asks for confirmation: type 'yes')
+node scripts/delete-user.js --username alice
+
+# Delete without prompt
+node scripts/delete-user.js --username alice --yes
+```
+
+Notes:
+
+- This performs the same DB deletion as the in-app flow (`signedDeleteAccount`).
+- If the main server process is currently running, any in-memory session/websocket state for that user can persist until restart. Restart the server if you need to force-disconnect/revoke RAM-only state.
