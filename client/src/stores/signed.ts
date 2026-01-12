@@ -173,20 +173,24 @@ export const useSignedStore = defineStore('signed', () => {
   async function refreshPresence() {
     if (!token.value || !userId.value) return
 
-    const ids = new Set<string>()
-    for (const c of chats.value) {
-      if (c.type === 'personal' && c.otherUserId) ids.add(c.otherUserId)
-      if (c.type === 'group') {
-        const members = membersByChatId.value[c.id]
-        if (Array.isArray(members)) {
-          for (const m of members) {
-            if (m?.userId) ids.add(String(m.userId))
-          }
-        }
-      }
+    // Privacy + load: presence can only be requested for correspondents in
+    // personal chats. If we're actively viewing a personal chat, request only
+    // the current correspondent.
+    const list: string[] = []
+
+    if (view.value === 'chat' && activeChatId.value) {
+      const c = chats.value.find((x) => x.id === activeChatId.value) ?? null
+      if (c?.type === 'personal' && c.otherUserId) list.push(String(c.otherUserId))
     }
 
-    const list = Array.from(ids)
+    if (!list.length) {
+      const ids = new Set<string>()
+      for (const c of chats.value) {
+        if (c.type === 'personal' && c.otherUserId) ids.add(String(c.otherUserId))
+      }
+      list.push(...Array.from(ids))
+    }
+
     if (!list.length) {
       onlineByUserId.value = {}
       return
@@ -997,6 +1001,7 @@ export const useSignedStore = defineStore('signed', () => {
 
   function goHome() {
     view.value = 'contacts'
+    void refreshPresence()
   }
 
   function openSettings() {

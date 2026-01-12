@@ -288,7 +288,35 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
     }
 
     const raw = req.body?.userIds;
-    const ids = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+    const idsRaw = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+
+    // Hard limit to reduce load and abuse potential.
+    const MAX_PRESENCE_IDS = 25;
+    const idsLimited = idsRaw.slice(0, MAX_PRESENCE_IDS);
+
+    // Permission model: caller may only request presence for users they share
+    // a personal chat with (a "private chats list").
+    const allowed = new Set();
+    if (idsLimited.length) {
+      try {
+        const r = await query(
+          `SELECT DISTINCT other.user_id::text AS other_user_id
+           FROM chats c
+           INNER JOIN chat_members me_cm ON me_cm.chat_id = c.id AND me_cm.user_id = $1
+           INNER JOIN chat_members other ON other.chat_id = c.id AND other.user_id <> $1
+           WHERE c.chat_type = 'personal'`,
+          [me],
+        );
+        for (const row of r?.rows ?? []) {
+          const id = String(row.other_user_id ?? '');
+          if (id) allowed.add(id);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const ids = idsLimited.filter((id) => id && id !== me && allowed.has(id));
 
     // Hidden-mode users should not appear online/busy to others.
     const hidden = new Set();
@@ -309,7 +337,6 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
     const online = [];
     const busy = [];
     for (const id of ids) {
-      if (!id || id === me) continue;
       if (hidden.has(id)) continue;
       const ws = signedSockets.get(id);
       if (ws && ws.readyState === 1) online.push(id);
