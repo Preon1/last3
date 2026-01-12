@@ -559,6 +559,36 @@ export async function signedLeaveChat(userId, chatId) {
   await assertChatMember(userId, chatId)
 
   const result = await transaction(async (client) => {
+    const chat = await client.query(
+      `SELECT chat_type
+       FROM chats
+       WHERE id = $1
+       LIMIT 1`,
+      [String(chatId)],
+    )
+    if (!chat.rows.length) return { ok: false, reason: 'not_found' }
+    if (String(chat.rows[0].chat_type) !== 'group') return { ok: false, reason: 'not_group' }
+
+    const before = await client.query(
+      `SELECT COUNT(*)::int AS n
+       FROM chat_members
+       WHERE chat_id = $1`,
+      [String(chatId)],
+    )
+    const beforeN = Number(before.rows?.[0]?.n) || 0
+    const isLast = beforeN <= 1
+
+    let deletedMessageIds = []
+    if (!isLast) {
+      const del = await client.query(
+        `DELETE FROM messages
+         WHERE chat_id = $1 AND sender_id = $2
+         RETURNING id`,
+        [String(chatId), String(userId)],
+      )
+      deletedMessageIds = del.rows.map((r) => String(r.id))
+    }
+
     await client.query(
       `DELETE FROM chat_members
        WHERE chat_id = $1 AND user_id = $2`,
@@ -578,14 +608,28 @@ export async function signedLeaveChat(userId, chatId) {
       [String(chatId)],
     )
     const n = Number(left.rows?.[0]?.n) || 0
+
+    let chatDeleted = false
     if (n === 0) {
+      // If you were the last member, delete the chat. This cascades messages,
+      // recipients, unread, and memberships.
       await client.query(
         `DELETE FROM chats
          WHERE id = $1`,
         [String(chatId)],
       )
+      chatDeleted = true
     }
-    return { ok: true, remainingMembers: n }
+
+    const remaining = await client.query(
+      `SELECT user_id
+       FROM chat_members
+       WHERE chat_id = $1`,
+      [String(chatId)],
+    )
+    const remainingMemberIds = remaining.rows.map((r) => String(r.user_id))
+
+    return { ok: true, remainingMembers: n, remainingMemberIds, deletedMessageIds, chatDeleted }
   })
 
   return result

@@ -382,11 +382,6 @@ button.secondary {
   opacity: 0.9;
 }
 
-button.danger {
-  border-color: var(--danger);
-  background: var(--danger);
-}
-
 .muted { color: var(--muted); font-size: 14px; }
 .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
 .status { color: var(--muted); font-size: 14px; }
@@ -717,11 +712,6 @@ button:disabled {
   display: flex;
   min-height: 0;
   position: relative;
-  padding: 14px;
-}
-
-.app.no-header .content {
-  padding: 0;
 }
 
 .page {

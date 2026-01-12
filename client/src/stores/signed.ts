@@ -598,6 +598,23 @@ export const useSignedStore = defineStore('signed', () => {
         void refreshChats()
       }
 
+      if (obj.type === 'signedMessagesDeleted') {
+        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+        const idsRaw = (obj as any).ids
+        const ids = Array.isArray(idsRaw) ? idsRaw.map(String).filter(Boolean) : []
+        if (!chatId || !ids.length) return
+
+        const cur = messagesByChatId.value[chatId] ?? []
+        if (cur.length) {
+          const s = new Set(ids)
+          const hasAny = cur.some((m) => s.has(m.id))
+          if (hasAny) {
+            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => !s.has(m.id)) }
+          }
+        }
+        void refreshChats()
+      }
+
       if (obj.type === 'signedMessageUpdated') {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null

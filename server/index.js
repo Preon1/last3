@@ -598,7 +598,38 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
         if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
       }
     } else {
-      await signedLeaveChat(userId, chatId);
+      const left = await signedLeaveChat(userId, chatId);
+      if (left && left.ok) {
+        // Remaining members should refresh chat list (membership/messages changed).
+        try {
+          const payload = { type: 'signedChatsChanged', chatId, reason: left.chatDeleted ? 'group_deleted' : 'member_left' };
+          for (const uid of left.remainingMemberIds || []) {
+            const ws = signedSockets.get(String(uid));
+            if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+          }
+        } catch {
+          // ignore
+        }
+
+        // Remove leaver's messages from remaining members' in-memory views.
+        try {
+          const ids = Array.isArray(left.deletedMessageIds) ? left.deletedMessageIds : [];
+          if (ids.length) {
+            // Avoid huge websocket frames if someone deletes a lot of messages.
+            const CHUNK = 500;
+            for (let i = 0; i < ids.length; i += CHUNK) {
+              const part = ids.slice(i, i + CHUNK);
+              const payload = { type: 'signedMessagesDeleted', chatId, ids: part };
+              for (const uid of left.remainingMemberIds || []) {
+                const ws = signedSockets.get(String(uid));
+                if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
     res.json({ success: true });
   } catch (e) {

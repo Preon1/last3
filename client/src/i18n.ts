@@ -136,8 +136,11 @@ export const messages = {
       renameGroupBadLength: 'Name must be 3–64 characters.',
       deleteChatWarning:
         'This will permanently delete this chat and remove all messages for both you and your friend. This cannot be undone.',
-      leaveGroupWarning:
-        'You will leave this group. It will disappear from your chat list and you will stop receiving messages from it.',
+      leaveGroupRemoveMyMessagesWarning:
+        'You will leave this group and all of your messages in it will be permanently deleted. This cannot be undone.',
+      deleteGroup: 'Delete group',
+      deleteGroupWarning:
+        'You are the last member. This will permanently delete the group and remove all messages. This cannot be undone.',
       noChats: 'No chats yet. Add a friend by username.',
       youSignedInAs: 'Signed in as',
       hiddenMode: 'Hidden mode',
@@ -328,8 +331,11 @@ export const messages = {
       renameGroupBadLength: 'Naam moet 3–64 tekens zijn.',
       deleteChatWarning:
         'Dit verwijdert deze chat permanent en wist alle berichten voor zowel jou als je vriend. Dit kan niet ongedaan worden gemaakt.',
-      leaveGroupWarning:
-        'Je verlaat deze groep. De groep verdwijnt uit je chatlijst en je ontvangt geen berichten meer.',
+      leaveGroupRemoveMyMessagesWarning:
+        'Je verlaat deze groep en al jouw berichten in deze groep worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.',
+      deleteGroup: 'Groep verwijderen',
+      deleteGroupWarning:
+        'Je bent de laatste deelnemer. Dit verwijdert de groep permanent en wist alle berichten. Dit kan niet ongedaan worden gemaakt.',
     },
     about: {
       title: 'Over',
@@ -497,8 +503,11 @@ export const messages = {
       renameGroupBadLength: 'Le nom doit contenir 3 à 64 caractères.',
       deleteChatWarning:
         'Cela supprimera définitivement cette discussion et effacera tous les messages pour vous et votre ami. Cette action est irréversible.',
-      leaveGroupWarning:
-        'Vous allez quitter ce groupe. Il disparaîtra de votre liste et vous ne recevrez plus de messages.',
+      leaveGroupRemoveMyMessagesWarning:
+        'Vous allez quitter ce groupe et tous vos messages dans ce groupe seront définitivement supprimés. Cette action est irréversible.',
+      deleteGroup: 'Supprimer le groupe',
+      deleteGroupWarning:
+        'Vous êtes le dernier membre. Cela supprimera définitivement le groupe et effacera tous les messages. Cette action est irréversible.',
     },
     about: {
       title: 'À propos',
@@ -659,8 +668,11 @@ export const messages = {
       renameGroupBadLength: 'Name muss 3–64 Zeichen lang sein.',
       deleteChatWarning:
         'Dies löscht diesen Chat dauerhaft und entfernt alle Nachrichten für dich und deinen Freund. Das kann nicht rückgängig gemacht werden.',
-      leaveGroupWarning:
-        'Du wirst diese Gruppe verlassen. Sie verschwindet aus deiner Chatliste und du erhältst keine Nachrichten mehr.',
+      leaveGroupRemoveMyMessagesWarning:
+        'Du verlässt diese Gruppe und alle deine Nachrichten darin werden dauerhaft gelöscht. Das kann nicht rückgängig gemacht werden.',
+      deleteGroup: 'Gruppe löschen',
+      deleteGroupWarning:
+        'Du bist das letzte Mitglied. Das löscht die Gruppe dauerhaft und entfernt alle Nachrichten. Das kann nicht rückgängig gemacht werden.',
       deleteChat: 'Chat löschen',
       leaveGroup: 'Gruppe verlassen',
     },
@@ -829,8 +841,11 @@ export const messages = {
       renameGroupBadLength: 'Название должно быть длиной 3–64 символа.',
       deleteChatWarning:
         'Это навсегда удалит чат и удалит все сообщения как у вас, так и у вашего собеседника. Отменить это нельзя.',
-      leaveGroupWarning:
-        'Вы выйдете из этой группы. Она исчезнет из списка чатов, и вы перестанете получать сообщения.',
+      leaveGroupRemoveMyMessagesWarning:
+        'Вы выйдете из этой группы, и все ваши сообщения в ней будут навсегда удалены. Отменить это нельзя.',
+      deleteGroup: 'Удалить группу',
+      deleteGroupWarning:
+        'Вы — последний участник. Это навсегда удалит группу и все сообщения. Отменить это нельзя.',
     },
     about: {
       title: 'О приложении',

@@ -32,6 +32,8 @@ const renameReport = ref('')
 const deleteOpen = ref(false)
 const deleteBusy = ref(false)
 const deleteReport = ref('')
+const deleteInfoBusy = ref(false)
+const deleteIsLastMember = ref(false)
 
 const activeChat = computed(() => {
   const cid = activeChatId.value
@@ -87,11 +89,16 @@ const canOpenOtherMenu = computed(() => {
 })
 
 const deleteTitle = computed(() => {
-  return activeChat.value?.type === 'group' ? String(t('signed.leaveGroup')) : String(t('signed.deleteChat'))
+  if (activeChat.value?.type === 'group') {
+    return deleteIsLastMember.value ? String(t('signed.deleteGroup')) : String(t('signed.leaveGroup'))
+  }
+  return String(t('signed.deleteChat'))
 })
 
 const deleteBody = computed(() => {
-  if (activeChat.value?.type === 'group') return String(t('signed.leaveGroupWarning'))
+  if (activeChat.value?.type === 'group') {
+    return deleteIsLastMember.value ? String(t('signed.deleteGroupWarning')) : String(t('signed.leaveGroupRemoveMyMessagesWarning'))
+  }
   return String(t('signed.deleteChatWarning'))
 })
 
@@ -100,12 +107,31 @@ function openDeleteConfirm() {
   deleteOpen.value = true
   deleteBusy.value = false
   deleteReport.value = ''
+
+  deleteIsLastMember.value = false
+  if (activeChat.value?.type === 'group' && activeChatId.value) {
+    deleteInfoBusy.value = true
+    void (async () => {
+      try {
+        const list = await signed.fetchChatMembers(String(activeChatId.value))
+        deleteIsLastMember.value = Array.isArray(list) && list.length <= 1
+      } catch {
+        // ignore
+      } finally {
+        deleteInfoBusy.value = false
+      }
+    })()
+  } else {
+    deleteInfoBusy.value = false
+  }
 }
 
 function closeDeleteConfirm() {
   deleteOpen.value = false
   deleteBusy.value = false
   deleteReport.value = ''
+  deleteInfoBusy.value = false
+  deleteIsLastMember.value = false
 }
 
 async function onConfirmDelete() {
@@ -422,7 +448,8 @@ watch([view, activeChatId], () => {
       <div class="modal-card">
         <div class="modal-title" id="deleteChatTitleSigned">{{ deleteTitle }}</div>
 
-        <div class="muted" style="margin-top: 8px;">{{ deleteBody }}</div>
+        <div v-if="deleteInfoBusy" class="muted" style="margin-top: 8px;">{{ t('signed.membersLoading') }}</div>
+        <div v-else class="muted" style="margin-top: 8px;">{{ deleteBody }}</div>
         <div v-if="deleteReport" class="status" aria-live="polite" style="margin-top: 8px;">{{ deleteReport }}</div>
 
         <div class="modal-actions">
