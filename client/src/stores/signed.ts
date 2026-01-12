@@ -1566,6 +1566,10 @@ export const useSignedStore = defineStore('signed', () => {
     const { publicJwk, privateJwk } = await generateRsaKeyPair()
     const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password, extraEntropy: params.extraEntropy })
 
+    // Import private key before setting token/userId so App.vue doesn't interpret
+    // the session as "signed in but locked" mid-register and auto-logout.
+    const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
+
     const j = await fetchJson('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1585,7 +1589,7 @@ export const useSignedStore = defineStore('signed', () => {
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
 
-    privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
+    privateKey.value = importedPrivateKey
 
     // Persist key material only after server registration succeeds.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey, extraEntropy: params.extraEntropy })
