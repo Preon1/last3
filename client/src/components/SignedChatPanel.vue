@@ -9,7 +9,7 @@ const signed = useSignedStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
-const { activeChatId, messagesByChatId, chats, userId, membersByChatId } = storeToRefs(signed)
+const { activeChatId, messagesByChatId, userId, membersByChatId } = storeToRefs(signed)
 
 const chatInput = ref('')
 const chatRootEl = ref<HTMLElement | null>(null)
@@ -110,18 +110,6 @@ function setMessageEl(id: string, el: Element | null) {
     messageEls.delete(id)
   }
 }
-
-const memberUsername = ref('')
-const memberBusy = ref(false)
-const memberErr = ref('')
-
-const activeChat = computed(() => {
-  const cid = activeChatId.value
-  if (!cid) return null
-  return chats.value.find((c) => c.id === cid) ?? null
-})
-
-const isGroup = computed(() => Boolean(activeChat.value?.type === 'group'))
 
 const rendered = computed(() => {
   const cid = activeChatId.value
@@ -608,28 +596,6 @@ function resolveReplyPreview(replyToId: string) {
   return preview ? `${senderName}: ${preview}` : String(senderName)
 }
 
-async function onAddMember() {
-  memberErr.value = ''
-  const cid = activeChatId.value
-  if (!cid) return
-  const u = memberUsername.value.trim()
-  if (!u) return
-  memberBusy.value = true
-  try {
-    await signed.addGroupMember(cid, u)
-    memberUsername.value = ''
-  } catch (e: any) {
-    const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
-    const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
-    if (isIntrovert) {
-      toast.error(String(t('toast.introvertTitle')), msg === 'introvert' ? String(t('toast.introvertBody')) : msg)
-      return
-    }
-    memberErr.value = msg
-  } finally {
-    memberBusy.value = false
-  }
-}
 
 function onChatKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
@@ -718,21 +684,6 @@ function onMessagesScroll() {
 
 <template>
   <section ref="chatRootEl" class="chat">
-    <div v-if="isGroup" class="chat-input" style="padding-bottom: 8px;">
-      <input
-        v-model="memberUsername"
-        :disabled="memberBusy || !activeChatId"
-        maxlength="64"
-        autocomplete="off"
-        :placeholder="String(t('signed.memberPlaceholder'))"
-        @keydown.enter.prevent="onAddMember"
-      />
-      <button class="secondary" type="button" :disabled="memberBusy || !memberUsername.trim()" @click="onAddMember">
-        {{ t('signed.addMember') }}
-      </button>
-    </div>
-
-    <div v-if="memberErr" class="status" aria-live="polite" style="margin: 0 12px 8px;">{{ memberErr }}</div>
 
     <div ref="chatMessagesEl" class="chat-messages" aria-live="polite" @scroll="onMessagesScroll">
       <div

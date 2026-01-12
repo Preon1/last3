@@ -127,6 +127,10 @@ export const messages = {
       createGroup: 'Create group',
       addMember: 'Add member',
       memberPlaceholder: 'Username',
+      memberAddedOk: 'Member added.',
+      membersList: 'Members list',
+      membersLoading: 'Loading members…',
+      noMembers: 'No members.',
       noChats: 'No chats yet. Add a friend by username.',
       youSignedInAs: 'Signed in as',
       hiddenMode: 'Hidden mode',
@@ -306,6 +310,12 @@ export const messages = {
     signed: {
       deleteChat: 'Chat verwijderen',
       leaveGroup: 'Groep verlaten',
+      addMember: 'Lid toevoegen',
+      memberPlaceholder: 'Gebruikersnaam',
+      memberAddedOk: 'Lid toegevoegd.',
+      membersList: 'Ledenlijst',
+      membersLoading: 'Leden laden…',
+      noMembers: 'Geen leden.',
     },
     about: {
       title: 'Over',
@@ -462,6 +472,12 @@ export const messages = {
     signed: {
       deleteChat: 'Supprimer la discussion',
       leaveGroup: 'Quitter le groupe',
+      addMember: 'Ajouter un membre',
+      memberPlaceholder: "Nom d'utilisateur",
+      memberAddedOk: 'Membre ajouté.',
+      membersList: 'Liste des membres',
+      membersLoading: 'Chargement des membres…',
+      noMembers: 'Aucun membre.',
     },
     about: {
       title: 'À propos',
@@ -609,6 +625,16 @@ export const messages = {
       yourName: 'Dein Name',
       namePlaceholder: 'z. B. Alex',
       join: 'Beitreten',
+    },
+    signed: {
+      addMember: 'Mitglied hinzufügen',
+      memberPlaceholder: 'Benutzername',
+      memberAddedOk: 'Mitglied hinzugefügt.',
+      membersList: 'Mitgliederliste',
+      membersLoading: 'Mitglieder werden geladen…',
+      noMembers: 'Keine Mitglieder.',
+      deleteChat: 'Chat löschen',
+      leaveGroup: 'Gruppe verlassen',
     },
     about: {
       title: 'Über',
@@ -764,6 +790,12 @@ export const messages = {
     signed: {
       deleteChat: 'Удалить чат',
       leaveGroup: 'Выйти из группы',
+      addMember: 'Добавить участника',
+      memberPlaceholder: 'Имя пользователя',
+      memberAddedOk: 'Участник добавлен.',
+      membersList: 'Список участников',
+      membersLoading: 'Загрузка участников…',
+      noMembers: 'Участников нет.',
     },
     about: {
       title: 'О приложении',

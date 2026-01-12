@@ -1340,6 +1340,7 @@ export const useSignedStore = defineStore('signed', () => {
     updateHiddenMode,
     updateIntrovertMode,
     refreshChats,
+    fetchChatMembers,
     openChat,
     goHome,
     openSettings,
