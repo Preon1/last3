@@ -36,6 +36,11 @@ services:
       # Optional debug logs (true/false). When false, lrcom stays silent.
       - DEBUG=${DEBUG:-false}
 
+      # Signed-mode cleanup: delete expired users (and cascading data) periodically.
+      - SIGNED_CLEANUP_ENABLED=${SIGNED_CLEANUP_ENABLED:-1}
+      - SIGNED_CLEANUP_INTERVAL_MS=${SIGNED_CLEANUP_INTERVAL_MS:-600000}
+      - SIGNED_CLEANUP_INITIAL_DELAY_MS=${SIGNED_CLEANUP_INITIAL_DELAY_MS:-30000}
+
       # PostgreSQL connection
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

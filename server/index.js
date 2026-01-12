@@ -55,7 +55,8 @@ const TLS_CERT_PATH = process.env.TLS_CERT_PATH ?? '';
 const USE_HTTPS = true;
 
 const SIGNED_CLEANUP_ENABLED = (process.env.SIGNED_CLEANUP_ENABLED ?? '1') !== '0';
-const SIGNED_CLEANUP_INTERVAL_MS = Number(process.env.SIGNED_CLEANUP_INTERVAL_MS ?? 24 * 60 * 60 * 1000);
+// Expired-user cleanup: default every 10 minutes (configurable via env).
+const SIGNED_CLEANUP_INTERVAL_MS = Number(process.env.SIGNED_CLEANUP_INTERVAL_MS ?? 10 * 60 * 1000);
 const SIGNED_CLEANUP_INITIAL_DELAY_MS = Number(process.env.SIGNED_CLEANUP_INITIAL_DELAY_MS ?? 30 * 1000);
 
 // Optional Web Push (background notifications). If keys are not provided, the app
