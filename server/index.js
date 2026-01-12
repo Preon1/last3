@@ -1172,10 +1172,11 @@ wss.on('connection', async (ws, req) => {
 
           // Authorization: only allow calling users who share a signed chat.
           // Introvert mode: only allow calls if the users share a *personal* chat.
+          let authRow = null;
           try {
             const auth = await query(
               `SELECT
-                 COALESCE((SELECT introvert_mode FROM users WHERE id = $2::uuid), FALSE) AS introvert,
+                 COALESCE((SELECT introvert_mode FROM users WHERE id::text = $2), FALSE) AS introvert,
                  EXISTS(
                    SELECT 1
                    FROM chat_members cm1
@@ -1193,30 +1194,76 @@ wss.on('connection', async (ws, req) => {
                  ) AS has_personal`,
               [signedUser.id, String(to)],
             );
-
-            const row = auth?.rows?.[0];
-            const hasAny = Boolean(row?.has_any);
-            const hasPersonal = Boolean(row?.has_personal);
-            const introvert = Boolean(row?.introvert);
-
-            if (!hasAny) {
-              sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
-              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-              return;
-            }
-
-            if (introvert && !hasPersonal) {
-              sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'introvert' });
-              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-              return;
-            }
+            authRow = auth?.rows?.[0] ?? null;
           } catch (err) {
-            debugError('[signed callStart] auth query failed', {
-              from: signedUser?.id,
-              to,
-              err,
-            });
+            const msgText = typeof err?.message === 'string' ? err.message : '';
+            const mayBeMissingIntrovertColumn = msgText.includes('introvert_mode');
+
+            if (mayBeMissingIntrovertColumn) {
+              // Backward-compatible fallback: if the DB schema doesn't have introvert_mode yet,
+              // skip introvert enforcement (feature not available) but still enforce shared-chat auth.
+              try {
+                const auth = await query(
+                  `SELECT
+                     EXISTS(
+                       SELECT 1
+                       FROM chat_members cm1
+                       INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
+                       WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
+                       LIMIT 1
+                     ) AS has_any,
+                     EXISTS(
+                       SELECT 1
+                       FROM chats c
+                       INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
+                       INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
+                       WHERE c.chat_type = 'personal'
+                       LIMIT 1
+                     ) AS has_personal`,
+                  [signedUser.id, String(to)],
+                );
+                const row = auth?.rows?.[0] ?? null;
+                authRow = row ? { ...row, introvert: false } : null;
+              } catch (err2) {
+                debugError('[signed callStart] auth query failed (fallback)', {
+                  from: signedUser?.id,
+                  to,
+                  err: err2,
+                });
+                sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
+                if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+                return;
+              }
+            } else {
+              debugError('[signed callStart] auth query failed', {
+                from: signedUser?.id,
+                to,
+                err,
+              });
+              sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
+              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+              return;
+            }
+          }
+
+          if (!authRow) {
             sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
+
+          const hasAny = Boolean(authRow?.has_any);
+          const hasPersonal = Boolean(authRow?.has_personal);
+          const introvert = Boolean(authRow?.introvert);
+
+          if (!hasAny) {
+            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
+
+          if (introvert && !hasPersonal) {
+            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'introvert' });
             if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
             return;
           }

@@ -71,6 +71,30 @@ export const useCallStore = defineStore('call', () => {
   const roomId = ref<string | null>(null)
   const status = ref<string>('')
 
+  let statusClearTimer: number | null = null
+
+  function clearStatusClearTimer() {
+    if (statusClearTimer != null) {
+      window.clearTimeout(statusClearTimer)
+      statusClearTimer = null
+    }
+  }
+
+  function scheduleStatusAutoClear() {
+    clearStatusClearTimer()
+    // Keep the call UI visible briefly to show the user what happened.
+    statusClearTimer = window.setTimeout(() => {
+      statusClearTimer = null
+      const idle =
+        !roomId.value
+        && !pendingIncomingFrom.value
+        && !outgoingPending.value
+        && !joinPending.value
+        && !joinRequestFromId.value
+      if (idle) status.value = ''
+    }, 3000)
+  }
+
   const pendingIncomingFrom = ref<string | null>(null)
   const pendingIncomingFromName = ref<string>('')
   const pendingIncomingRoomId = ref<string | null>(null)
@@ -312,6 +336,7 @@ export const useCallStore = defineStore('call', () => {
 
   function resetCallState() {
     stopRingtone()
+    clearStatusClearTimer()
     clearReconnectTimer()
     for (const id of Array.from(pcs.keys())) closePeer(id)
 
@@ -369,6 +394,7 @@ export const useCallStore = defineStore('call', () => {
       await ensureMic()
     } catch (err) {
       status.value = micErrorToStatus(err)
+      scheduleStatusAutoClear()
       return
     }
 
@@ -480,6 +506,7 @@ export const useCallStore = defineStore('call', () => {
       await ensureMic()
     } catch (err) {
       status.value = micErrorToStatus(err)
+      scheduleStatusAutoClear()
       return
     }
 
@@ -507,6 +534,7 @@ export const useCallStore = defineStore('call', () => {
     stopRingtone()
     playCallInterruptedSound()
     resetCallState()
+    scheduleStatusAutoClear()
   }
 
   async function acceptIncoming() {
@@ -517,6 +545,7 @@ export const useCallStore = defineStore('call', () => {
       await ensureMic()
     } catch (err) {
       status.value = micErrorToStatus(err)
+      scheduleStatusAutoClear()
       return
     }
 
@@ -592,6 +621,7 @@ export const useCallStore = defineStore('call', () => {
             reason === 'introvert'
               ? String(i18n.global.t('call.introvertBlocked'))
               : String(i18n.global.t('call.callFailed', { reason }))
+          scheduleStatusAutoClear()
         }
       } else {
         if (outgoingPending.value && !roomId.value) {
@@ -621,6 +651,7 @@ export const useCallStore = defineStore('call', () => {
           ? String(i18n.global.t('call.joinFailedReason', { reason }))
           : String(i18n.global.t('call.joinFailed'))
         resetCallState()
+        scheduleStatusAutoClear()
       }
       return
     }
@@ -639,6 +670,7 @@ export const useCallStore = defineStore('call', () => {
         outgoingPending.value = false
         outgoingPendingName.value = ''
         status.value = String(i18n.global.t('call.callRejected'))
+        scheduleStatusAutoClear()
       }
       if (!roomId.value) resetCallState()
       return
@@ -650,6 +682,7 @@ export const useCallStore = defineStore('call', () => {
       status.value = String(i18n.global.t('call.callEnded'))
       playCallInterruptedSound()
       resetCallState()
+      scheduleStatusAutoClear()
       return
     }
 

@@ -11,7 +11,7 @@ const props = withDefaults(defineProps<{ mode?: Mode }>(), {
 })
 
 const call = useCallStore()
-const { inCall, outgoingPending, pendingIncomingFrom, joinPending, joinRequestFromId } = storeToRefs(call)
+const { inCall, outgoingPending, pendingIncomingFrom, joinPending, joinRequestFromId, status } = storeToRefs(call)
 
 const show = computed(() =>
   Boolean(pendingIncomingFrom.value)
@@ -19,6 +19,7 @@ const show = computed(() =>
   || inCall.value
   || joinPending.value
   || Boolean(joinRequestFromId.value)
+  || Boolean(status.value)
 )
 </script>
 
