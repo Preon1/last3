@@ -128,7 +128,7 @@ const rendered = computed(() => {
   return messagesByChatId.value[cid] ?? []
 })
 
-const canSend = computed(() => Boolean(activeChatId.value && chatInput.value.trim()))
+const canSend = computed(() => Boolean(activeChatId.value && chatInput.value.trim() && !editBusy.value))
 
 const didInitialScroll = ref(false)
 
@@ -137,7 +137,6 @@ const loadMoreHasMore = ref(true)
 const isPrepending = ref(false)
 
 const editingId = ref<string | null>(null)
-const editingText = ref<string>('')
 const editBusy = ref(false)
 
 const replyingToId = ref<string | null>(null)
@@ -155,12 +154,29 @@ function isMineMessage(senderId: string) {
   return Boolean(userId.value && senderId === userId.value)
 }
 
+function focusChatInputNow() {
+  void nextTick(() => {
+    try {
+      const el = chatInputEl.value
+      el?.focus()
+      const pos = chatInput.value.length
+      el?.setSelectionRange(pos, pos)
+    } catch {
+      // ignore
+    }
+  })
+}
+
 function startEdit(m: { id: string; text: string; senderId: string }) {
-  if (!isMineMessage(m.senderId)) return
+  if (!isMineMessage(String(m.senderId))) return
   if (editBusy.value) return
-  if (editingId.value && editingId.value !== m.id) return
-  editingId.value = m.id
-  editingText.value = m.text
+  if (editingId.value && editingId.value !== String(m.id)) return
+
+  cancelReply()
+  editingId.value = String(m.id)
+  chatInput.value = String(m.text ?? '')
+  queueMicrotask(() => autoGrowChatInput())
+  focusChatInputNow()
 }
 
 function startReply(m: { id: string; text: string; fromUsername: string; senderId: string }) {
@@ -172,6 +188,7 @@ function startReply(m: { id: string; text: string; fromUsername: string; senderI
   const senderName = memberName || m.fromUsername
   const preview = (m.text ?? '').trim().slice(0, 80)
   replyingToLabel.value = preview ? `${senderName}: ${preview}` : String(senderName)
+  focusChatInputNow()
 }
 
 function cancelReply() {
@@ -181,7 +198,8 @@ function cancelReply() {
 
 function cancelEdit() {
   editingId.value = null
-  editingText.value = ''
+  chatInput.value = ''
+  queueMicrotask(() => autoGrowChatInput(true))
 }
 
 function closeMsgMenu() {
@@ -192,12 +210,10 @@ function closeMsgMenu() {
 function focusChatInputSoon() {
   if (window.innerWidth <= 768) return
   if (!activeChatId.value) return
-  if (editingId.value) return
 
   window.setTimeout(() => {
     if (window.innerWidth <= 768) return
     if (!activeChatId.value) return
-    if (editingId.value) return
     try {
       chatInputEl.value?.focus()
     } catch {
@@ -343,10 +359,25 @@ function onGlobalPointerDown(e: PointerEvent) {
 }
 
 function onGlobalKeyDown(e: KeyboardEvent) {
-  if (!msgMenuOpen.value) return
   if (e.key !== 'Escape') return
-  e.preventDefault()
-  closeMsgMenu()
+
+  if (msgMenuOpen.value) {
+    e.preventDefault()
+    closeMsgMenu()
+    return
+  }
+
+  if (replyingToId.value) {
+    e.preventDefault()
+    cancelReply()
+    return
+  }
+
+  if (editingId.value) {
+    e.preventDefault()
+    cancelEdit()
+    return
+  }
 }
 
 onMounted(() => {
@@ -367,12 +398,14 @@ function showSendError(e: any) {
 async function saveEdit(chatId: string, messageId: string) {
   if (!chatId) return
   if (!messageId) return
-  const next = editingText.value.trim()
+  const next = chatInput.value.trim()
   if (!next) return
   editBusy.value = true
   try {
     await signed.updateMessageText(chatId, messageId, next)
-    cancelEdit()
+    editingId.value = null
+    chatInput.value = ''
+    queueMicrotask(() => autoGrowChatInput(true))
   } catch (e: any) {
     showSendError(e)
   } finally {
@@ -456,6 +489,8 @@ watch(
   async () => {
     disconnectObserver()
     closeMsgMenu()
+    cancelReply()
+    if (editingId.value) cancelEdit()
     didInitialScroll.value = false
     loadMoreHasMore.value = true
     loadMoreBusy.value = false
@@ -477,6 +512,12 @@ async function onSend() {
   if (!cid) return
   const t0 = chatInput.value.trim()
   if (!t0) return
+
+  if (editingId.value) {
+    await saveEdit(cid, editingId.value)
+    return
+  }
+
   const rid = replyingToId.value
   try {
     await signed.sendMessage(cid, t0, { replyToId: rid })
@@ -581,6 +622,19 @@ async function onAddMember() {
 }
 
 function onChatKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    if (replyingToId.value) {
+      e.preventDefault()
+      cancelReply()
+      return
+    }
+    if (editingId.value) {
+      e.preventDefault()
+      cancelEdit()
+      return
+    }
+  }
+
   if (e.key === 'ArrowUp') {
     if (editBusy.value) return
     if (editingId.value) return
@@ -602,17 +656,6 @@ function onChatKeydown(e: KeyboardEvent) {
       if (typeof m.text !== 'string' || !m.text.trim()) continue
       startEdit(m)
       e.preventDefault()
-      void nextTick(() => {
-        try {
-          const root = chatMessagesEl.value
-          if (!root) return
-          const msgEl = root.querySelector(`[data-msg-id="${cssEscape(String(m.id))}"]`) as HTMLElement | null
-          const ta = msgEl?.querySelector('textarea') as HTMLTextAreaElement | null
-          ta?.focus()
-        } catch {
-          // ignore
-        }
-      })
       return
     }
     return
@@ -683,7 +726,7 @@ function onMessagesScroll() {
         v-for="m in rendered"
         :key="m.id"
         class="chat-line"
-        :class="{ 'chat-line--reply-target': replyingToId === m.id }"
+        :class="{ 'chat-line--reply-target': replyingToId === m.id, 'chat-line--edit-target': editingId === m.id }"
         :ref="(el) => setMessageEl(m.id, el as any)"
         :data-msg-id="m.id"
         @contextmenu.prevent="openMsgMenu($event, m)"
@@ -705,19 +748,7 @@ function onMessagesScroll() {
           {{ t('chat.replying') }}: {{ resolveReplyPreview(String(m.replyToId)) || String(m.replyToId) }}
         </div>
 
-        <div v-if="editingId === m.id" class="chat-text">
-          <textarea
-            v-model="editingText"
-            rows="2"
-            autocomplete="off"
-            style="width: 100%; margin-top: 6px;"
-          ></textarea>
-          <div style="display: flex; gap: 8px; margin-top: 6px;">
-            <button class="secondary" type="button" :disabled="editBusy" @click="cancelEdit">{{ t('common.cancel') }}</button>
-            <button type="button" :disabled="editBusy || !editingText.trim()" @click="saveEdit(m.chatId, m.id)">{{ t('common.save') }}</button>
-          </div>
-        </div>
-        <div v-else class="chat-text">
+        <div class="chat-text">
           <template v-for="(p, i) in linkifyText(String(m.text ?? ''))" :key="i">
             <a
               v-if="p.href"
@@ -780,12 +811,13 @@ function onMessagesScroll() {
     </div>
 
     <div class="chat-input">
-      <div v-if="replyingToId" class="muted chat-submode-cancel">
+      <div v-if="replyingToId || editingId" class="muted">
         <button
-          class="secondary icon-only"
+          class="secondary icon-only chat-submode-cancel"
           type="button"
+          :disabled="Boolean(editBusy && editingId)"
           :aria-label="String(t('common.cancel'))"
-          @click="cancelReply"
+          @click="editingId ? cancelEdit() : cancelReply()"
         >
           <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#x"></use></svg>
         </button>

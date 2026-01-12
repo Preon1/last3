@@ -479,8 +479,8 @@ button:disabled {
   max-height: 100vh;
   max-height: 100dvh;
   padding-bottom: 53px;
-  padding-top: 70vh;
-  padding-top: 70dvh;
+  padding-top: 60vh;
+  padding-top: 60dvh;
 }
 
 @media(min-width:768px){
@@ -507,6 +507,13 @@ button:disabled {
   outline-offset: -2px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--brand-light) 8%, transparent);
+}
+
+.chat-line--edit-target {
+  outline: 2px solid color-mix(in srgb, var(--brand-dark) 60%, transparent);
+  outline-offset: -2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand-dark) 8%, transparent);
 }
 
 .chat-line:last-child {
