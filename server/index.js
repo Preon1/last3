@@ -11,12 +11,14 @@ import { registerUser, loginUser, getUserByUsername } from './auth.js';
 import { issueToken, getUserIdForToken, requireSignedAuth, parseAuthTokenFromReq, revokeToken } from './signedSession.js';
 import {
   signedListChats,
+  signedListChatsWithLastMessage,
   signedUnreadCounts,
   signedCreatePersonalChat,
   signedCreateGroupChat,
   signedListChatMembers,
   signedAddGroupMember,
   signedRenameGroupChat,
+  signedGetLastMessagesForChatIds,
   signedFetchMessages,
   signedSendMessage,
   signedMarkChatRead,
@@ -242,10 +244,25 @@ app.post('/api/auth/check-username', async (req, res) => {
 app.get('/api/signed/chats', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
-    const chats = await signedListChats(userId);
+    const chats = await signedListChatsWithLastMessage(userId);
     const unread = await signedUnreadCounts(userId);
     res.json({ success: true, chats, unread });
   } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/signed/chats/last-messages', requireSignedAuth, async (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const chatIdsRaw = req.body?.chatIds;
+    const chatIds = Array.isArray(chatIdsRaw) ? chatIdsRaw.map(String).filter(Boolean) : [];
+    if (!chatIds.length) return res.status(400).json({ error: 'chatIds required' });
+
+    const lastMessages = await signedGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: true });
+    res.json({ success: true, lastMessages });
+  } catch (e) {
+    if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
     res.status(500).json({ error: 'Server error' });
   }
 });

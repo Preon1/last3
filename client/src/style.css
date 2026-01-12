@@ -618,9 +618,8 @@ button:disabled {
   opacity: 0.9;
 }
 
-.chat-submode-cancel{
-  width: 37px;
-  height: 37px;
+button.small{
+  padding: 7px;
 }
 
 /* Layout */
@@ -731,22 +730,22 @@ button:disabled {
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
+  position: relative;
 }
 
 .page-top {
-  width: 100%;
-  margin: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-  border-radius: 0;
-  padding: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+  z-index: 1;
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: calc(100% - 28px);
 }
 
 .page-panel{
@@ -756,11 +755,19 @@ button:disabled {
   flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  width: 100%;
 }
 
 .page-title {
-  font-weight: 800;
+  font-weight: 600;
+  padding: 10px 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur));
+  border-radius: 50px;
+  flex-grow: 1;
+  line-height: 15px;
 }
 
 .contacts {
@@ -773,6 +780,7 @@ button:disabled {
   overflow: auto;
   min-height: 0;
   scrollbar-width: thin;
+  padding-top: 64px;
 }
 
 .contact-row {
@@ -787,6 +795,7 @@ button:disabled {
   color: var(--secondary-text);
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur));
+  border-radius: 15px;
 }
 
 .contact-row.active {
@@ -798,6 +807,20 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.contact-row-left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contact-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .contact-row-right {
@@ -840,7 +863,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 10px 16px;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);

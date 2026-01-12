@@ -32,6 +32,72 @@ const filteredChats = computed(() => {
   return list
 })
 
+const sortedChats = computed(() => {
+  const list = filteredChats.value.slice()
+  list.sort((a, b) => {
+    const ua = unreadByChatId.value[a.id] ?? 0
+    const ub = unreadByChatId.value[b.id] ?? 0
+    const aUnread = ua > 0
+    const bUnread = ub > 0
+    if (aUnread !== bUnread) return aUnread ? -1 : 1
+
+    const ta = signed.getChatLastMessageTsMs(a.id)
+    const tb = signed.getChatLastMessageTsMs(b.id)
+    if (ta !== tb) return tb - ta
+
+    // Stable-ish fallback.
+    return String(b.id).localeCompare(String(a.id))
+  })
+  return list
+})
+
+const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function pad2(n: number) {
+  return String(Math.floor(n)).padStart(2, '0')
+}
+
+function formatTimeOrDate(tsMs: number): string {
+  if (!tsMs || !Number.isFinite(tsMs)) return ''
+  const d = new Date(tsMs)
+  const now = new Date()
+
+  const sameDay =
+    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+
+  if (sameDay) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+
+  const day = pad2(d.getDate())
+  const mon = MONTHS_EN[d.getMonth()] ?? ''
+  return mon ? `${day} ${mon}` : day
+}
+
+function shorten(s: string, max: number): string {
+  const v = String(s ?? '')
+  if (v.length <= max) return v
+  return v.slice(0, max) + '..'
+}
+
+function chatPreview(c: { id: string; type: 'personal' | 'group' }): string {
+  const p = signed.getChatLastMessagePreview(c.id)
+  if (!p) return ''
+
+  const timeOrDate = formatTimeOrDate(p.tsMs)
+  const body = shorten(String(p.text ?? '').replace(/\s+/g, ' ').trim(), 100)
+  if (!body) return ''
+
+  const parts: string[] = []
+  if (timeOrDate) parts.push(timeOrDate)
+
+  if (c.type === 'group') {
+    const sender = shorten(String(p.senderUsername ?? '').trim(), 10)
+    if (sender) parts.push(sender)
+  }
+
+  parts.push(body)
+  return parts.join(' • ')
+}
+
 const filterLabel = computed(() => {
   const type =
     filterMode.value === 'personal'
@@ -170,7 +236,7 @@ async function onOpen(chatId: string) {
 
 <template>
   <section class="page">
-    <div class="page-inner">
+    <div class="page-inner" style="padding-bottom:0;padding-top:0;">
       <div class="page-top">
         <div class="page-panel">
           <div class="page-title">{{ t('signed.chats') }}</div>
@@ -182,7 +248,7 @@ async function onOpen(chatId: string) {
             <div class="page-other-actions" ref="addMenuRoot">
               <button
                 ref="addMenuButton"
-                class="secondary icon-only"
+                class="secondary icon-only small"
                 type="button"
                 aria-haspopup="menu"
                 :aria-expanded="addMenuOpen ? 'true' : 'false'"
@@ -211,20 +277,25 @@ async function onOpen(chatId: string) {
       </div>
 
       <ul class="contacts">
-        <template v-if="filteredChats.length">
-          <li v-for="c in filteredChats" :key="c.id">
+        <template v-if="sortedChats.length">
+          <li v-for="c in sortedChats" :key="c.id">
             <button class="contact-row" type="button" :class="{ active: isActive(c.id) }" @click="onOpen(c.id)">
-              <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
-                <span
-                  v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
-                  class="status-dot"
-                  :class="signed.getChatOnlineState(c.id)"
-                  aria-hidden="true"
-                ></span>
-                {{ c.type === 'personal' ? (c.otherUsername ?? c.id) : (c.name ?? c.id) }}
+              <span class="contact-row-left">
+                <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
+                  <span
+                    v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
+                    class="status-dot"
+                    :class="signed.getChatOnlineState(c.id)"
+                    aria-hidden="true"
+                  ></span>
+                  {{ c.type === 'personal' ? (c.otherUsername ?? c.id) : (c.name ?? c.id) }}
+                </span>
+                <span v-if="chatPreview(c)" class="muted contact-preview">{{ chatPreview(c) }}</span>
               </span>
-              <span v-if="unreadByChatId[c.id]" class="unread-badge" :aria-label="String(t('common.unreadMessages'))">
-                {{ unreadByChatId[c.id] }}
+              <span class="contact-row-right">
+                <span v-if="unreadByChatId[c.id]" class="unread-badge" :aria-label="String(t('common.unreadMessages'))">
+                  {{ unreadByChatId[c.id] }}
+                </span>
               </span>
             </button>
           </li>

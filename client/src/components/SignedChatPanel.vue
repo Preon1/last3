@@ -777,7 +777,7 @@ function onMessagesScroll() {
     <div class="chat-input">
       <div v-if="replyingToId || editingId" class="muted">
         <button
-          class="secondary icon-only chat-submode-cancel"
+          class="secondary icon-only small"
           type="button"
           :disabled="Boolean(editBusy && editingId)"
           :aria-label="String(t('common.cancel'))"

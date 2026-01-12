@@ -21,6 +21,23 @@ export type SignedChat = {
   otherPublicKey?: string
 }
 
+export type SignedLastMessageWire = {
+  id: string
+  chatId: string
+  senderId: string
+  senderUsername?: string
+  encryptedData: string
+}
+
+export type SignedLastMessagePreview = {
+  id: string
+  chatId: string
+  senderId: string
+  senderUsername: string
+  tsMs: number
+  text: string
+}
+
 export type SignedChatMember = {
   userId: string
   username: string
@@ -65,6 +82,15 @@ const MAX_PASSWORD_LEN = 512
 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large'
+
+function uuidV7ToUnixMs(id: string): number | null {
+  const hex = String(id).replace(/-/g, '')
+  if (hex.length < 12) return null
+  const tsHex = hex.slice(0, 12)
+  if (!/^[0-9a-fA-F]{12}$/.test(tsHex)) return null
+  const ms = Number.parseInt(tsHex, 16)
+  return Number.isFinite(ms) ? ms : null
+}
 
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length
@@ -115,6 +141,9 @@ export const useSignedStore = defineStore('signed', () => {
 
   const chats = ref<SignedChat[]>([])
   const unreadByChatId = ref<Record<string, number>>({})
+
+  const lastMessageByChatId = ref<Record<string, SignedLastMessageWire | null>>({})
+  const lastMessagePreviewByChatId = ref<Record<string, SignedLastMessagePreview>>({})
 
   const membersByChatId = ref<Record<string, SignedChatMember[]>>({})
 
@@ -579,6 +608,23 @@ export const useSignedStore = defineStore('signed', () => {
                 [chatId]: (unreadByChatId.value[chatId] ?? 0) + 1,
               }
             }
+
+            // Best-effort: keep chat list previews fresh.
+            lastMessageByChatId.value = {
+              ...lastMessageByChatId.value,
+              [chatId]: { id, chatId, senderId, senderUsername: senderUsername ?? displayName, encryptedData },
+            }
+            lastMessagePreviewByChatId.value = {
+              ...lastMessagePreviewByChatId.value,
+              [chatId]: {
+                id,
+                chatId,
+                senderId,
+                senderUsername: senderUsername ?? displayName,
+                tsMs: uuidV7ToUnixMs(id) ?? 0,
+                text: plain.text,
+              },
+            }
           } catch {
             // ignore decrypt failures
           }
@@ -645,6 +691,24 @@ export const useSignedStore = defineStore('signed', () => {
                 : m,
             )
             messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
+
+            if (lastMessageByChatId.value[chatId]?.id === id) {
+              lastMessageByChatId.value = {
+                ...lastMessageByChatId.value,
+                [chatId]: { id, chatId, senderId, senderUsername: senderUsername ?? displayName, encryptedData },
+              }
+              lastMessagePreviewByChatId.value = {
+                ...lastMessagePreviewByChatId.value,
+                [chatId]: {
+                  id,
+                  chatId,
+                  senderId,
+                  senderUsername: senderUsername ?? displayName,
+                  tsMs: uuidV7ToUnixMs(id) ?? 0,
+                  text: plain.text,
+                },
+              }
+            }
           } catch {
             // ignore
           }
@@ -696,6 +760,71 @@ export const useSignedStore = defineStore('signed', () => {
     const nextChats: SignedChat[] = Array.isArray(j.chats) ? j.chats : []
     chats.value = nextChats
 
+    // New server versions may include `lastMessage` on each chat.
+    const nextLast: Record<string, SignedLastMessageWire | null> = {}
+    if (Array.isArray((j as any)?.chats)) {
+      for (const c of (j as any).chats) {
+        const chatId = typeof c?.id === 'string' ? String(c.id) : ''
+        if (!chatId) continue
+        const lm = c?.lastMessage
+        if (!lm) {
+          nextLast[chatId] = null
+          continue
+        }
+        const id = typeof lm?.id === 'string' ? String(lm.id) : ''
+        const senderId = typeof lm?.senderId === 'string' ? String(lm.senderId) : ''
+        const encryptedData = typeof lm?.encryptedData === 'string' ? String(lm.encryptedData) : ''
+        const senderUsername = typeof lm?.senderUsername === 'string' ? String(lm.senderUsername) : ''
+
+        if (!id || !senderId || !encryptedData) {
+          nextLast[chatId] = null
+          continue
+        }
+
+        nextLast[chatId] = { id, chatId, senderId, senderUsername, encryptedData }
+      }
+    }
+    lastMessageByChatId.value = nextLast
+
+    // Best-effort: decrypt last-message previews for the chat list.
+    if (privateKey.value && userId.value) {
+      const entries = Object.entries(nextLast)
+      const previews = await Promise.all(
+        entries.map(async ([chatId, lm]) => {
+          if (!lm) return null
+          try {
+            const plain = await decryptSignedMessage({
+              encryptedData: lm.encryptedData,
+              myUserId: userId.value as string,
+              myPrivateKey: privateKey.value as CryptoKey,
+            })
+            const tsMs = uuidV7ToUnixMs(lm.id) ?? 0
+            const text = typeof plain?.text === 'string' ? plain.text : ''
+            const preview: SignedLastMessagePreview = {
+              id: lm.id,
+              chatId,
+              senderId: lm.senderId,
+              senderUsername: lm.senderUsername ?? '',
+              tsMs,
+              text,
+            }
+            return { chatId, preview }
+          } catch {
+            return null
+          }
+        }),
+      )
+
+      const nextPreview: Record<string, SignedLastMessagePreview> = {}
+      for (const p of previews) {
+        if (!p) continue
+        nextPreview[p.chatId] = p.preview
+      }
+      lastMessagePreviewByChatId.value = nextPreview
+    } else {
+      lastMessagePreviewByChatId.value = {}
+    }
+
     const unread: Record<string, number> = {}
     if (Array.isArray(j.unread)) {
       for (const u of j.unread) {
@@ -708,6 +837,14 @@ export const useSignedStore = defineStore('signed', () => {
   function getChat(chatId: string): SignedChat | null {
     const c = chats.value.find((x) => x.id === chatId)
     return c ?? null
+  }
+
+  function getChatLastMessagePreview(chatId: string): SignedLastMessagePreview | null {
+    return lastMessagePreviewByChatId.value[chatId] ?? null
+  }
+
+  function getChatLastMessageTsMs(chatId: string): number {
+    return getChatLastMessagePreview(chatId)?.tsMs ?? 0
   }
 
   async function fetchChatMembers(chatId: string) {
@@ -1365,6 +1502,8 @@ export const useSignedStore = defineStore('signed', () => {
     activeChatId,
     chats,
     unreadByChatId,
+    lastMessageByChatId,
+    lastMessagePreviewByChatId,
     membersByChatId,
     messagesByChatId,
     onlineByUserId,
@@ -1395,6 +1534,8 @@ export const useSignedStore = defineStore('signed', () => {
     deleteChat,
     refreshPresence,
     getChatOnlineState,
+    getChatLastMessagePreview,
+    getChatLastMessageTsMs,
     ensureTurnConfig,
     sendWs,
     registerInboundHandler,

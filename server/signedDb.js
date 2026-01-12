@@ -118,6 +118,75 @@ export async function signedListChats(userId) {
   })
 }
 
+async function signedLastMessagesForUserByChatIds(userId, chatIds) {
+  const ids = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
+  if (!ids.length) return []
+
+  // Only return messages that the caller can decrypt (message_recipients join).
+  const r = await query(
+    `SELECT DISTINCT ON (m.chat_id) m.chat_id, m.id, m.sender_id, u.username AS sender_username, m.encrypted_data
+     FROM messages m
+     INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $1
+     INNER JOIN users u ON u.id = m.sender_id
+     WHERE m.chat_id = ANY($2::uuid[])
+     ORDER BY m.chat_id, m.id DESC`,
+    [String(userId), ids],
+  )
+
+  return r.rows.map((row) => ({
+    chatId: String(row.chat_id),
+    id: String(row.id),
+    senderId: String(row.sender_id),
+    senderUsername: String(row.sender_username ?? ''),
+    encryptedData: String(row.encrypted_data),
+  }))
+}
+
+export async function signedGetLastMessagesForChatIds(userId, chatIds, opts = {}) {
+  const enforceMembership = opts?.enforceMembership !== false
+  const list = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
+  if (!list.length) return []
+
+  const unique = Array.from(new Set(list))
+
+  if (enforceMembership) {
+    const memberRows = await query(
+      `SELECT chat_id
+       FROM chat_members
+       WHERE user_id = $1 AND chat_id = ANY($2::uuid[])`,
+      [String(userId), unique],
+    )
+
+    const memberSet = new Set(memberRows.rows.map((r) => String(r.chat_id)))
+    const allOk = unique.every((id) => memberSet.has(String(id)))
+    if (!allOk) {
+      const err = new Error('Forbidden')
+      err.code = 'forbidden'
+      throw err
+    }
+  }
+
+  const rows = await signedLastMessagesForUserByChatIds(userId, unique)
+  const byChatId = new Map(rows.map((m) => [String(m.chatId), m]))
+
+  // Preserve caller order; chats with no messages get null.
+  return list.map((cid) => byChatId.get(String(cid)) ?? null)
+}
+
+export async function signedListChatsWithLastMessage(userId) {
+  const chats = await signedListChats(userId)
+  const chatIds = chats.map((c) => c.id)
+  const last = await signedGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: false })
+  const lastByChatId = new Map(
+    chatIds.map((cid, i) => [String(cid), last[i]]),
+  )
+
+  return chats.map((c) => ({
+    ...c,
+    lastMessage: lastByChatId.get(String(c.id)) ?? null,
+  }))
+}
+
 export async function signedUnreadCounts(userId) {
   const result = await query(
     `SELECT chat_id, COUNT(*)::int AS count
