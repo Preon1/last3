@@ -300,6 +300,44 @@ export async function signedAddGroupMember(userId, chatId, username) {
   }
 }
 
+export async function signedRenameGroupChat(userId, chatId, name) {
+  await assertChatMember(userId, chatId)
+
+  const chat = await query(
+    `SELECT chat_type
+     FROM chats
+     WHERE id = $1
+     LIMIT 1`,
+    [chatId],
+  )
+  if (chat.rows.length === 0) return { ok: false, reason: 'not_found' }
+  if (String(chat.rows[0].chat_type) !== 'group') return { ok: false, reason: 'not_group' }
+
+  const n = typeof name === 'string' ? name.trim() : ''
+  // Match username length constraints: 3–64.
+  if (n.length < 3 || n.length > 64) return { ok: false, reason: 'bad_name' }
+
+  await query(
+    `UPDATE chats
+     SET chat_name = $1
+     WHERE id = $2`,
+    [n, chatId],
+  )
+
+  const members = await query(
+    `SELECT user_id
+     FROM chat_members
+     WHERE chat_id = $1`,
+    [chatId],
+  )
+
+  return {
+    ok: true,
+    chat: { id: String(chatId), type: 'group', name: n },
+    memberIds: members.rows.map((r) => String(r.user_id)),
+  }
+}
+
 async function assertChatMember(userId, chatId) {
   const r = await query(
     `SELECT 1

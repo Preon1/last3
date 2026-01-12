@@ -912,6 +912,26 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  async function renameGroupChat(chatId: string, name: string) {
+    const cid = String(chatId || '').trim()
+    const n = String(name || '').trim()
+    if (!cid) throw new Error('chatId required')
+    if (n.length < 3 || n.length > 64) throw new Error('Name must be 3-64 characters')
+
+    const j = await fetchJson('/api/signed/chats/rename-group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ chatId: cid, name: n }),
+    })
+
+    const chat = j?.chat
+    if (!chat || typeof chat.id !== 'string') throw new Error('Bad response')
+
+    // Best-effort: update local chat list.
+    chats.value = chats.value.map((c) => (String(c.id) === String(chat.id) ? { ...c, name: String(chat.name ?? n) } : c))
+    return chat
+  }
+
   async function loadMessages(chatId: string, limit = 50) {
     const lim = Math.max(1, Math.min(200, Number(limit) || 50))
 
@@ -1347,6 +1367,7 @@ export const useSignedStore = defineStore('signed', () => {
     createPersonalChat,
     createGroupChat,
     addGroupMember,
+    renameGroupChat,
     loadMoreMessages,
     sendMessage,
     markMessagesRead,

@@ -24,6 +24,11 @@ const membersOpen = ref(false)
 const membersBusy = ref(false)
 const membersErr = ref('')
 
+const renameOpen = ref(false)
+const renameName = ref('')
+const renameBusy = ref(false)
+const renameReport = ref('')
+
 const activeChat = computed(() => {
   const cid = activeChatId.value
   if (!cid) return null
@@ -146,6 +151,59 @@ function closeAddMember() {
   addMemberReport.value = ''
 }
 
+function openRenameGroup() {
+  closeOtherMenu()
+  const current = activeChat.value?.type === 'group' ? String(activeChat.value?.name ?? '') : ''
+  renameName.value = current
+  renameOpen.value = true
+  renameBusy.value = false
+  renameReport.value = ''
+  void nextTick(() => {
+    try {
+      const el = document.getElementById('renameGroupName') as HTMLInputElement | null
+      el?.focus()
+      el?.select()
+    } catch {
+      // ignore
+    }
+  })
+}
+
+function closeRenameGroup() {
+  renameOpen.value = false
+  renameBusy.value = false
+  renameReport.value = ''
+}
+
+async function onRenameGroup() {
+  renameReport.value = ''
+  const cid = activeChatId.value
+  if (!cid) return
+  const n = renameName.value.trim()
+  if (n.length < 3 || n.length > 64) {
+    renameReport.value = String(t('signed.renameGroupBadLength'))
+    return
+  }
+
+  renameBusy.value = true
+  try {
+    await signed.renameGroupChat(cid, n)
+
+    // Requirement: send an automated message to the group after rename.
+    try {
+      await signed.sendMessage(cid, `I renamed group to ${n}.`)
+    } catch {
+      // ignore
+    }
+
+    closeRenameGroup()
+  } catch (e: any) {
+    renameReport.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+  } finally {
+    renameBusy.value = false
+  }
+}
+
 async function onAddMember() {
   addMemberReport.value = ''
   const cid = activeChatId.value
@@ -191,6 +249,11 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     closeMembersList()
     return
   }
+  if (renameOpen.value) {
+    e.preventDefault()
+    closeRenameGroup()
+    return
+  }
   if (otherMenuOpen.value) {
     e.preventDefault()
     closeOtherMenu()
@@ -212,6 +275,7 @@ watch([view, activeChatId], () => {
   closeOtherMenu()
   closeAddMember()
   closeMembersList()
+  closeRenameGroup()
 })
 </script>
 
@@ -287,6 +351,17 @@ watch([view, activeChatId], () => {
           </button>
 
           <button
+            v-if="activeChat?.type === 'group'"
+            class="secondary page-other-item"
+            type="button"
+            role="menuitem"
+            :disabled="renameBusy"
+            @click="openRenameGroup"
+          >
+            {{ t('signed.renameGroup') }}
+          </button>
+
+          <button
             class="secondary page-other-item"
             type="button"
             role="menuitem"
@@ -294,6 +369,40 @@ watch([view, activeChatId], () => {
             @click="onDeleteChat"
           >
             {{ activeChat?.type === 'group' ? t('signed.leaveGroup') : t('signed.deleteChat') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="renameOpen"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="renameGroupTitleSigned"
+      @click="(e) => { if (e.target === e.currentTarget) closeRenameGroup() }"
+    >
+      <div class="modal-card">
+        <div class="modal-title" id="renameGroupTitleSigned">{{ t('signed.renameGroup') }}</div>
+
+        <div class="field" style="margin-top: 8px;">
+          <input
+            id="renameGroupName"
+            v-model="renameName"
+            :disabled="renameBusy || !activeChatId"
+            minlength="3"
+            maxlength="64"
+            autocomplete="off"
+            :placeholder="String(t('signed.renameGroupPlaceholder'))"
+            @keydown.enter.prevent="onRenameGroup"
+          />
+          <div v-if="renameReport" class="status" aria-live="polite">{{ renameReport }}</div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary" type="button" :disabled="renameBusy" @click="closeRenameGroup">{{ t('common.close') }}</button>
+          <button type="button" :disabled="renameBusy || renameName.trim().length < 3 || renameName.trim().length > 64" @click="onRenameGroup">
+            {{ t('signed.renameGroup') }}
           </button>
         </div>
       </div>

@@ -16,6 +16,7 @@ import {
   signedCreateGroupChat,
   signedListChatMembers,
   signedAddGroupMember,
+  signedRenameGroupChat,
   signedFetchMessages,
   signedSendMessage,
   signedMarkChatRead,
@@ -391,6 +392,36 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
     }
 
     res.json({ success: true, member: result.member });
+  } catch (e) {
+    if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
+    const name = typeof req.body?.name === 'string' ? req.body.name : '';
+    if (!chatId || !name) return res.status(400).json({ error: 'chatId and name required' });
+
+    const result = await signedRenameGroupChat(userId, chatId, name);
+    if (!result.ok) {
+      const code = result.reason === 'not_found' ? 404 : 400;
+      return res.status(code).json({ error: result.reason });
+    }
+
+    try {
+      const payload = { type: 'signedChatsChanged', chatId, reason: 'group_renamed', name: String(result.chat?.name ?? '') };
+      for (const uid of result.memberIds || []) {
+        const ws = signedSockets.get(String(uid));
+        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      }
+    } catch {
+      // ignore
+    }
+
+    res.json({ success: true, chat: result.chat });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
     res.status(500).json({ error: 'Server error' });
