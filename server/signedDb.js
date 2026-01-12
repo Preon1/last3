@@ -131,7 +131,7 @@ export async function signedUnreadCounts(userId) {
 }
 
 export async function signedCreatePersonalChat(userId, otherUsername) {
-  const otherRes = await query('SELECT id, username, public_key FROM users WHERE username = $1', [otherUsername])
+  const otherRes = await query('SELECT id, username, public_key, introvert_mode FROM users WHERE username = $1', [otherUsername])
   if (otherRes.rows.length === 0) {
     return { ok: false, reason: 'not_found' }
   }
@@ -165,6 +165,12 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
         otherPublicKey: String(other.public_key),
       },
     }
+  }
+
+  // Introvert mode: user cannot be added to new chats by others.
+  // Does not affect already existing chats (handled above).
+  if (Boolean(other.introvert_mode)) {
+    return { ok: false, reason: 'introvert' }
   }
 
   const created = await transaction(async (client) => {
@@ -258,11 +264,14 @@ export async function signedAddGroupMember(userId, chatId, username) {
   const u = typeof username === 'string' ? username.trim() : ''
   if (!u) return { ok: false, reason: 'bad_username' }
 
-  const otherRes = await query('SELECT id, username, public_key FROM users WHERE username = $1', [u])
+  const otherRes = await query('SELECT id, username, public_key, introvert_mode FROM users WHERE username = $1', [u])
   if (otherRes.rows.length === 0) return { ok: false, reason: 'not_found' }
 
   const other = otherRes.rows[0]
   const otherUserId = String(other.id)
+
+  // Introvert mode: user cannot be added to chats by others.
+  if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
 
   await query(
     `INSERT INTO chat_members (chat_id, user_id)

@@ -72,7 +72,7 @@ export async function registerUser({ username, password, publicKey, expirationDa
   const result = await query(
     `INSERT INTO users (username, password_hash, public_key, expiration_days, remove_date)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, username, public_key, expiration_days, remove_date, hidden_mode`,
+     RETURNING id, username, public_key, expiration_days, remove_date, hidden_mode, introvert_mode`,
     [username, passwordHash, normalizedPublicKey, expirationDays, removeDate]
   )
 
@@ -85,7 +85,7 @@ export async function registerUser({ username, password, publicKey, expirationDa
 export async function loginUser({ username, password, publicKey }) {
   // Get user
   const userResult = await query(
-    'SELECT id, username, password_hash, public_key, expiration_days, remove_date, hidden_mode FROM users WHERE username = $1',
+    'SELECT id, username, password_hash, public_key, expiration_days, remove_date, hidden_mode, introvert_mode FROM users WHERE username = $1',
     [username]
   )
 
@@ -146,6 +146,7 @@ export async function loginUser({ username, password, publicKey }) {
     userId: user.id,
     username: user.username,
     hiddenMode: Boolean(user.hidden_mode),
+    introvertMode: Boolean(user.introvert_mode),
     chats: chatsResult.rows,
     unreadMessages: unreadResult.rows,
   }

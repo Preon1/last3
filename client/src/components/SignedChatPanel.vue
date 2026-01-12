@@ -336,7 +336,13 @@ async function onAddMember() {
     await signed.addGroupMember(cid, u)
     memberUsername.value = ''
   } catch (e: any) {
-    memberErr.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
+    if (isIntrovert) {
+      toast.error(String(t('toast.introvertTitle')), msg === 'introvert' ? String(t('toast.introvertBody')) : msg)
+      return
+    }
+    memberErr.value = msg
   } finally {
     memberBusy.value = false
   }

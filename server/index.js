@@ -161,6 +161,7 @@ app.post('/api/auth/register', async (req, res) => {
       userId: user.id,
       username: user.username,
       hiddenMode: Boolean(user.hidden_mode),
+      introvertMode: Boolean(user.introvert_mode),
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -198,6 +199,20 @@ app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) 
     await query('UPDATE users SET hidden_mode = $2 WHERE id = $1', [userId, hiddenMode]);
 
     res.json({ success: true, hiddenMode });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/signed/account/introvert-mode', requireSignedAuth, async (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const introvertMode = req.body?.introvertMode;
+    if (typeof introvertMode !== 'boolean') return res.status(400).json({ error: 'introvertMode boolean required' });
+
+    await query('UPDATE users SET introvert_mode = $2 WHERE id = $1', [userId, introvertMode]);
+
+    res.json({ success: true, introvertMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -298,6 +313,12 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
     const result = await signedCreatePersonalChat(userId, otherUsername);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
+      if (result.reason === 'introvert') {
+        return res.status(403).json({
+          error:
+            'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
+        });
+      }
       return res.status(code).json({ error: result.reason });
     }
 
@@ -359,6 +380,12 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
     const result = await signedAddGroupMember(userId, chatId, username);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
+      if (result.reason === 'introvert') {
+        return res.status(403).json({
+          error:
+            'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
+        });
+      }
       return res.status(code).json({ error: result.reason });
     }
 
@@ -937,17 +964,42 @@ wss.on('connection', async (ws, req) => {
           }
 
           // Authorization: only allow calling users who share a signed chat.
+          // Introvert mode: only allow calls if the users share a *personal* chat.
           try {
-            const ok = await query(
-              `SELECT 1
-               FROM chat_members cm1
-               INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
-               WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
-               LIMIT 1`,
+            const auth = await query(
+              `SELECT
+                 COALESCE((SELECT introvert_mode FROM users WHERE id = $2::uuid), FALSE) AS introvert,
+                 EXISTS(
+                   SELECT 1
+                   FROM chat_members cm1
+                   INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
+                   WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
+                   LIMIT 1
+                 ) AS has_any,
+                 EXISTS(
+                   SELECT 1
+                   FROM chats c
+                   INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
+                   INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
+                   WHERE c.chat_type = 'personal'
+                   LIMIT 1
+                 ) AS has_personal`,
               [signedUser.id, String(to)],
             );
-            if (!ok?.rows?.length) {
+
+            const row = auth?.rows?.[0];
+            const hasAny = Boolean(row?.has_any);
+            const hasPersonal = Boolean(row?.has_personal);
+            const introvert = Boolean(row?.introvert);
+
+            if (!hasAny) {
               sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
+              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+              return;
+            }
+
+            if (introvert && !hasPersonal) {
+              sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'introvert' });
               if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
               return;
             }

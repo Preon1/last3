@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
   public_key TEXT NOT NULL,
   expiration_days INTEGER NOT NULL CHECK (expiration_days >= 7 AND expiration_days <= 365),
   remove_date TIMESTAMP NOT NULL,
-  hidden_mode BOOLEAN NOT NULL DEFAULT FALSE
+  hidden_mode BOOLEAN NOT NULL DEFAULT FALSE,
+  introvert_mode BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX idx_users_username ON users(username);
@@ -40,8 +41,8 @@ CREATE INDEX idx_chat_members_chat ON chat_members(chat_id);
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY,
   chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-  encrypted_data TEXT NOT NULL,
-  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  encrypted_data TEXT NOT NULL
 );
 
 CREATE INDEX idx_messages_chat ON messages(chat_id);

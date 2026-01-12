@@ -11,7 +11,7 @@ const signed = useSignedStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username, hiddenMode } = storeToRefs(signed)
+const { username, hiddenMode, introvertMode } = storeToRefs(signed)
 
 function onCycleLanguage() {
   cycleLocale()
@@ -49,6 +49,16 @@ async function onToggleHiddenMode(ev: Event) {
     // ignore
   }
 }
+
+async function onToggleIntrovertMode(ev: Event) {
+  const target = ev.target as HTMLInputElement | null
+  if (!target) return
+  try {
+    await signed.updateIntrovertMode(Boolean(target.checked))
+  } catch {
+    // ignore
+  }
+}
 </script>
 
 <template>
@@ -71,6 +81,19 @@ async function onToggleHiddenMode(ev: Event) {
             :checked="Boolean(hiddenMode)"
             @change="onToggleHiddenMode"
             :aria-label="String(t('signed.hiddenMode'))"
+          />
+        </label>
+
+        <label class="secondary" style="display:flex; gap: 10px; align-items:center; justify-content:space-between;">
+          <span>
+            <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.introvertModeHelp') }}</div>
+          </span>
+          <input
+            type="checkbox"
+            :checked="Boolean(introvertMode)"
+            @change="onToggleIntrovertMode"
+            :aria-label="String(t('signed.introvertMode'))"
           />
         </label>
 

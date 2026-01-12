@@ -580,7 +580,10 @@ export const useCallStore = defineStore('call', () => {
           playCallInterruptedSound()
           outgoingPending.value = false
           outgoingPendingName.value = ''
-          status.value = String(i18n.global.t('call.callFailed', { reason }))
+          status.value =
+            reason === 'introvert'
+              ? String(i18n.global.t('call.introvertBlocked'))
+              : String(i18n.global.t('call.callFailed', { reason }))
         }
       } else {
         if (outgoingPending.value && !roomId.value) {

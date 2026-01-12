@@ -3,8 +3,10 @@ import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSignedStore } from '../stores/signed'
 import { useI18n } from 'vue-i18n'
+import { useToastStore } from '../stores/toast'
 
 const signed = useSignedStore()
+const toast = useToastStore()
 const { t } = useI18n()
 
 const { chats, unreadByChatId, activeChatId } = storeToRefs(signed)
@@ -30,7 +32,13 @@ async function onAddFriend() {
     await signed.createPersonalChat(u)
     friend.value = ''
   } catch (e: any) {
-    err.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
+    if (isIntrovert) {
+      toast.error(String(t('toast.introvertTitle')), msg === 'introvert' ? String(t('toast.introvertBody')) : msg)
+      return
+    }
+    err.value = msg
   } finally {
     busy.value = false
   }

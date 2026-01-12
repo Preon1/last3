@@ -64,6 +64,9 @@ export const messages = {
       chatSendFailedBody: "Couldn't reach the server. Please check your connection and try again.",
       chatTooLargeTitle: 'Message not sent',
       chatTooLargeBody: 'Message is too large to send.',
+      introvertTitle: 'Cannot add user',
+      introvertBody:
+        'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
     },
     setup: {
       subtitle: 'Anonymous, encrypted voice web messenger with no registration and no chat history.',
@@ -123,6 +126,9 @@ export const messages = {
       youSignedInAs: 'Signed in as',
       hiddenMode: 'Hidden mode',
       hiddenModeHelp: 'When enabled, others will not see your online/busy status.',
+      introvertMode: 'Introvert mode',
+      introvertModeHelp:
+        'When enabled, others cannot create new chats with you or add you to groups. Calls are only allowed for users who already share a private chat with you.',
       deleteAccount: 'Delete account',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',
@@ -213,6 +219,7 @@ export const messages = {
       callEnded: 'Call ended.',
       callRejected: 'Call rejected.',
       callFailed: 'Call failed: {reason}',
+      introvertBlocked: 'Call blocked: user is in introvert mode.',
       joinFailed: 'Join failed.',
       joinFailedReason: 'Join failed: {reason}',
       from: 'From {name}',

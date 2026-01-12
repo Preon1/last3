@@ -86,6 +86,7 @@ type StoredUser = {
   userId: string
   username: string
   hiddenMode?: boolean
+  introvertMode?: boolean
 }
 
 export const useSignedStore = defineStore('signed', () => {
@@ -93,6 +94,7 @@ export const useSignedStore = defineStore('signed', () => {
   const userId = ref<string | null>(null)
   const username = ref<string | null>(null)
   const hiddenMode = ref<boolean>(false)
+  const introvertMode = ref<boolean>(false)
   const publicKeyJwk = ref<string | null>(null)
   const privateKey = ref<CryptoKey | null>(null)
 
@@ -1136,6 +1138,7 @@ export const useSignedStore = defineStore('signed', () => {
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
     hiddenMode.value = Boolean(j?.hiddenMode)
+    introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
 
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
@@ -1144,7 +1147,10 @@ export const useSignedStore = defineStore('signed', () => {
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey, extraEntropy: params.extraEntropy })
 
     if (token.value && userId.value && username.value) {
-      storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
+      storeSession(
+        { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+        token.value,
+      )
     }
 
     await refreshChats()
@@ -1178,11 +1184,15 @@ export const useSignedStore = defineStore('signed', () => {
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
     hiddenMode.value = Boolean(j?.hiddenMode)
+    introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
     privateKey.value = priv
 
     if (token.value && userId.value && username.value) {
-      storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
+      storeSession(
+        { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+        token.value,
+      )
     }
 
     // Migrate/ensure low-profile local storage now that we have the password.
@@ -1202,6 +1212,7 @@ export const useSignedStore = defineStore('signed', () => {
     userId.value = null
     username.value = null
     hiddenMode.value = false
+    introvertMode.value = false
     publicKeyJwk.value = null
     privateKey.value = null
     chats.value = []
@@ -1246,6 +1257,7 @@ export const useSignedStore = defineStore('signed', () => {
     userId.value = restored.u.userId
     username.value = restored.u.username
     hiddenMode.value = Boolean(restored.u.hiddenMode)
+    introvertMode.value = Boolean(restored.u.introvertMode)
     publicKeyJwk.value = null
   }
 
@@ -1262,10 +1274,37 @@ export const useSignedStore = defineStore('signed', () => {
       hiddenMode.value = Boolean(j?.hiddenMode)
 
       if (token.value && userId.value && username.value) {
-        storeSession({ userId: userId.value, username: username.value, hiddenMode: hiddenMode.value }, token.value)
+        storeSession(
+          { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+          token.value,
+        )
       }
     } catch (e) {
       hiddenMode.value = prev
+      throw e
+    }
+  }
+
+  async function updateIntrovertMode(next: boolean) {
+    if (!token.value) throw new Error('Not logged in')
+    const prev = introvertMode.value
+    introvertMode.value = Boolean(next)
+    try {
+      const j = await fetchJson('/api/signed/account/introvert-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ introvertMode: introvertMode.value }),
+      })
+      introvertMode.value = Boolean(j?.introvertMode)
+
+      if (token.value && userId.value && username.value) {
+        storeSession(
+          { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+          token.value,
+        )
+      }
+    } catch (e) {
+      introvertMode.value = prev
       throw e
     }
   }
@@ -1278,6 +1317,7 @@ export const useSignedStore = defineStore('signed', () => {
     userId,
     username,
     hiddenMode,
+    introvertMode,
     publicKeyJwk,
     privateKey,
     ws,
@@ -1298,6 +1338,7 @@ export const useSignedStore = defineStore('signed', () => {
     logout,
     deleteAccount,
     updateHiddenMode,
+    updateIntrovertMode,
     refreshChats,
     openChat,
     goHome,
