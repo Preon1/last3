@@ -153,6 +153,7 @@ export const messages = {
       introvertMode: 'Introvert mode',
       introvertModeHelp:
         'When enabled, others cannot create new chats with you or add you to groups. Calls are only allowed for users who already share a private chat with you.',
+      cannotChatWithSelf: 'You cannot create a private chat with yourself.',
       deleteAccount: 'Delete account',
       deleteAccountWarning:
         'This action is unrecoverable. Your account will be deleted and all of your messages in all chats will be permanently removed. This cannot be undone.',
@@ -340,6 +341,7 @@ export const messages = {
       groupNamePlaceholder: 'bijv. Team',
       createGroup: 'Groep maken',
       noChats: 'Nog geen chats. Voeg een vriend toe op gebruikersnaam.',
+      cannotChatWithSelf: 'Je kunt geen privéchat met jezelf maken.',
       deleteAccount: 'Account verwijderen',
       deleteAccountWarning:
         'Deze actie is onomkeerbaar. Je account wordt verwijderd en al je berichten in alle chats worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.',
@@ -531,6 +533,7 @@ export const messages = {
       groupNamePlaceholder: 'ex. Équipe',
       createGroup: 'Créer un groupe',
       noChats: "Aucune discussion. Ajoutez un ami par nom d'utilisateur.",
+      cannotChatWithSelf: "Vous ne pouvez pas créer une discussion privée avec vous-même.",
       deleteAccount: 'Supprimer le compte',
       deleteAccountWarning:
         "Cette action est irréversible. Votre compte sera supprimé et tous vos messages dans toutes les discussions seront définitivement effacés. Cela ne peut pas être annulé.",
@@ -717,6 +720,7 @@ export const messages = {
       groupNamePlaceholder: 'z. B. Team',
       createGroup: 'Gruppe erstellen',
       noChats: 'Noch keine Chats. Füge einen Freund per Benutzername hinzu.',
+      cannotChatWithSelf: 'Du kannst keinen privaten Chat mit dir selbst erstellen.',
       deleteAccount: 'Konto löschen',
       deleteAccountWarning:
         'Diese Aktion ist unwiderruflich. Dein Konto wird gelöscht und alle deine Nachrichten in allen Chats werden dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.',
@@ -907,6 +911,7 @@ export const messages = {
       groupNamePlaceholder: 'напр. Команда',
       createGroup: 'Создать группу',
       noChats: 'Пока нет чатов. Добавьте друга по имени пользователя.',
+      cannotChatWithSelf: 'Нельзя создать личный чат с самим собой.',
       deleteAccount: 'Удалить аккаунт',
       deleteAccountWarning:
         'Это действие необратимо. Ваш аккаунт будет удалён, и все ваши сообщения во всех чатах будут удалены навсегда. Это нельзя отменить.',

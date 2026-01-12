@@ -97,7 +97,8 @@ export async function signedListChats(userId) {
 
   const personalByChatId = new Map(personal.rows.map((r) => [String(r.chat_id), r]))
 
-  return chats.rows.map((c) => {
+  return chats.rows
+    .map((c) => {
     const id = String(c.id)
     const type = String(c.chat_type)
     const base = { id, type, ...(c.chat_name ? { name: String(c.chat_name) } : {}) }
@@ -112,10 +113,14 @@ export async function signedListChats(userId) {
           otherPublicKey: String(p.other_public_key),
         }
       }
+
+      // Malformed personal chats (e.g. legacy self-chat with no counterpart).
+      return null
     }
 
     return base
   })
+    .filter(Boolean)
 }
 
 async function signedLastMessagesForUserByChatIds(userId, chatIds) {

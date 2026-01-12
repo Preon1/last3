@@ -1007,6 +1007,11 @@ export const useSignedStore = defineStore('signed', () => {
     const u = friendUsername.trim()
     if (!u) throw new Error('Username required')
 
+    // Avoid creating a private chat with yourself.
+    if (username.value && u.toLowerCase() === String(username.value).toLowerCase()) {
+      throw new Error('self')
+    }
+
     const j = await fetchJson('/api/signed/chats/create-personal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
