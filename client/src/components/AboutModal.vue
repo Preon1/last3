@@ -29,7 +29,7 @@ watchEffect((onCleanup) => {
       <div class="modal-title" id="aboutTitle">{{ t('about.title') }}</div>
       <div class="muted" v-html="t('about.description')"></div>
       <div class="modal-actions">
-        <a href="https://github.com/Preon1/last2" target="_blank" rel="noopener noreferrer">{{ t('about.repoLink') }}</a>
+        <a href="https://github.com/Preon1/last3" target="_blank" rel="noopener noreferrer">{{ t('about.repoLink') }}</a>
         <button class="secondary" type="button" @click="ui.closeAbout">{{ t('common.close') }}</button>
       </div>
     </div>
