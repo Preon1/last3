@@ -316,11 +316,11 @@ function toggleMode() {
       @click="(e) => { if (e.target === e.currentTarget) cancelEntropy() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="entropyTitle">Entropy</div>
+        <div class="modal-title" id="entropyTitle">{{ t('signed.entropy.title') }}</div>
         <div class="muted" style="margin-bottom: 10px;">
-          Click 10 times on random places inside the field below.
+          {{ t('signed.entropy.instructions') }}
         </div>
-        <div class="muted" style="margin-bottom: 12px;">Hits: {{ entropyHits.length }}/10</div>
+        <div class="muted" style="margin-bottom: 12px;">{{ t('signed.entropy.hits', { hits: entropyHits.length, total: 10 }) }}</div>
 
         <div
           role="button"

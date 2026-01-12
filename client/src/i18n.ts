@@ -35,7 +35,7 @@ function detectInitialLocale(): SupportedLocale {
   return nav ?? 'en'
 }
 
-export const messages = {
+const baseMessages = {
   en: {
     common: {
       about: 'About',
@@ -174,12 +174,17 @@ export const messages = {
         expirationDays:
           'Limitations: 7–365 days.\nSecurity note: (fill later)\nTip: activity extends expiration (with privacy jitter).',
       },
+      entropy: {
+        title: 'Entropy',
+        instructions: 'Click 10 times on random places inside the field below.',
+        hits: 'Hits: {hits}/{total}',
+      },
       genericError: 'Something went wrong.',
     },
     about: {
       title: 'About',
       description:
-        'Last is a free, anonymous, ephemeral web messenger with open source code. This means it requires no installation or registration, is not tied to a phone number, email, or name, does not store logs, messages, or logins, does not create sessions or cookies, and does not collect any analytics. Any person or company can create an isolated copy of this app for their own communication needs.<br>Voice communication is encrypted, and chat messages are sent over an SSL-encrypted channel. (In the next version, messaging will also be wrapped in an additional client-to-client encryption layer to prevent access via an attack on the server.)<br>The name "Last" comes from "last resort communication".<br>What is implemented so far:<br>1. Group chat and private chats.<br>2. Voice calls<br>3. Group voice calls<br>4. Multiple languages.<br>What are the downsides of this approach?<br>1. No message history. It is not stored even on your device. Close the tab and open it again — everything disappears.<br>2. You cannot write to or call someone who is offline. Your messages are received only by those who are online right now. If you wrote to someone and later you and your interlocutor left, then those messages no longer exist. Communication is therefore session-based: agree with someone in advance, talk, and leave. You can also not leave and simply stay online all the time.<br>3. You may not know who exactly you are talking to. All that is required to enter is an arbitrary nickname, so the responsibility for understanding the identity of the other person lies entirely with the user.<br>4. (In the current version) Communication in a narrow circle. You do not have a list of personal contacts. You see everyone who is online right now, so a single instance* of the app is not designed for mass use by millions or even thousands of users. There are also limits on how many audio conferences can be supported by the server at the same time.<br>*An app instance is a copy that runs on any private server and is available via one or more web addresses or an IP. A group of users is therefore united only by knowing this address. The number of instances is unlimited.<br>The developer of the application is not responsible for how it is used and what data is transmitted through it. The application code may be copied and modified by anyone for their own needs provided that a link to the original repository is kept in the "About" section. The full license text is available in Git.',
+        'TODO',
       repoLink: 'Git repository',
     },
     theme: {
@@ -295,6 +300,7 @@ export const messages = {
   nl: {
     common: {
       about: 'Over',
+      manageKeys: 'Sleutels beheren',
       back: 'Terug',
       chat: 'Chat',
       close: 'Sluiten',
@@ -326,6 +332,66 @@ export const messages = {
     },
 
     signed: {
+      keys: {
+        title: 'Sleutels beheren',
+        description:
+          'Maak een back-up van je versleutelde sleutels om je account naar een ander apparaat te verplaatsen of om een veilige kopie te bewaren.\n\nDit bestand bevat versleuteld sleutelmateriaal dat in je browser is opgeslagen. Deel het niet.',
+        countOnDevice: 'Sleutels op dit apparaat: {count}',
+        download: 'Downloaden',
+        downloadUser: 'Sleutel van {username} downloaden',
+        downloadAll: 'Alle sleutels downloaden',
+        downloadSpecific: 'Een specifieke sleutel downloaden',
+        addFromFile: 'Sleutel(s) uit bestand toevoegen',
+        removeAll: 'Alle lokale sleutels verwijderen',
+        downloadAllOk: '{count} sleutel(s) gedownload.',
+        downloadOneOk: 'Sleutel gedownload.',
+        importBadFormat: 'Ongeldig bestandsformaat. Verwacht een JSON-sleutelinvoer of een array met sleutelinvoeren.',
+        importResult: 'Gelezen: {read}. Toegevoegd: {added}. Genegeerd (bestaat al): {ignored}. Ongeldig: {invalid}.',
+        specificHint:
+          'Voer gebruikersnaam en wachtwoord in om een overeenkomstige versleutelde invoer te vinden. Dit logt je niet in.',
+        specificMissing: 'Gebruikersnaam en wachtwoord zijn verplicht.',
+        specificNotFound: 'Geen overeenkomende sleutel gevonden (gebruikersnaam/wachtwoord komt niet overeen).',
+        removeConfirm:
+          'Dit verwijdert permanent en onherstelbaar ALLE lokale sleutels voor {count} account(s) die op dit apparaat zijn aangemaakt/geïmporteerd.\n\nJe wordt uitgelogd.',
+        removeAllConfirm: 'Alle sleutels verwijderen',
+        removeAllOk: 'Alle lokale sleutels verwijderd.',
+      },
+      subtitle: 'Je eigen privé-messenger. Volledig versleuteld, geen logs, geen sporen.',
+      username: 'Gebruikersnaam',
+      usernamePlaceholder: 'bijv. alice',
+      password: 'Wachtwoord',
+      passwordPlaceholder: 'Minstens 8 tekens',
+      expirationDays: 'Accountverval (dagen)',
+      register: 'Registreren',
+      login: 'Inloggen',
+      youSignedInAs: 'Aangemeld als',
+      hiddenMode: 'Verborgen modus',
+      hiddenModeHelp: 'Wanneer ingeschakeld, zien anderen je online-/bezetstatus niet.',
+      introvertMode: 'Introverte modus',
+      introvertModeHelp:
+        'Wanneer ingeschakeld, kunnen anderen geen nieuwe chats met je maken of je aan groepen toevoegen. Oproepen zijn alleen toegestaan voor gebruikers die al een privéchat met je delen.',
+      errInvalidCredentials: 'Ongeldige gebruikersnaam of wachtwoord.',
+      errUnauthorized: 'Sessie verlopen. Log opnieuw in.',
+      errNoLocalKey:
+        'Geen lokale sleutel gevonden voor deze gebruiker op dit apparaat. Gebruik het juiste wachtwoord, of registreer opnieuw om nieuwe sleutels te maken.',
+      errPasswordTooLong: 'Wachtwoord mag maximaal {max} tekens zijn.',
+      help: {
+        usernameAria: 'Hulp: gebruikersnaam',
+        passwordAria: 'Hulp: wachtwoord',
+        expirationDaysAria: 'Hulp: accountverval',
+        username:
+          'Beperkingen: 3–64 tekens.\nBeveiligingsopmerking: (later invullen)\nTip: gebruikersnamen zijn hoofdlettergevoelig bij inloggen.',
+        password:
+          'Beperkingen: minimaal 8 tekens.\nBeveiligingsopmerking: (later invullen)\nTip: je wachtwoord wordt lokaal gebruikt om je privésleutel te ontsleutelen.',
+        expirationDays:
+          'Beperkingen: 7–365 dagen.\nBeveiligingsopmerking: (later invullen)\nTip: activiteit verlengt de vervaldatum (met privacy-jitter).',
+      },
+      entropy: {
+        title: 'Entropie',
+        instructions: 'Klik 10 keer op willekeurige plekken in het veld hieronder.',
+        hits: 'Klikken: {hits}/{total}',
+      },
+      genericError: 'Er is iets misgegaan.',
       chats: 'Chats',
       chat: 'Chat',
       add: 'Toevoegen',
@@ -368,7 +434,7 @@ export const messages = {
     about: {
       title: 'Over',
       description:
-        'Last is een gratis, anonieme, tijdelijke webmessenger met open source-code. Dit betekent dat er geen installatie of registratie nodig is, dat het niet gekoppeld is aan een telefoonnummer, e-mail of naam, geen logs, gesprekken of logins opslaat, geen sessies of cookies aanmaakt en geen statistieken verzamelt. Iedereen (personen of bedrijven) kan een geïsoleerde kopie van deze app opzetten voor eigen communicatiedoeleinden.<br>Spraakcommunicatie is versleuteld en berichten worden verstuurd via een met SSL versleuteld kanaal. (In de volgende versie wordt de berichtendienst ook voorzien van een extra client-naar-client versleutelingslaag om toegang via een aanval op de server te voorkomen).<br>De naam "Last" komt van "last resort communication".<br>Wat is er op dit moment gerealiseerd:<br>1. Groepschat en privéchats.<br>2. Spraakgesprekken<br>3. Groepsspraakgesprekken<br>4. Meerdere talen.<br>Wat zijn de nadelen van deze aanpak?<br>1. Geen gespreksgeschiedenis. Die wordt zelfs niet op je apparaat opgeslagen. Tabblad sluiten en opnieuw openen — alles is verdwenen.<br>2. Je kunt geen bericht sturen of bellen naar iemand die niet online is. Je berichten worden alleen ontvangen door mensen die nu online zijn. Als je iemand iets hebt gestuurd en daarna jij en je gesprekspartner offline gaan, bestaan die berichten niet meer. Communicatie is dus sessiegebonden: spreek vooraf af, praat, en ga weer weg. Je kunt ook gewoon online blijven.<br>3. Je weet mogelijk niet met wie je precies praat. Voor toegang is alleen een willekeurige nickname nodig, dus de verantwoordelijkheid om de identiteit van de ander te begrijpen ligt volledig bij de gebruiker.<br>4. (In de huidige versie) Communicatie in een kleine kring. Je hebt geen lijst met persoonlijke contacten. Je ziet iedereen die nu online is, dus één app-instantie* is niet bedoeld voor massaal gebruik door miljoenen of zelfs duizenden gebruikers. Ook zijn er grenzen aan hoeveel audioconferenties de server tegelijkertijd kan ondersteunen.<br>*Een app-instantie is een kopie die op een private server draait en bereikbaar is via één of meerdere webadressen of een IP-adres. Een groep gebruikers wordt dus alleen verbonden door het kennen van dat adres. Het aantal instanties is onbeperkt.<br>De ontwikkelaar van de applicatie is niet verantwoordelijk voor hoe deze wordt gebruikt en welke gegevens er via worden verzonden. De code van de applicatie mag door iedereen worden gekopieerd en aangepast voor eigen gebruik, mits de link naar de oorspronkelijke repository behouden blijft in de sectie "Over". De volledige licentie is beschikbaar in Git.',
+        'TODO',
       copy: 'Kopiëren',
       repoLink: 'Git-repository',
     },
@@ -417,10 +483,6 @@ export const messages = {
       joinOngoingBody: 'Je probeert deel te nemen aan een lopend gesprek.',
       callAria: 'Bellen',
       sendAria: 'Versturen',
-      toast: {
-        chatSendFailedTitle: 'Message non envoyé',
-        chatSendFailedBody: "Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.",
-      },
     },
     call: {
       notInCall: 'Niet in gesprek',
@@ -491,6 +553,7 @@ export const messages = {
   fr: {
     common: {
       about: 'À propos',
+      manageKeys: 'Gérer les clés',
       back: 'Retour',
       chat: 'Chat',
       close: 'Fermer',
@@ -518,6 +581,67 @@ export const messages = {
     },
 
     signed: {
+      keys: {
+        title: 'Gérer les clés',
+        description:
+          'Sauvegardez vos clés chiffrées pour déplacer votre compte vers un autre appareil ou pour conserver une copie en lieu sûr.\n\nCe fichier contient du matériel de clés chiffré stocké dans votre navigateur. Ne le partagez pas.',
+        countOnDevice: 'Clés sur cet appareil : {count}',
+        download: 'Télécharger',
+        downloadUser: 'Télécharger la clé de {username}',
+        downloadAll: 'Télécharger toutes les clés',
+        downloadSpecific: 'Télécharger une clé spécifique',
+        addFromFile: 'Ajouter des clé(s) depuis un fichier',
+        removeAll: 'Supprimer toutes les clés locales',
+        downloadAllOk: '{count} clé(s) téléchargée(s).',
+        downloadOneOk: 'Clé téléchargée.',
+        importBadFormat: 'Format de fichier invalide. Attendu : une entrée de clé JSON ou un tableau d’entrées de clés.',
+        importResult:
+          'Lues : {read}. Ajoutées : {added}. Ignorées (déjà présentes) : {ignored}. Invalides : {invalid}.',
+        specificHint:
+          "Saisissez le nom d'utilisateur et le mot de passe pour trouver une entrée chiffrée correspondante. Cela ne vous connecte pas.",
+        specificMissing: "Nom d'utilisateur et mot de passe requis.",
+        specificNotFound: 'Aucune clé correspondante (nom d’utilisateur/mot de passe incorrect).',
+        removeConfirm:
+          'Cela supprimera définitivement et de manière irréversible TOUTES les clés locales pour {count} compte(s) créés/importés sur cet appareil.\n\nVous serez déconnecté(e).',
+        removeAllConfirm: 'Supprimer toutes les clés',
+        removeAllOk: 'Toutes les clés locales ont été supprimées.',
+      },
+      subtitle: 'Votre messagerie privée. Entièrement chiffrée, sans journaux, sans traces.',
+      username: "Nom d'utilisateur",
+      usernamePlaceholder: 'ex. alice',
+      password: 'Mot de passe',
+      passwordPlaceholder: 'Au moins 8 caractères',
+      expirationDays: 'Expiration du compte (jours)',
+      register: "S'inscrire",
+      login: 'Se connecter',
+      youSignedInAs: 'Connecté en tant que',
+      hiddenMode: 'Mode invisible',
+      hiddenModeHelp: 'Lorsque activé, les autres ne verront pas votre statut en ligne/occupé.',
+      introvertMode: 'Mode introverti',
+      introvertModeHelp:
+        'Lorsque activé, les autres ne peuvent pas créer de nouvelles discussions avec vous ni vous ajouter à des groupes. Les appels sont autorisés uniquement pour les utilisateurs qui partagent déjà une discussion privée avec vous.',
+      errInvalidCredentials: "Nom d'utilisateur ou mot de passe invalide.",
+      errUnauthorized: 'Session expirée. Veuillez vous reconnecter.',
+      errNoLocalKey:
+        "Aucune clé locale trouvée pour cet utilisateur sur cet appareil. Utilisez le bon mot de passe, ou inscrivez-vous à nouveau pour créer de nouvelles clés.",
+      errPasswordTooLong: 'Le mot de passe doit comporter au maximum {max} caractères.',
+      help: {
+        usernameAria: "Aide : nom d'utilisateur",
+        passwordAria: 'Aide : mot de passe',
+        expirationDaysAria: "Aide : expiration du compte",
+        username:
+          'Limites : 3–64 caractères.\nNote de sécurité : (à compléter)\nAstuce : les noms d’utilisateur sont sensibles à la casse à la connexion.',
+        password:
+          'Limites : au moins 8 caractères.\nNote de sécurité : (à compléter)\nAstuce : votre mot de passe sert à déchiffrer votre clé privée localement.',
+        expirationDays:
+          'Limites : 7–365 jours.\nNote de sécurité : (à compléter)\nAstuce : l’activité prolonge l’expiration (avec jitter de confidentialité).',
+      },
+      entropy: {
+        title: 'Entropie',
+        instructions: 'Cliquez 10 fois à des endroits aléatoires dans le champ ci-dessous.',
+        hits: 'Clics : {hits}/{total}',
+      },
+      genericError: 'Une erreur est survenue.',
       chats: 'Discussions',
       chat: 'Discussion',
       add: 'Ajouter',
@@ -560,7 +684,7 @@ export const messages = {
     about: {
       title: 'À propos',
       description:
-        "Last est une messagerie web éphémère, gratuite et anonyme, dont le code est open source. Cela signifie qu’elle ne nécessite ni installation ni inscription, qu’elle n’est liée ni à un numéro de téléphone ni à une adresse e-mail ni à un nom, qu’elle ne conserve pas de journaux, de conversations ni d’identifiants, qu’elle ne crée pas de sessions ni de cookies et qu’elle ne collecte aucune statistique. Toute personne ou entreprise peut déployer une copie isolée de cette application pour ses besoins de communication.<br>Les communications vocales sont chiffrées, et les messages transitent via un canal chiffré SSL. (Dans la prochaine version, la messagerie sera également enveloppée d’une couche de chiffrement supplémentaire client-à-client afin d’empêcher l’accès via une attaque sur le serveur).<br>Le nom « Last » vient de « last resort communication ».<br>Ce qui est actuellement disponible :<br>1. Chat général et chats privés.<br>2. Appels vocaux<br>3. Appels vocaux de groupe<br>4. Multilingue.<br>Quels sont les inconvénients de cette approche ?<br>1. Pas d’historique de conversation. Il n’est pas conservé, même sur votre appareil. Fermez l’onglet et rouvrez-le : tout disparaît.<br>2. Vous ne pouvez pas écrire ou appeler quelqu’un qui n’est pas en ligne. Vos messages ne sont reçus que par les personnes actuellement connectées. Si vous avez écrit à quelqu’un puis que vous et votre interlocuteur vous êtes déconnectés, ces messages n’existent plus. La communication est donc de type « session » : convenez d’un moment à l’avance, discutez, puis quittez. Vous pouvez aussi rester en ligne en permanence.<br>3. Vous ne savez pas forcément avec qui vous échangez. Pour entrer, un pseudonyme arbitraire suffit ; la responsabilité de comprendre l’identité de l’interlocuteur revient donc entièrement à l’utilisateur.<br>4. (Dans la version actuelle) Communication dans un cercle restreint. Vous n’avez pas de liste de contacts personnels. Vous voyez toutes les personnes en ligne ; une seule instance* de l’application n’est donc pas conçue pour un usage massif par des millions, voire des milliers d’utilisateurs. Il existe aussi des limites au nombre de conférences audio pouvant être prises en charge simultanément par le serveur.<br>*Une instance de l’application est une copie qui tourne sur un serveur privé et qui est accessible via une ou plusieurs adresses web ou une adresse IP. Un groupe d’utilisateurs est donc lié uniquement par la connaissance de cette adresse. Le nombre d’instances n’est pas limité.<br>Le développeur de l’application n’est pas responsable de la manière dont elle est utilisée ni des données qui y transitent. Le code de l’application peut être copié et modifié par quiconque pour ses besoins, à condition de conserver un lien vers le dépôt d’origine dans la section « À propos ». Le texte complet de la licence est disponible dans Git.",
+        "TODO",
       repoLink: 'Dépôt Git',
     },
     theme: {
@@ -679,6 +803,7 @@ export const messages = {
   de: {
     common: {
       about: 'Über',
+      manageKeys: 'Schlüssel verwalten',
       back: 'Zurück',
       chat: 'Chat',
       close: 'Schließen',
@@ -693,6 +818,7 @@ export const messages = {
       language: 'Sprache',
       unreadMessages: 'Ungelesene Nachrichten',
       logout: 'Abmelden',
+      modified: 'bearbeitet',
     },
     toast: {
       chatSendFailedTitle: 'Nachricht nicht gesendet',
@@ -705,6 +831,68 @@ export const messages = {
       join: 'Beitreten',
     },
     signed: {
+      keys: {
+        title: 'Schlüssel verwalten',
+        description:
+          'Sichere deine verschlüsselten Schlüssel, um dein Konto auf ein anderes Gerät zu übertragen oder eine sichere Kopie aufzubewahren.\n\nDiese Datei enthält verschlüsseltes Schlüsselmaterial, das in deinem Browser gespeichert ist. Teile sie nicht.',
+        countOnDevice: 'Schlüssel auf diesem Gerät: {count}',
+        download: 'Herunterladen',
+        downloadUser: 'Schlüssel von {username} herunterladen',
+        downloadAll: 'Alle Schlüssel herunterladen',
+        downloadSpecific: 'Einen bestimmten Schlüssel herunterladen',
+        addFromFile: 'Schlüssel aus Datei hinzufügen',
+        removeAll: 'Alle lokalen Schlüssel entfernen',
+        downloadAllOk: '{count} Schlüssel heruntergeladen.',
+        downloadOneOk: 'Schlüssel heruntergeladen.',
+        importBadFormat:
+          'Ungültiges Dateiformat. Erwartet wird ein JSON-Schlüsseleintrag oder ein Array von Schlüsseln.',
+        importResult:
+          'Gelesen: {read}. Hinzugefügt: {added}. Ignoriert (bereits vorhanden): {ignored}. Ungültig: {invalid}.',
+        specificHint:
+          'Gib Benutzername und Passwort ein, um einen passenden verschlüsselten Eintrag zu finden. Das meldet dich nicht an.',
+        specificMissing: 'Benutzername und Passwort erforderlich.',
+        specificNotFound: 'Kein passender Schlüssel gefunden (Benutzername/Passwort stimmt nicht).',
+        removeConfirm:
+          'Das löscht dauerhaft und unwiderruflich ALLE lokalen Schlüssel für {count} Konto/Konten, die auf diesem Gerät erstellt/importiert wurden.\n\nDu wirst abgemeldet.',
+        removeAllConfirm: 'Alle Schlüssel entfernen',
+        removeAllOk: 'Alle lokalen Schlüssel entfernt.',
+      },
+      subtitle: 'Dein eigener privater Messenger. Vollständig verschlüsselt, keine Logs, keine Spuren.',
+      username: 'Benutzername',
+      usernamePlaceholder: 'z. B. alice',
+      password: 'Passwort',
+      passwordPlaceholder: 'Mindestens 8 Zeichen',
+      expirationDays: 'Kontoablauf (Tage)',
+      register: 'Registrieren',
+      login: 'Anmelden',
+      youSignedInAs: 'Angemeldet als',
+      hiddenMode: 'Versteckter Modus',
+      hiddenModeHelp: 'Wenn aktiviert, sehen andere deinen Online-/Beschäftigt-Status nicht.',
+      introvertMode: 'Introvertierter Modus',
+      introvertModeHelp:
+        'Wenn aktiviert, können andere keine neuen Chats mit dir erstellen oder dich zu Gruppen hinzufügen. Anrufe sind nur für Nutzer erlaubt, die bereits einen privaten Chat mit dir teilen.',
+      errInvalidCredentials: 'Ungültiger Benutzername oder Passwort.',
+      errUnauthorized: 'Sitzung abgelaufen. Bitte erneut anmelden.',
+      errNoLocalKey:
+        'Kein lokaler Schlüssel für diesen Benutzer auf diesem Gerät gefunden. Verwende das richtige Passwort oder registriere dich erneut, um neue Schlüssel zu erstellen.',
+      errPasswordTooLong: 'Passwort darf höchstens {max} Zeichen lang sein.',
+      help: {
+        usernameAria: 'Hilfe: Benutzername',
+        passwordAria: 'Hilfe: Passwort',
+        expirationDaysAria: 'Hilfe: Kontoablauf',
+        username:
+          'Einschränkungen: 3–64 Zeichen.\nSicherheitshinweis: (später ausfüllen)\nTipp: Benutzernamen sind beim Login case-sensitiv.',
+        password:
+          'Einschränkungen: mindestens 8 Zeichen.\nSicherheitshinweis: (später ausfüllen)\nTipp: Dein Passwort wird lokal genutzt, um deinen privaten Schlüssel zu entschlüsseln.',
+        expirationDays:
+          'Einschränkungen: 7–365 Tage.\nSicherheitshinweis: (später ausfüllen)\nTipp: Aktivität verlängert den Ablauf (mit Privacy-Jitter).',
+      },
+      entropy: {
+        title: 'Entropie',
+        instructions: 'Klicke 10-mal an zufällige Stellen im Feld unten.',
+        hits: 'Klicks: {hits}/{total}',
+      },
+      genericError: 'Etwas ist schiefgelaufen.',
       chats: 'Chats',
       chat: 'Chat',
       add: 'Hinzufügen',
@@ -747,7 +935,7 @@ export const messages = {
     about: {
       title: 'Über',
       description:
-        'Last ist ein kostenloser, anonymer, kurzlebiger Web-Messenger mit offenem Quellcode. Das bedeutet: keine Installation, keine Registrierung, keine Bindung an Telefonnummer, E-Mail oder Namen, keine Speicherung von Logs, Chats oder Logins, keine Sessions oder Cookies und keine Erhebung von Statistiken. Jede Person oder jedes Unternehmen kann eine isolierte Kopie dieser Anwendung für eigene Kommunikationszwecke betreiben.<br>Sprachkommunikation ist verschlüsselt, und Nachrichten werden über einen SSL-verschlüsselten Kanal übertragen. (In der nächsten Version wird die Nachrichtenübertragung zusätzlich in eine weitere Client-zu-Client-Verschlüsselungsschicht eingebettet, um Zugriffe durch einen Angriff auf den Server zu verhindern).<br>Der Name „Last“ stammt von „last resort communication“.<br>Derzeit umgesetzt:<br>1. Gruppenchat und private Chats.<br>2. Sprachanrufe<br>3. Gruppen-Sprachanrufe<br>4. Mehrsprachigkeit.<br>Was sind die Nachteile dieses Ansatzes?<br>1. Keine Chat-Historie. Sie wird nicht einmal auf deinem Gerät gespeichert. Tab schließen und neu öffnen – alles ist weg.<br>2. Du kannst niemandem schreiben oder ihn anrufen, der nicht online ist. Nachrichten erhalten nur Personen, die gerade online sind. Wenn du jemandem geschrieben hast und später du und dein Gesprächspartner offline geht, existieren diese Nachrichten nicht mehr. Kommunikation hat also Session-Charakter: vorher verabreden, sprechen und wieder gehen. Du kannst auch einfach dauerhaft online bleiben.<br>3. Du weißt möglicherweise nicht, mit wem genau du sprichst. Für den Einstieg reicht ein beliebiger Nickname – die Verantwortung, die Identität des Gegenübers einzuordnen, liegt vollständig beim Nutzer.<br>4. (In der aktuellen Version) Kommunikation in einem kleinen Kreis. Es gibt keine persönliche Kontaktliste. Du siehst alle, die gerade online sind; eine einzelne App-Instanz* ist daher nicht für die massenhafte Nutzung durch Millionen oder sogar Tausende Nutzer ausgelegt. Außerdem gibt es Grenzen dafür, wie viele Audio-Konferenzen der Server gleichzeitig unterstützen kann.<br>*Eine App-Instanz ist eine Kopie, die auf einem privaten Server läuft und über eine oder mehrere Web-Adressen oder eine IP erreichbar ist. Eine Nutzergruppe wird somit nur durch die Kenntnis dieser Adresse verbunden. Die Anzahl der Instanzen ist nicht begrenzt.<br>Der Entwickler der Anwendung übernimmt keine Verantwortung dafür, wie sie genutzt wird und welche Daten darüber übertragen werden. Der Quellcode der Anwendung darf von jedem für eigene Zwecke kopiert und verändert werden, sofern in der Rubrik „Über“ ein Link zum ursprünglichen Repository erhalten bleibt. Die vollständige Lizenz ist in Git verfügbar.',
+        'TODO',
       repoLink: 'Git-Repository',
     },
     theme: {
@@ -797,10 +985,6 @@ export const messages = {
       joinOngoingBody: 'Du versuchst, einem laufenden Anruf beizutreten.',
       callAria: 'Anrufen',
       sendAria: 'Senden',
-      toast: {
-        chatSendFailedTitle: 'Сообщение не отправлено',
-        chatSendFailedBody: 'Не удалось связаться с сервером. Проверьте подключение и попробуйте снова.',
-      },
     },
     call: {
       notInCall: 'Nicht im Anruf',
@@ -810,7 +994,6 @@ export const messages = {
       unknown: 'Unbekannt',
       waitingToJoinNamed: 'Warten auf Beitritt zu {name}…',
       waitingToJoin: 'Warten auf Beitritt…',
-      requestingToJoinNamed: 'Beitritt zu {name} anfragen…',
       requestingToJoin: 'Beitritt anfragen…',
       calling: 'Rufe an…',
       callingNamed: 'Rufe {name} an…',
@@ -869,6 +1052,7 @@ export const messages = {
   ru: {
     common: {
       about: 'О приложении',
+      manageKeys: 'Управление ключами',
       back: 'Назад',
       chat: 'Чат',
       close: 'Закрыть',
@@ -896,6 +1080,68 @@ export const messages = {
     },
 
     signed: {
+      keys: {
+        title: 'Управление ключами',
+        description:
+          'Сделайте резервную копию ваших зашифрованных ключей, чтобы перенести аккаунт на другое устройство или сохранить безопасную копию.\n\nЭтот файл содержит зашифрованный ключевой материал, сохранённый в вашем браузере. Не делитесь им.',
+        countOnDevice: 'Ключи на этом устройстве: {count}',
+        download: 'Скачать',
+        downloadUser: 'Скачать ключ {username}',
+        downloadAll: 'Скачать все ключи',
+        downloadSpecific: 'Скачать конкретный ключ',
+        addFromFile: 'Добавить ключ(и) из файла',
+        removeAll: 'Удалить все локальные ключи',
+        downloadAllOk: 'Скачано ключей: {count}.',
+        downloadOneOk: 'Ключ скачан.',
+        importBadFormat:
+          'Неверный формат файла. Ожидается JSON-запись ключа или массив JSON-записей ключей.',
+        importResult:
+          'Прочитано: {read}. Добавлено: {added}. Пропущено (уже есть): {ignored}. Неверных: {invalid}.',
+        specificHint:
+          'Введите имя пользователя и пароль, чтобы найти подходящую зашифрованную запись. Это не выполняет вход.',
+        specificMissing: 'Требуются имя пользователя и пароль.',
+        specificNotFound: 'Подходящий ключ не найден (имя пользователя/пароль не совпадают).',
+        removeConfirm:
+          'Это навсегда и безвозвратно удалит ВСЕ локальные ключи для {count} аккаунта(ов), созданных/импортированных на этом устройстве.\n\nВы будете разлогинены.',
+        removeAllConfirm: 'Удалить все ключи',
+        removeAllOk: 'Все локальные ключи удалены.',
+      },
+      subtitle: 'Ваш личный мессенджер. Полностью зашифрован, без логов и следов.',
+      username: 'Имя пользователя',
+      usernamePlaceholder: 'напр. alice',
+      password: 'Пароль',
+      passwordPlaceholder: 'Минимум 8 символов',
+      expirationDays: 'Срок действия аккаунта (дни)',
+      register: 'Регистрация',
+      login: 'Вход',
+      youSignedInAs: 'Вы вошли как',
+      hiddenMode: 'Скрытый режим',
+      hiddenModeHelp: 'Если включено, другие не увидят ваш статус онлайн/занят.',
+      introvertMode: 'Режим интроверта',
+      introvertModeHelp:
+        'Если включено, другие не смогут создавать с вами новые чаты или добавлять вас в группы. Звонки разрешены только пользователям, которые уже имеют с вами личный чат.',
+      errInvalidCredentials: 'Неверное имя пользователя или пароль.',
+      errUnauthorized: 'Сессия истекла. Войдите снова.',
+      errNoLocalKey:
+        'Локальный ключ для этого пользователя на этом устройстве не найден. Используйте правильный пароль или зарегистрируйтесь снова, чтобы создать новые ключи.',
+      errPasswordTooLong: 'Пароль должен быть не длиннее {max} символов.',
+      help: {
+        usernameAria: 'Справка: имя пользователя',
+        passwordAria: 'Справка: пароль',
+        expirationDaysAria: 'Справка: срок действия аккаунта',
+        username:
+          'Ограничения: 3–64 символа.\nПримечание по безопасности: (заполнить позже)\nПодсказка: регистр в имени пользователя важен при входе.',
+        password:
+          'Ограничения: минимум 8 символов.\nПримечание по безопасности: (заполнить позже)\nПодсказка: пароль используется локально для расшифровки вашего приватного ключа.',
+        expirationDays:
+          'Ограничения: 7–365 дней.\nПримечание по безопасности: (заполнить позже)\nПодсказка: активность продлевает срок действия (с приватным jitter).',
+      },
+      entropy: {
+        title: 'Энтропия',
+        instructions: 'Нажмите 10 раз в случайных местах внутри поля ниже.',
+        hits: 'Нажатия: {hits}/{total}',
+      },
+      genericError: 'Что-то пошло не так.',
       chats: 'Чаты',
       chat: 'Чат',
       add: 'Добавить',
@@ -938,7 +1184,7 @@ export const messages = {
     about: {
       title: 'О приложении',
       description:
-        'Last — это анонимный бесплатный эфемерный веб-мессенджер с открытым исходным кодом. Это означает, что он не требует установки и регистрации, не привязан ни к номеру, ни к почте или имени, не сохраняет логи, переписки, логины, не создаёт сессии, куки и не собирает никакую статистику. Любой человек или компания могут создать свою изолированную копию этого приложения для персональных нужд коммуникации.<br>Голосовое общение зашифровано, а переписка осуществляется через SSL-зашифрованный канал. (В следующей версии также будет обёрнуто в дополнительный слой шифрования клиент-клиент для предотвращения доступа посредством атаки на сервер.)<br>Название "Last" от "last resort communication".<br>Что на данный момент реализовано:<br>1. Общий чат и приватные чаты.<br>2. Голосовая связь<br>3. Групповая голосовая связь<br>4. Мультиязычность.<br>Какие минусы такого подхода?<br>1. Отсутствие истории переписки. Она не хранится даже на вашем устройстве. Закрыли вкладку и зашли заново — всё исчезло.<br>2. Вы не можете написать или позвонить тому, кого нет в сети. Ваши сообщения получают только те, кто сейчас в сети. Если вы кому-то написали, потом вы и ваш собеседник вышли, то этих сообщений больше не существует. Таким образом, связь имеет сессионный характер — договорились с кем-то заранее, пообщались и вышли. Можно и не выходить и просто всегда быть в сети.<br>3. Вы можете не знать, с кем именно вы общаетесь. Всё, что требуется для входа — это произвольный никнейм, поэтому ответственность в понимании личности собеседника лежит полностью на пользователе.<br>4. (В текущей версии) Общение в узком кругу. У вас нет списка личных контактов. Вы видите всех, кто сейчас в сети, поэтому один инстанс* приложения не рассчитан на массовое использование миллионами и даже тысячами пользователей. Также есть ограничения на то, сколько аудиоконференций может быть одновременно поддержано сервером.<br>*Инстанс приложения — это его копия, которая работает на любом частном сервере и доступна по одному или нескольким веб-адресам или IP. Таким образом, группу пользователей объединяет только знание этого адреса. Количество инстансов не ограничено.<br>Разработчик приложения не несёт ответственности за то, каким образом оно используется и какие данные передаются через него. Код приложения может быть скопирован и изменён кем угодно для своих нужд при условии сохранения ссылки на исходный репозиторий в разделе "О приложении". Полная версия лицензии на использование есть в Git.',
+        'TODO',
       repoLink: 'Исходный код',
     },
     theme: {
@@ -1055,13 +1301,38 @@ export const messages = {
   },
 } as const
 
-export const i18n = createI18n({
+type AnyRecord = any
+
+function isPlainObject(v: unknown): v is AnyRecord {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+}
+
+function mergeDeep(base: AnyRecord, override: AnyRecord): AnyRecord {
+  const out: AnyRecord = { ...(base ?? {}) }
+  for (const [k, v] of Object.entries(override ?? {})) {
+    if (isPlainObject(v) && isPlainObject(base?.[k])) out[k] = mergeDeep(base[k], v)
+    else out[k] = v
+  }
+  return out
+}
+
+// Ensure every locale has the full key spectrum.
+// Any missing key falls back to English (without needing to duplicate text).
+export const messages: Record<SupportedLocale, any> = {
+  en: baseMessages.en,
+  nl: mergeDeep(baseMessages.en, baseMessages.nl),
+  fr: mergeDeep(baseMessages.en, baseMessages.fr),
+  de: mergeDeep(baseMessages.en, baseMessages.de),
+  ru: mergeDeep(baseMessages.en, baseMessages.ru),
+}
+
+export const i18n: any = createI18n({
   legacy: false,
   locale: detectInitialLocale(),
   fallbackLocale: 'en',
   warnHtmlMessage: false,
   messages,
-})
+} as any)
 
 export function getLocale(): SupportedLocale {
   return normalizeLocale(String(i18n.global.locale.value)) ?? 'en'
