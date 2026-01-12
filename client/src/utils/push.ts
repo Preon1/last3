@@ -5,16 +5,16 @@ function urlBase64ToUint8Array(base64String: string) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)))
 }
 
-export async function tryEnableWebPushForSocket(send: (obj: unknown) => void) {
+export async function tryGetWebPushSubscriptionJson() {
   try {
-    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
-    if (!('serviceWorker' in navigator)) return false
-    if (!('PushManager' in window)) return false
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return null
+    if (!('serviceWorker' in navigator)) return null
+    if (!('PushManager' in window)) return null
 
     const res = await fetch('/api/push/public-key', { cache: 'no-store' })
-    if (!res.ok) return false
+    if (!res.ok) return null
     const data = (await res.json()) as { enabled?: boolean; publicKey?: string }
-    if (!data?.enabled || !data?.publicKey) return false
+    if (!data?.enabled || !data?.publicKey) return null
 
     // Only register SW if push is enabled (keeps it quiet when VAPID isn't set).
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -27,9 +27,8 @@ export async function tryEnableWebPushForSocket(send: (obj: unknown) => void) {
         applicationServerKey: urlBase64ToUint8Array(data.publicKey),
       }))
 
-    send({ type: 'pushSubscribe', subscription })
-    return true
+    return subscription.toJSON()
   } catch {
-    return false
+    return null
   }
 }

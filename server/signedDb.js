@@ -12,6 +12,8 @@ export async function signedCleanupExpiredUsers(now = new Date()) {
       [asDate],
     )
 
+    const deletedUserIds = deletedUsers.rows.map((r) => String(r.id))
+
     // Clean up chats that can no longer function:
     // - personal chats with <2 members
     // - group chats with 0 members
@@ -31,6 +33,7 @@ export async function signedCleanupExpiredUsers(now = new Date()) {
 
     return {
       deletedUsers: deletedUsers.rowCount || 0,
+      deletedUserIds,
       deletedChats: (deletedPersonalChats.rowCount || 0) + (deletedEmptyGroupChats.rowCount || 0),
     }
   })

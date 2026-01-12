@@ -6,7 +6,19 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+let lastAppState = null;
+
 self.addEventListener('push', (event) => {
+  // Best-effort suppression: if the app told us it's foregrounded (any view),
+  // skip system notifications (user is already looking at the app).
+  try {
+    if (lastAppState && lastAppState.foreground === true) {
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
   let data = {};
   try {
     data = event.data ? event.data.json() : {};
@@ -56,4 +68,57 @@ self.addEventListener('notificationclick', (event) => {
       return undefined;
     })(),
   );
+});
+
+self.addEventListener('message', (event) => {
+  const data = event?.data || {};
+  if (!data || typeof data.type !== 'string') return;
+
+  if (data.type === 'appState') {
+    const foreground = Boolean(data.foreground);
+    const view = typeof data.view === 'string' ? data.view : '';
+    lastAppState = { foreground, view };
+    return;
+  }
+
+  if (data.type === 'closeNotificationByTag') {
+    const tag = typeof data.tag === 'string' ? data.tag : '';
+    if (!tag) return;
+
+    event.waitUntil(
+      (async () => {
+        try {
+          const list = await self.registration.getNotifications({ tag });
+          for (const n of list) {
+            try {
+              n.close();
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })(),
+    );
+  }
+
+  if (data.type === 'closeAllNotifications') {
+    event.waitUntil(
+      (async () => {
+        try {
+          const list = await self.registration.getNotifications({});
+          for (const n of list) {
+            try {
+              n.close();
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })(),
+    );
+  }
 });

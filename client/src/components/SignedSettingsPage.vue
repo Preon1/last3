@@ -12,7 +12,7 @@ const signed = useSignedStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username, hiddenMode, introvertMode } = storeToRefs(signed)
+const { username, hiddenMode, introvertMode, notificationsEnabled } = storeToRefs(signed)
 
 const deleteAccountOpen = ref(false)
 const deleteAccountBusy = ref(false)
@@ -93,6 +93,49 @@ async function onToggleIntrovertMode(ev: Event) {
     // ignore
   }
 }
+
+async function onToggleNotifications(ev: Event) {
+  const target = ev.target as HTMLInputElement | null
+  if (!target) return
+  const next = Boolean(target.checked)
+
+  if (!next) {
+    signed.setNotificationsEnabledLocal(false)
+    await signed.disablePushSubscription()
+    return
+  }
+
+  // Must be user-initiated to satisfy browser permission rules.
+  try {
+    if (typeof Notification === 'undefined') {
+      signed.setNotificationsEnabledLocal(false)
+      return
+    }
+
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') {
+      signed.setNotificationsEnabledLocal(false)
+      return
+    }
+
+    signed.setNotificationsEnabledLocal(true)
+    await signed.trySyncPushSubscription()
+  } catch {
+    signed.setNotificationsEnabledLocal(false)
+  }
+}
+
+function notificationStateLabel() {
+  try {
+    if (typeof Notification === 'undefined') return String(t('notifications.state.default'))
+    const p = Notification.permission
+    if (p === 'granted') return String(t('notifications.state.granted'))
+    if (p === 'denied') return String(t('notifications.state.denied'))
+    return String(t('notifications.state.default'))
+  } catch {
+    return String(t('notifications.state.default'))
+  }
+}
 </script>
 
 <template>
@@ -105,6 +148,19 @@ async function onToggleIntrovertMode(ev: Event) {
       </div>
 
       <div class="settings-actions">
+        <label class="secondary">
+          <input
+            type="checkbox"
+            :checked="Boolean(notificationsEnabled)"
+            @change="onToggleNotifications"
+            :aria-label="String(t('notifications.settingsLabel'))"
+          />
+          <span>
+            <div style="font-weight: 600;">{{ t('notifications.settingsLabel') }} {{ notificationStateLabel() }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('notifications.settingsHint') }}</div>
+          </span>
+        </label>
+
         <label class="secondary">
           <input
             type="checkbox"

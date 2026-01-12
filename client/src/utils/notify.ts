@@ -1,3 +1,5 @@
+import { getNotificationsEnabled } from './notificationPrefs'
+
 export function notificationsGranted() {
   try {
     return typeof Notification !== 'undefined' && Notification.permission === 'granted'
@@ -8,6 +10,7 @@ export function notificationsGranted() {
 
 export function notify(title: string, body: string, opts?: { tag?: string }) {
   try {
+    if (!getNotificationsEnabled()) return
     if (!notificationsGranted()) return
 
     const tag = opts?.tag ?? 'lrcom'
