@@ -4,8 +4,10 @@ import { storeToRefs } from 'pinia'
 import { useSignedStore } from '../stores/signed'
 import { useI18n } from 'vue-i18n'
 import { useToastStore } from '../stores/toast'
+import { useUiStore } from '../stores/ui'
 
 const signed = useSignedStore()
+const ui = useUiStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
@@ -76,6 +78,11 @@ function shorten(s: string, max: number): string {
   const v = String(s ?? '')
   if (v.length <= max) return v
   return v.slice(0, max) + '..'
+}
+
+function openShareLink() {
+  addMenuOpen.value = false
+  ui.openShareLink()
 }
 
 function chatPreview(c: { id: string; type: 'personal' | 'group' }): string {
@@ -269,6 +276,9 @@ async function onOpen(chatId: string) {
                 </button>
                 <button class="secondary page-other-item" type="button" role="menuitem" @click="openCreateChat">
                   {{ t('signed.createChat') }}
+                </button>
+                <button class="secondary page-other-item" type="button" role="menuitem" @click="openShareLink">
+                  {{ t('common.shareLink') }}
                 </button>
               </div>
             </div>

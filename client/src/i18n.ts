@@ -40,6 +40,7 @@ const baseMessages = {
     common: {
       about: 'About',
       manageKeys: 'Manage keys',
+      shareLink: 'Share link',
       back: 'Back',
       chat: 'Chat',
       close: 'Close',
@@ -78,6 +79,10 @@ const baseMessages = {
       yourName: 'Your name',
       namePlaceholder: 'e.g. Alex',
       join: 'Join',
+    },
+    shareLink: {
+      hint: 'Share this link to let someone create a private chat with you after they sign in.',
+      linkLabel: 'Link',
     },
     signed: {
       keys: {
@@ -301,6 +306,7 @@ const baseMessages = {
     common: {
       about: 'Over',
       manageKeys: 'Sleutels beheren',
+      shareLink: 'Link delen',
       back: 'Terug',
       chat: 'Chat',
       close: 'Sluiten',
@@ -329,6 +335,10 @@ const baseMessages = {
       yourName: 'Jouw naam',
       namePlaceholder: 'bijv. Alex',
       join: 'Meedoen',
+    },
+    shareLink: {
+      hint: 'Deel deze link zodat iemand na het inloggen een privéchat met je kan maken.',
+      linkLabel: 'Link',
     },
 
     signed: {
@@ -554,6 +564,7 @@ const baseMessages = {
     common: {
       about: 'À propos',
       manageKeys: 'Gérer les clés',
+      shareLink: 'Partager le lien',
       back: 'Retour',
       chat: 'Chat',
       close: 'Fermer',
@@ -578,6 +589,10 @@ const baseMessages = {
       yourName: 'Votre nom',
       namePlaceholder: 'ex. Alex',
       join: 'Rejoindre',
+    },
+    shareLink: {
+      hint: 'Partagez ce lien pour permettre à quelqu’un de créer une discussion privée avec vous après connexion.',
+      linkLabel: 'Lien',
     },
 
     signed: {
@@ -804,6 +819,7 @@ const baseMessages = {
     common: {
       about: 'Über',
       manageKeys: 'Schlüssel verwalten',
+      shareLink: 'Link teilen',
       back: 'Zurück',
       chat: 'Chat',
       close: 'Schließen',
@@ -829,6 +845,10 @@ const baseMessages = {
       yourName: 'Dein Name',
       namePlaceholder: 'z. B. Alex',
       join: 'Beitreten',
+    },
+    shareLink: {
+      hint: 'Teile diesen Link, damit jemand nach dem Anmelden einen privaten Chat mit dir erstellen kann.',
+      linkLabel: 'Link',
     },
     signed: {
       keys: {
@@ -1053,6 +1073,7 @@ const baseMessages = {
     common: {
       about: 'О приложении',
       manageKeys: 'Управление ключами',
+      shareLink: 'Поделиться ссылкой',
       back: 'Назад',
       chat: 'Чат',
       close: 'Закрыть',
@@ -1077,6 +1098,10 @@ const baseMessages = {
       yourName: 'Ваше имя',
       namePlaceholder: 'напр. Алекс',
       join: 'Присоединиться',
+    },
+    shareLink: {
+      hint: 'Поделитесь этой ссылкой, чтобы после входа пользователь смог создать с вами личный чат.',
+      linkLabel: 'Ссылка',
     },
 
     signed: {

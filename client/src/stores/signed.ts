@@ -87,6 +87,7 @@ const SS_TOKEN = 'lrcom-signed-token'
 const SS_USER = 'lrcom-signed-user'
 const SS_EXPIRES_AT = 'lrcom-signed-expires-at'
 const SS_LAST_USERNAME = 'lrcom-signed-last-username'
+const SS_ADD_USERNAME = 'lrcom-add-username'
 
 const MAX_PASSWORD_LEN = 512
 
@@ -138,6 +139,8 @@ export const useSignedStore = defineStore('signed', () => {
   const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
 
   const lastUsername = ref<string>('')
+
+  const pendingAddUsername = ref<string>('')
 
   const ws = ref<WebSocket | null>(null)
   const wsShouldReconnect = ref(false)
@@ -603,6 +606,68 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  function loadPendingAddUsername(): string {
+    try {
+      return String(sessionStorage.getItem(SS_ADD_USERNAME) ?? '').trim()
+    } catch {
+      return ''
+    }
+  }
+
+  function storePendingAddUsername(u: string) {
+    const v = String(u ?? '').trim()
+    pendingAddUsername.value = v
+    try {
+      if (v) sessionStorage.setItem(SS_ADD_USERNAME, v)
+      else sessionStorage.removeItem(SS_ADD_USERNAME)
+    } catch {
+      // ignore
+    }
+  }
+
+  function capturePendingAddFromUrl() {
+    try {
+      const qs = new URLSearchParams(location.search)
+      const u = String(qs.get('add') ?? '').trim()
+      if (!u) return
+      // Basic sanity bounds (matches server username max).
+      if (u.length > 64) return
+      storePendingAddUsername(u)
+    } catch {
+      // ignore
+    }
+  }
+
+  function cleanAddParamFromUrl() {
+    try {
+      const qs = new URLSearchParams(location.search)
+      if (!qs.has('add')) return
+      qs.delete('add')
+      const next = qs.toString()
+      const url = `${location.pathname}${next ? `?${next}` : ''}${location.hash || ''}`
+      history.replaceState(null, '', url)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function maybeAddChatFromUrl() {
+    const target = String(pendingAddUsername.value ?? '').trim()
+    if (!target) return
+    if (!token.value) return
+
+    try {
+      // Avoid attempting to add yourself.
+      if (username.value && target.toLowerCase() === String(username.value).toLowerCase()) return
+      await createPersonalChat(target)
+    } catch {
+      // ignore (not found / introvert / etc)
+    } finally {
+      storePendingAddUsername('')
+      cleanAddParamFromUrl()
+    }
+  }
+
   async function unlock(params: { password: string }) {
     const u = (username.value ?? '').trim()
     if (!u) throw new Error('Username required')
@@ -623,6 +688,7 @@ export const useSignedStore = defineStore('signed', () => {
     if (token.value) {
       await refreshChats()
       await connectWs()
+      void maybeAddChatFromUrl()
       void maybeOpenChatFromUrl()
       scheduleTokenRefresh()
       void trySyncPushSubscription()
@@ -1534,6 +1600,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     await refreshChats()
     await connectWs()
+    void maybeAddChatFromUrl()
     void maybeOpenChatFromUrl()
     scheduleTokenRefresh()
     void trySyncPushSubscription()
@@ -1584,6 +1651,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     await refreshChats()
     await connectWs()
+    void maybeAddChatFromUrl()
     void maybeOpenChatFromUrl()
     scheduleTokenRefresh()
     void trySyncPushSubscription()
@@ -1618,6 +1686,7 @@ export const useSignedStore = defineStore('signed', () => {
         // ignore
       }
       lastUsername.value = ''
+      pendingAddUsername.value = ''
     } else {
       clearSession()
     }
@@ -1650,6 +1719,10 @@ export const useSignedStore = defineStore('signed', () => {
     expiresAtMs.value = restored.e
     publicKeyJwk.value = null
   }
+
+  // Capture invite links on initial load, before login/register.
+  pendingAddUsername.value = loadPendingAddUsername()
+  if (!pendingAddUsername.value) capturePendingAddFromUrl()
 
   async function updateHiddenMode(next: boolean) {
     if (!token.value) throw new Error('Not logged in')

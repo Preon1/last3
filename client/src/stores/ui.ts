@@ -5,6 +5,7 @@ import { i18n } from '../i18n'
 export const useUiStore = defineStore('ui', () => {
   const aboutOpen = ref(false)
   const manageKeysOpen = ref(false)
+  const shareLinkOpen = ref(false)
 
   const themeMode = ref<'system' | 'dark' | 'light'>('system')
 
@@ -60,6 +61,14 @@ export const useUiStore = defineStore('ui', () => {
     manageKeysOpen.value = false
   }
 
+  function openShareLink() {
+    shareLinkOpen.value = true
+  }
+
+  function closeShareLink() {
+    shareLinkOpen.value = false
+  }
+
   // Initialize + persist theme.
   loadTheme()
   watch(
@@ -78,6 +87,7 @@ export const useUiStore = defineStore('ui', () => {
   return {
     aboutOpen,
     manageKeysOpen,
+    shareLinkOpen,
     themeMode,
     themeLabel,
     cycleTheme,
@@ -85,5 +95,7 @@ export const useUiStore = defineStore('ui', () => {
     closeAbout,
     openManageKeys,
     closeManageKeys,
+    openShareLink,
+    closeShareLink,
   }
 })
