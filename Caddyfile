@@ -13,6 +13,31 @@
 
 
   route {
+    # Cache static files copied from client/public/ (these end up at the site root).
+    # Note: service worker updates can get sticky if cached; keep sw.js no-cache.
+    @service_worker {
+      path /sw.js
+    }
+    header @service_worker Cache-Control "no-cache"
+
+    @public_static {
+      path \
+        /apple-touch-icon.png \
+        /calling.wav \
+        /call_interrupted.wav \
+        /favicon-96x96.png \
+        /favicon.ico \
+        /favicon.svg \
+        /icons.svg \
+        /incoming_call.wav \
+        /incoming_message.wav \
+        /lrcom_logo.png \
+        /site.webmanifest \
+        /web-app-manifest-192x192.png \
+        /web-app-manifest-512x512.png
+    }
+    header @public_static Cache-Control "public, max-age=3600"
+
     # Per-endpoint rate limiting (requires Caddy built with github.com/mholt/caddy-ratelimit)
     # Keyed by client IP.
     rate_limit {
