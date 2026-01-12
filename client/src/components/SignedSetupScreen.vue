@@ -217,7 +217,7 @@ function toggleMode() {
         </div>
 
         <div class="setup-toggle">
-          <button class="secondary" type="button" @click="toggleMode">
+          <button class="secondary" tabindex="1" type="button" @click="toggleMode">
             {{ isRegister ? t('signed.login') : t('signed.register') }}
           </button>
         </div>
@@ -232,11 +232,13 @@ function toggleMode() {
               type="button"
               :aria-label="String(t('signed.help.usernameAria'))"
               @click="toggleHelp('username')"
+              tabindex="7"
             >
               ?
             </button>
           </div>
           <input
+            tabindex="2"
             id="signed-username"
             v-model="username"
             maxlength="64"
@@ -253,11 +255,13 @@ function toggleMode() {
               type="button"
               :aria-label="String(t('signed.help.passwordAria'))"
               @click="toggleHelp('password')"
+              tabindex="8"
             >
               ?
             </button>
           </div>
           <input
+            tabindex="3"
             id="signed-password"
             v-model="password"
             type="password"
@@ -271,6 +275,7 @@ function toggleMode() {
           <div class="field-label-row">
             <span class="field-label">{{ t('signed.expirationDays') }}</span>
             <button
+              tabindex="9"
               class="help"
               type="button"
               :aria-label="String(t('signed.help.expirationDaysAria'))"
@@ -279,12 +284,12 @@ function toggleMode() {
               ?
             </button>
           </div>
-          <input id="signed-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
+          <input tabindex="4" id="signed-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
         </label>
 
         <div class="setup-actions">
-          <button v-if="!isRegister" class="join" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
-          <button v-else class="join" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
+          <button v-if="!isRegister" class="join" tabindex="5" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
+          <button v-else class="join" tabindex="6" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
         </div>
 
         <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
