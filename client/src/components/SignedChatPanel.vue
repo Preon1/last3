@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useSignedStore } from '../stores/signed'
@@ -13,6 +13,7 @@ const { activeChatId, messagesByChatId, chats, userId, membersByChatId } = store
 
 const chatInput = ref('')
 const chatMessagesEl = ref<HTMLDivElement | null>(null)
+const chatInputEl = ref<HTMLTextAreaElement | null>(null)
 
 const messageEls = new Map<string, Element>()
 let observer: IntersectionObserver | null = null
@@ -298,6 +299,7 @@ async function onSend() {
     await signed.sendMessage(cid, t0, { replyToId: rid })
     chatInput.value = ''
     cancelReply()
+    queueMicrotask(() => autoGrowChatInput(true))
   } catch (e: any) {
     showSendError(e)
   }
@@ -311,6 +313,43 @@ function fmtIso(iso: string) {
   } catch {
     return ''
   }
+}
+
+// 53px - basic padding bottom of messages container
+const messagesContainerPB = ref(53)
+
+watchEffect(() => {
+  const messagesContainer = chatMessagesEl.value
+  if (messagesContainer) {
+    messagesContainerPB.value = Number.parseFloat(window.getComputedStyle(messagesContainer).paddingBottom)
+    || messagesContainerPB.value
+  }
+})
+
+function autoGrowChatInput(reset = false) {
+  const el = chatInputEl.value
+  if (!el) return
+
+  const cs = window.getComputedStyle(el)
+  const lineHeight = Number.parseFloat(cs.lineHeight) || 20
+  const paddingTop = Number.parseFloat(cs.paddingTop) || 0
+  const paddingBottom = Number.parseFloat(cs.paddingBottom) || 0
+
+  const basicHeight = Math.ceil(lineHeight + paddingTop + paddingBottom + 2)
+  const maxHeight = lineHeight * 8 + paddingTop + paddingBottom + 2
+  let target = Math.min(el.scrollHeight + 2, maxHeight)
+
+  if (reset || el.value == '') {
+    target = basicHeight
+  }
+
+  el.style.height = `${target}px`
+  el.style.overflowY = el.scrollHeight + 2 > maxHeight ? 'auto' : 'hidden'
+
+  // increase padding bottom of messages block to correspond with growth of textarea
+  const messagesContainer = chatMessagesEl.value
+  if (!messagesContainer) return
+  messagesContainer.style.paddingBottom = `${messagesContainerPB.value + target - basicHeight}px`
 }
 
 function resolveReplyPreview(replyToId: string) {
@@ -493,12 +532,14 @@ function onMessagesScroll() {
         <button class="secondary" type="button" @click="cancelReply">{{ t('common.cancel') }}</button>
       </div>
       <textarea
+        ref="chatInputEl"
         v-model="chatInput"
         :disabled="!activeChatId"
         rows="1"
         autocomplete="off"
         :placeholder="String(t('chat.typeMessage'))"
         @keydown="onChatKeydown"
+        @input="autoGrowChatInput()"
       ></textarea>
       <button class="icon-only chat-send" type="button" :disabled="!canSend" :aria-label="String(t('chat.sendAria'))" @click="onSend">
         <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#send"></use></svg>
