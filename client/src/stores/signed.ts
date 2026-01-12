@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { notify } from '../utils/notify'
+import { tryGetWebPushSubscriptionJson } from '../utils/push'
+import { closeNotificationsByTag, getNotificationsEnabled, setNotificationsEnabled } from '../utils/notificationPrefs'
 import {
   decryptPrivateKeyJwk,
   decryptSignedMessage,
@@ -76,6 +79,7 @@ const LS_KEYS = 'lrcom-signed-keys'
 const LS_LEGACY_KEY = 'lrcom-signed-key'
 const SS_TOKEN = 'lrcom-signed-token'
 const SS_USER = 'lrcom-signed-user'
+const SS_EXPIRES_AT = 'lrcom-signed-expires-at'
 const SS_LAST_USERNAME = 'lrcom-signed-last-username'
 
 const MAX_PASSWORD_LEN = 512
@@ -117,12 +121,15 @@ type StoredUser = {
 
 export const useSignedStore = defineStore('signed', () => {
   const token = ref<string | null>(null)
+  const expiresAtMs = ref<number | null>(null)
   const userId = ref<string | null>(null)
   const username = ref<string | null>(null)
   const hiddenMode = ref<boolean>(false)
   const introvertMode = ref<boolean>(false)
   const publicKeyJwk = ref<string | null>(null)
   const privateKey = ref<CryptoKey | null>(null)
+
+  const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
 
   const lastUsername = ref<string>('')
 
@@ -159,6 +166,8 @@ export const useSignedStore = defineStore('signed', () => {
 
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
 
+  let tokenRefreshTimer: number | null = null
+
   function clearPresenceTimer() {
     if (presenceTimer != null) {
       try {
@@ -167,6 +176,103 @@ export const useSignedStore = defineStore('signed', () => {
         // ignore
       }
       presenceTimer = null
+    }
+  }
+
+  function clearTokenRefreshTimer() {
+    if (tokenRefreshTimer != null) {
+      try {
+        window.clearTimeout(tokenRefreshTimer)
+      } catch {
+        // ignore
+      }
+      tokenRefreshTimer = null
+    }
+  }
+
+  function scheduleTokenRefresh() {
+    clearTokenRefreshTimer()
+    if (!token.value) return
+    if (!expiresAtMs.value) return
+
+    const now = Date.now()
+    const refreshAt = expiresAtMs.value - 5 * 60 * 1000
+    const delay = Math.max(30_000, refreshAt - now)
+
+    tokenRefreshTimer = window.setTimeout(() => {
+      void refreshSessionToken()
+    }, delay)
+  }
+
+  async function refreshSessionToken() {
+    if (!token.value) return
+
+    try {
+      const r = await fetch(`${apiBase()}/api/signed/session/refresh`, {
+        method: 'POST',
+        headers: { ...authHeaders() },
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        if (r.status === 401) logout()
+        return
+      }
+
+      const nextToken = typeof (j as any)?.token === 'string' ? String((j as any).token) : null
+      const nextExpires = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
+      if (!nextToken || !nextExpires) return
+
+      token.value = nextToken
+      expiresAtMs.value = nextExpires
+
+      if (token.value && userId.value && username.value) {
+        storeSession(
+          { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+          token.value,
+          expiresAtMs.value,
+        )
+      }
+
+      await connectWs()
+      scheduleTokenRefresh()
+    } catch {
+      // ignore
+    }
+  }
+
+  function setNotificationsEnabledLocal(next: boolean) {
+    notificationsEnabled.value = Boolean(next)
+    setNotificationsEnabled(Boolean(next))
+  }
+
+  async function trySyncPushSubscription() {
+    if (!token.value) return false
+    if (!notificationsEnabled.value) return false
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
+
+    const subscription = await tryGetWebPushSubscriptionJson()
+    if (!subscription) return false
+
+    try {
+      await fetchJson('/api/signed/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ subscription }),
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function disablePushSubscription() {
+    try {
+      if (!('serviceWorker' in navigator)) return
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      if (sub) await sub.unsubscribe()
+    } catch {
+      // ignore
     }
   }
 
@@ -404,23 +510,27 @@ export const useSignedStore = defineStore('signed', () => {
     return null
   }
 
-  function storeSession(u: StoredUser, t: string) {
+  function storeSession(u: StoredUser, t: string, expiresAt?: number | null) {
     try {
       sessionStorage.setItem(SS_TOKEN, t)
       sessionStorage.setItem(SS_USER, JSON.stringify(u))
+      if (typeof expiresAt === 'number' && Number.isFinite(expiresAt)) sessionStorage.setItem(SS_EXPIRES_AT, String(expiresAt))
+      else sessionStorage.removeItem(SS_EXPIRES_AT)
     } catch {
       // ignore
     }
   }
 
-  function loadSession(): { u: StoredUser; t: string } | null {
+  function loadSession(): { u: StoredUser; t: string; e: number | null } | null {
     try {
       const t = sessionStorage.getItem(SS_TOKEN)
       const rawU = sessionStorage.getItem(SS_USER)
       if (!t || !rawU) return null
       const u = JSON.parse(rawU) as StoredUser
       if (!u?.userId || !u?.username) return null
-      return { u, t }
+      const rawE = sessionStorage.getItem(SS_EXPIRES_AT)
+      const e = rawE != null && rawE.trim() ? Number(rawE) : null
+      return { u, t, e: Number.isFinite(e as number) ? (e as number) : null }
     } catch {
       return null
     }
@@ -430,6 +540,7 @@ export const useSignedStore = defineStore('signed', () => {
     try {
       sessionStorage.removeItem(SS_TOKEN)
       sessionStorage.removeItem(SS_USER)
+      sessionStorage.removeItem(SS_EXPIRES_AT)
     } catch {
       // ignore
     }
@@ -475,6 +586,33 @@ export const useSignedStore = defineStore('signed', () => {
     if (token.value) {
       await refreshChats()
       await connectWs()
+      void maybeOpenChatFromUrl()
+      scheduleTokenRefresh()
+      void trySyncPushSubscription()
+    }
+  }
+
+  async function maybeOpenChatFromUrl() {
+    try {
+      const qs = new URLSearchParams(location.search)
+      const chatId = (qs.get('chatId') ?? '').trim()
+      if (!chatId) return
+
+      // Remove the param immediately to avoid re-open loops on reload.
+      try {
+        qs.delete('chatId')
+        const next = qs.toString()
+        const url = `${location.pathname}${next ? `?${next}` : ''}${location.hash || ''}`
+        history.replaceState(null, '', url)
+      } catch {
+        // ignore
+      }
+
+      const exists = chats.value.some((c) => String(c.id) === String(chatId))
+      if (!exists) return
+      await openChat(chatId)
+    } catch {
+      // ignore
     }
   }
 
@@ -545,6 +683,7 @@ export const useSignedStore = defineStore('signed', () => {
       wsReconnectAttempt.value = 0
       startPresencePolling()
       void syncAfterConnect()
+      void trySyncPushSubscription()
     })
 
     sock.addEventListener('close', () => {
@@ -610,6 +749,17 @@ export const useSignedStore = defineStore('signed', () => {
               unreadByChatId.value = {
                 ...unreadByChatId.value,
                 [chatId]: (unreadByChatId.value[chatId] ?? 0) + 1,
+              }
+
+              try {
+                const shouldNotify = typeof document !== 'undefined' && document.visibilityState !== 'visible'
+                if (shouldNotify) {
+                  notify('Last', senderUsername ? `New message from ${senderUsername}` : 'New message', {
+                    tag: `lrcom-chat-${String(chatId)}`,
+                  })
+                }
+              } catch {
+                // ignore
               }
             }
 
@@ -876,6 +1026,9 @@ export const useSignedStore = defineStore('signed', () => {
     activeChatId.value = chatId
     view.value = 'chat'
 
+    // Best-effort: clear any notification for this chat.
+    void closeNotificationsByTag(`lrcom-chat-${String(chatId)}`)
+
     await loadMessages(chatId)
 
     // Best-effort: prefetch group members so we can encrypt to all.
@@ -899,6 +1052,9 @@ export const useSignedStore = defineStore('signed', () => {
       })
       const next = typeof j?.unreadCount === 'number' ? j.unreadCount : null
       if (next != null) unreadByChatId.value = { ...unreadByChatId.value, [chatId]: Math.max(0, next) }
+
+      // Best-effort: if user read it, close any delivered push notification.
+      void closeNotificationsByTag(`lrcom-chat-${String(chatId)}`)
     } catch {
       // ignore
     }
@@ -1319,6 +1475,7 @@ export const useSignedStore = defineStore('signed', () => {
     })
 
     token.value = typeof j.token === 'string' ? j.token : null
+    expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
     hiddenMode.value = Boolean(j?.hiddenMode)
@@ -1334,11 +1491,15 @@ export const useSignedStore = defineStore('signed', () => {
       storeSession(
         { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
         token.value,
+        expiresAtMs.value,
       )
     }
 
     await refreshChats()
     await connectWs()
+    void maybeOpenChatFromUrl()
+    scheduleTokenRefresh()
+    void trySyncPushSubscription()
     view.value = 'contacts'
   }
 
@@ -1365,6 +1526,7 @@ export const useSignedStore = defineStore('signed', () => {
     })
 
     token.value = typeof j.token === 'string' ? j.token : null
+    expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
     username.value = typeof j.username === 'string' ? j.username : u
     hiddenMode.value = Boolean(j?.hiddenMode)
@@ -1376,6 +1538,7 @@ export const useSignedStore = defineStore('signed', () => {
       storeSession(
         { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
         token.value,
+        expiresAtMs.value,
       )
     }
 
@@ -1384,6 +1547,9 @@ export const useSignedStore = defineStore('signed', () => {
 
     await refreshChats()
     await connectWs()
+    void maybeOpenChatFromUrl()
+    scheduleTokenRefresh()
+    void trySyncPushSubscription()
     view.value = 'contacts'
   }
 
@@ -1392,7 +1558,9 @@ export const useSignedStore = defineStore('signed', () => {
     clearWsReconnectTimer()
     clearPresenceTimer()
     disconnectWs()
+    clearTokenRefreshTimer()
     token.value = null
+    expiresAtMs.value = null
     userId.value = null
     username.value = null
     hiddenMode.value = false
@@ -1442,6 +1610,7 @@ export const useSignedStore = defineStore('signed', () => {
     username.value = restored.u.username
     hiddenMode.value = Boolean(restored.u.hiddenMode)
     introvertMode.value = Boolean(restored.u.introvertMode)
+    expiresAtMs.value = restored.e
     publicKeyJwk.value = null
   }
 
@@ -1461,6 +1630,7 @@ export const useSignedStore = defineStore('signed', () => {
         storeSession(
           { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
           token.value,
+          expiresAtMs.value,
         )
       }
     } catch (e) {
@@ -1485,6 +1655,7 @@ export const useSignedStore = defineStore('signed', () => {
         storeSession(
           { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
           token.value,
+          expiresAtMs.value,
         )
       }
     } catch (e) {
@@ -1498,10 +1669,12 @@ export const useSignedStore = defineStore('signed', () => {
 
   return {
     token,
+    expiresAtMs,
     userId,
     username,
     hiddenMode,
     introvertMode,
+    notificationsEnabled,
     publicKeyJwk,
     privateKey,
     ws,
@@ -1530,6 +1703,9 @@ export const useSignedStore = defineStore('signed', () => {
     openChat,
     goHome,
     openSettings,
+    setNotificationsEnabledLocal,
+    trySyncPushSubscription,
+    disablePushSubscription,
     createPersonalChat,
     createGroupChat,
     addGroupMember,

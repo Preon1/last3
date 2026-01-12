@@ -3,6 +3,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import express from 'express';
+import webpush from 'web-push';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
@@ -65,12 +66,65 @@ const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY ?? '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? '';
 const PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 
+const VAPID_SUBJECT = (process.env.VAPID_SUBJECT ?? '').trim() || 'mailto:admin@localhost';
+
+if (PUSH_ENABLED) {
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  } catch {
+    // No logs (privacy policy).
+  }
+}
+
+// Push subscriptions are RAM-only: no DB traces. Server restart => re-subscribe.
+// userId -> Map(endpoint -> subscriptionJson)
+const pushSubsByUserId = new Map();
+
+function storePushSubscription(userId, sub) {
+  if (!userId) return false;
+  const endpoint = typeof sub?.endpoint === 'string' ? sub.endpoint : '';
+  const p256dh = typeof sub?.keys?.p256dh === 'string' ? sub.keys.p256dh : '';
+  const auth = typeof sub?.keys?.auth === 'string' ? sub.keys.auth : '';
+  if (!endpoint || !p256dh || !auth) return false;
+
+  let m = pushSubsByUserId.get(String(userId));
+  if (!m) {
+    m = new Map();
+    pushSubsByUserId.set(String(userId), m);
+  }
+
+  m.set(endpoint, { endpoint, keys: { p256dh, auth } });
+  return true;
+}
+
+async function sendPushToUserId(userId, payload) {
+  if (!PUSH_ENABLED) return;
+  const m = pushSubsByUserId.get(String(userId));
+  if (!m || !m.size) return;
+
+  const body = JSON.stringify(payload ?? {});
+  const stale = [];
+
+  for (const [endpoint, sub] of m.entries()) {
+    try {
+      await webpush.sendNotification(sub, body, { TTL: 60 * 60 });
+    } catch (e) {
+      const code = e?.statusCode;
+      if (code === 404 || code === 410) stale.push(endpoint);
+    }
+  }
+
+  if (stale.length) {
+    for (const ep of stale) m.delete(ep);
+    if (!m.size) pushSubsByUserId.delete(String(userId));
+  }
+}
+
 // Visual branding
 const APP_NAME = (process.env.APP_NAME ?? 'Last').trim() || 'Last';
 
 
-// Note: Web Push delivery is currently not wired up in signed-only mode.
-// We keep the public-key endpoint for potential future use.
+// Note: Push subscriptions are not persisted (RAM-only by design).
 
 const app = express();
 
@@ -136,6 +190,27 @@ app.get('/api/push/public-key', (req, res) => {
   res.json({ enabled: PUSH_ENABLED, publicKey: PUSH_ENABLED ? VAPID_PUBLIC_KEY : null });
 });
 
+// Signed session refresh: rotate bearer token without re-login.
+app.post('/api/signed/session/refresh', requireSignedAuth, (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const { token, expiresAt } = issueToken(userId);
+    res.json({ success: true, token, expiresAt });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Signed push subscription registration (RAM-only).
+app.post('/api/signed/push/subscribe', requireSignedAuth, (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'Push disabled' });
+  const userId = String(req._signedUserId);
+  const sub = req.body?.subscription;
+  const ok = storePushSubscription(userId, sub);
+  if (!ok) return res.status(400).json({ error: 'Invalid subscription' });
+  res.json({ success: true });
+});
+
 app.get('/api/config', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ appName: APP_NAME });
@@ -157,11 +232,12 @@ app.post('/api/auth/register', async (req, res) => {
       expirationDays: parseInt(expirationDays, 10),
     });
 
-    const { token } = issueToken(String(user.id));
+    const { token, expiresAt } = issueToken(String(user.id));
 
     res.json({
       success: true,
       token,
+      expiresAt,
       userId: user.id,
       username: user.username,
       hiddenMode: Boolean(user.hidden_mode),
@@ -182,11 +258,12 @@ app.post('/api/auth/login', async (req, res) => {
 
     const result = await loginUser({ username, password, publicKey });
 
-    const { token } = issueToken(String(result.userId));
+    const { token, expiresAt } = issueToken(String(result.userId));
 
     res.json({
       success: true,
       token,
+      expiresAt,
       ...result,
     });
   } catch (error) {
@@ -538,6 +615,21 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
     }
 
+    // Best-effort Web Push notify for offline recipients (RAM-only subs).
+    // Do not include message plaintext.
+    for (const uid of memberIds) {
+      if (String(uid) === String(senderId)) continue;
+      const ws = signedSockets.get(uid);
+      if (ws && ws.readyState === 1) continue;
+      void sendPushToUserId(uid, {
+        title: 'Last',
+        body: senderUsername ? `New message from ${senderUsername}` : 'New message',
+        tag: `lrcom-chat-${String(chatId)}`,
+        url: `/?chatId=${encodeURIComponent(String(chatId))}`,
+        data: { chatId: String(chatId), messageId: String(messageId) },
+      });
+    }
+
     res.json({ success: true, messageId });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -703,6 +795,13 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
     }
 
     await signedDeleteAccount(userId);
+
+    // Clear RAM-only state.
+    try {
+      pushSubsByUserId.delete(String(userId));
+    } catch {
+      // ignore
+    }
 
     // Revoke token after deletion.
     try {
@@ -1384,7 +1483,15 @@ async function start() {
 
     const run = async () => {
       try {
-        await signedCleanupExpiredUsers();
+        const r = await signedCleanupExpiredUsers();
+
+        // Clear RAM-only state for deleted users.
+        try {
+          const ids = Array.isArray(r?.deletedUserIds) ? r.deletedUserIds : [];
+          for (const id of ids) pushSubsByUserId.delete(String(id));
+        } catch {
+          // ignore
+        }
       } catch {
         // No logs (privacy policy)
       }

@@ -57,3 +57,30 @@ self.addEventListener('notificationclick', (event) => {
     })(),
   );
 });
+
+self.addEventListener('message', (event) => {
+  const data = event?.data || {};
+  if (!data || typeof data.type !== 'string') return;
+
+  if (data.type === 'closeNotificationByTag') {
+    const tag = typeof data.tag === 'string' ? data.tag : '';
+    if (!tag) return;
+
+    event.waitUntil(
+      (async () => {
+        try {
+          const list = await self.registration.getNotifications({ tag });
+          for (const n of list) {
+            try {
+              n.close();
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })(),
+    );
+  }
+});
