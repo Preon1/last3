@@ -6,6 +6,7 @@ import SignedAppShell from './components/SignedAppShell.vue'
 import AboutModal from './components/AboutModal.vue'
 import ManageKeysModal from './components/ManageKeysModal.vue'
 import ShareLinkModal from './components/ShareLinkModal.vue'
+import ScanQrModal from './components/ScanQrModal.vue'
 import ToastHost from './components/ToastHost.vue'
 import { useWakeLock } from './utils/wakeLock'
 import { useBeforeUnloadConfirm } from './utils/beforeUnloadConfirm'
@@ -44,5 +45,6 @@ useBeforeUnloadConfirm(inAnyApp)
     <AboutModal />
     <ManageKeysModal />
     <ShareLinkModal />
+    <ScanQrModal />
   </main>
 </template>

@@ -85,6 +85,11 @@ function openShareLink() {
   ui.openShareLink()
 }
 
+function openScanQr() {
+  addMenuOpen.value = false
+  ui.openScanQr()
+}
+
 function chatPreview(c: { id: string; type: 'personal' | 'group' }): string {
   const p = signed.getChatLastMessagePreview(c.id)
   if (!p) return ''
@@ -279,6 +284,9 @@ async function onOpen(chatId: string) {
                 </button>
                 <button class="secondary page-other-item" type="button" role="menuitem" @click="openShareLink">
                   {{ t('common.shareLink') }}
+                </button>
+                <button class="secondary page-other-item" type="button" role="menuitem" @click="openScanQr">
+                  {{ t('common.scanQr') }}
                 </button>
               </div>
             </div>

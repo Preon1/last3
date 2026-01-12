@@ -41,6 +41,7 @@ const baseMessages = {
       about: 'About',
       manageKeys: 'Manage keys',
       shareLink: 'Share link',
+      scanQr: 'Scan QR',
       back: 'Back',
       chat: 'Chat',
       close: 'Close',
@@ -83,6 +84,15 @@ const baseMessages = {
     shareLink: {
       hint: 'Share this link to let someone create a private chat with you after they sign in.',
       linkLabel: 'Link',
+    },
+
+    scanQr: {
+      hint: 'Scan an invite QR code to add the user immediately.',
+      cameraUnavailable: 'No camera available on this device.',
+      cameraPermissionDenied: 'Camera permission denied. Please allow camera access and try again.',
+      cameraStartFailed: 'Could not start the camera.',
+      invalidInvite: 'This QR code is not a valid invite link for this site.',
+      addFailedTitle: 'Cannot add user',
     },
     signed: {
       keys: {
@@ -307,6 +317,7 @@ const baseMessages = {
       about: 'Over',
       manageKeys: 'Sleutels beheren',
       shareLink: 'Link delen',
+      scanQr: 'QR scannen',
       back: 'Terug',
       chat: 'Chat',
       close: 'Sluiten',
@@ -339,6 +350,15 @@ const baseMessages = {
     shareLink: {
       hint: 'Deel deze link zodat iemand na het inloggen een privéchat met je kan maken.',
       linkLabel: 'Link',
+    },
+
+    scanQr: {
+      hint: 'Scan een uitnodigings-QR om de gebruiker direct toe te voegen.',
+      cameraUnavailable: 'Geen camera beschikbaar op dit apparaat.',
+      cameraPermissionDenied: 'Cameratoegang geweigerd. Sta toegang toe en probeer opnieuw.',
+      cameraStartFailed: 'Kon de camera niet starten.',
+      invalidInvite: 'Deze QR-code is geen geldige uitnodigingslink voor deze site.',
+      addFailedTitle: 'Kan gebruiker niet toevoegen',
     },
 
     signed: {
@@ -565,6 +585,7 @@ const baseMessages = {
       about: 'À propos',
       manageKeys: 'Gérer les clés',
       shareLink: 'Partager le lien',
+      scanQr: 'Scanner QR',
       back: 'Retour',
       chat: 'Chat',
       close: 'Fermer',
@@ -593,6 +614,15 @@ const baseMessages = {
     shareLink: {
       hint: 'Partagez ce lien pour permettre à quelqu’un de créer une discussion privée avec vous après connexion.',
       linkLabel: 'Lien',
+    },
+
+    scanQr: {
+      hint: 'Scannez un QR d’invitation pour ajouter l’utilisateur immédiatement.',
+      cameraUnavailable: 'Aucune caméra disponible sur cet appareil.',
+      cameraPermissionDenied: 'Accès à la caméra refusé. Autorisez l’accès et réessayez.',
+      cameraStartFailed: 'Impossible de démarrer la caméra.',
+      invalidInvite: "Ce QR code n’est pas un lien d’invitation valide pour ce site.",
+      addFailedTitle: "Impossible d’ajouter l’utilisateur",
     },
 
     signed: {
@@ -820,6 +850,7 @@ const baseMessages = {
       about: 'Über',
       manageKeys: 'Schlüssel verwalten',
       shareLink: 'Link teilen',
+      scanQr: 'QR scannen',
       back: 'Zurück',
       chat: 'Chat',
       close: 'Schließen',
@@ -849,6 +880,15 @@ const baseMessages = {
     shareLink: {
       hint: 'Teile diesen Link, damit jemand nach dem Anmelden einen privaten Chat mit dir erstellen kann.',
       linkLabel: 'Link',
+    },
+
+    scanQr: {
+      hint: 'Scanne einen Einladungs-QR, um den Nutzer sofort hinzuzufügen.',
+      cameraUnavailable: 'Keine Kamera auf diesem Gerät verfügbar.',
+      cameraPermissionDenied: 'Kamerazugriff verweigert. Bitte Zugriff erlauben und erneut versuchen.',
+      cameraStartFailed: 'Kamera konnte nicht gestartet werden.',
+      invalidInvite: 'Dieser QR-Code ist kein gültiger Einladungslink für diese Seite.',
+      addFailedTitle: 'Nutzer kann nicht hinzugefügt werden',
     },
     signed: {
       keys: {
@@ -1074,6 +1114,7 @@ const baseMessages = {
       about: 'О приложении',
       manageKeys: 'Управление ключами',
       shareLink: 'Поделиться ссылкой',
+      scanQr: 'Сканировать QR',
       back: 'Назад',
       chat: 'Чат',
       close: 'Закрыть',
@@ -1102,6 +1143,15 @@ const baseMessages = {
     shareLink: {
       hint: 'Поделитесь этой ссылкой, чтобы после входа пользователь смог создать с вами личный чат.',
       linkLabel: 'Ссылка',
+    },
+
+    scanQr: {
+      hint: 'Отсканируйте QR-приглашение, чтобы сразу добавить пользователя.',
+      cameraUnavailable: 'Камера недоступна на этом устройстве.',
+      cameraPermissionDenied: 'Доступ к камере запрещён. Разрешите доступ и попробуйте снова.',
+      cameraStartFailed: 'Не удалось запустить камеру.',
+      invalidInvite: 'Этот QR-код не является действительной ссылкой-приглашением для этого сайта.',
+      addFailedTitle: 'Не удалось добавить пользователя',
     },
 
     signed: {

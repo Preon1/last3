@@ -6,6 +6,7 @@ export const useUiStore = defineStore('ui', () => {
   const aboutOpen = ref(false)
   const manageKeysOpen = ref(false)
   const shareLinkOpen = ref(false)
+  const scanQrOpen = ref(false)
 
   const themeMode = ref<'system' | 'dark' | 'light'>('system')
 
@@ -69,6 +70,14 @@ export const useUiStore = defineStore('ui', () => {
     shareLinkOpen.value = false
   }
 
+  function openScanQr() {
+    scanQrOpen.value = true
+  }
+
+  function closeScanQr() {
+    scanQrOpen.value = false
+  }
+
   // Initialize + persist theme.
   loadTheme()
   watch(
@@ -88,6 +97,7 @@ export const useUiStore = defineStore('ui', () => {
     aboutOpen,
     manageKeysOpen,
     shareLinkOpen,
+    scanQrOpen,
     themeMode,
     themeLabel,
     cycleTheme,
@@ -97,5 +107,7 @@ export const useUiStore = defineStore('ui', () => {
     closeManageKeys,
     openShareLink,
     closeShareLink,
+    openScanQr,
+    closeScanQr,
   }
 })
