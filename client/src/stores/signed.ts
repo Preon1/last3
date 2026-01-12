@@ -61,6 +61,8 @@ const SS_TOKEN = 'lrcom-signed-token'
 const SS_USER = 'lrcom-signed-user'
 const SS_LAST_USERNAME = 'lrcom-signed-last-username'
 
+const MAX_PASSWORD_LEN = 512
+
 type StoredKeyV2 = {
   v: 2
   encryptedUsername: string
@@ -318,6 +320,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string; extraEntropy?: Uint8Array }) {
+    if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
     const encryptedUsername = await encryptStringWithPassword({ plaintext: params.username, password: params.password, extraEntropy: params.extraEntropy })
 
     const cur = loadKeyEntries()
@@ -414,6 +417,7 @@ export const useSignedStore = defineStore('signed', () => {
     const u = (username.value ?? '').trim()
     if (!u) throw new Error('Username required')
     if (!params.password) throw new Error('Password required')
+    if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
 
     const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
     if (!encryptedPrivateKey) throw new Error('No local key found')
@@ -1083,6 +1087,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     if (!params.password) throw new Error('Password required')
     if (params.password.length < 8) throw new Error('Password must be at least 8 characters')
+    if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
 
     const exp = Number(params.expirationDays)
     if (!Number.isFinite(exp) || exp < 7 || exp > 365) {
@@ -1139,6 +1144,7 @@ export const useSignedStore = defineStore('signed', () => {
     const u = params.username.trim()
     if (!u) throw new Error('Username required')
     if (!params.password) throw new Error('Password required')
+    if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
 
     storeLastUsername(u)
 

@@ -16,6 +16,8 @@ const LS_KEYS = 'lrcom-signed-keys'
 const LS_LEGACY_KEY = 'lrcom-signed-key'
 const DOWNLOAD_NAME = 'last_keys.json'
 
+const MAX_PASSWORD_LEN = 512
+
 const ui = useUiStore()
 const signed = useSignedStore()
 const { manageKeysOpen } = storeToRefs(ui)
@@ -154,6 +156,11 @@ async function onDownloadSpecific() {
   const pw = specificPassword.value
   if (!u || !pw) {
     specificErr.value = String(t('signed.keys.specificMissing'))
+    return
+  }
+
+  if (pw.length > MAX_PASSWORD_LEN) {
+    specificErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
 
@@ -357,7 +364,7 @@ async function onFileSelected(ev: Event) {
 
       <label class="field" for="keys-password">
         <span class="field-label">{{ t('signed.password') }}</span>
-        <input id="keys-password" v-model="specificPassword" type="password" minlength="8" />
+        <input id="keys-password" v-model="specificPassword" type="password" minlength="8" maxlength="512" />
       </label>
 
       <div v-if="specificErr" class="status" aria-live="polite" style="color: var(--danger);">{{ specificErr }}</div>

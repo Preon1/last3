@@ -127,6 +127,7 @@ export const messages = {
       errInvalidCredentials: 'Invalid username or password.',
       errUnauthorized: 'Session expired. Please log in again.',
       errNoLocalKey: 'No local key found for this user on this device. Use the correct password, or register again to create new keys.',
+      errPasswordTooLong: 'Password must be at most {max} characters.',
       help: {
         usernameAria: 'Help: username',
         passwordAria: 'Help: password',

@@ -17,11 +17,13 @@ const username = ref(lastUsername.value || restoredUsername.value || '')
 const password = ref('')
 const expirationDays = ref(30)
 
+const MAX_PASSWORD_LEN = 512
+
 const mode = ref<'login' | 'register'>('login')
 const isRegister = computed(() => mode.value === 'register')
 
-const canLogin = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8))
-const canRegister = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8))
+const canLogin = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8 && password.value.length <= MAX_PASSWORD_LEN))
+const canRegister = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8 && password.value.length <= MAX_PASSWORD_LEN))
 
 const busy = ref(false)
 const err = ref('')
@@ -168,6 +170,10 @@ function onCycleLanguage() {
 async function onLogin() {
   err.value = ''
   if (!canLogin.value) return
+  if (password.value.length > MAX_PASSWORD_LEN) {
+    err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    return
+  }
   busy.value = true
   try {
     await signed.login({ username: username.value.trim(), password: password.value })
@@ -182,6 +188,10 @@ async function onLogin() {
 function onRegister() {
   err.value = ''
   if (!canRegister.value) return
+  if (password.value.length > MAX_PASSWORD_LEN) {
+    err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    return
+  }
 
   // Collect user interaction entropy before triggering register.
   pendingRegister.value = { username: username.value.trim(), password: password.value, expirationDays: Number(expirationDays.value) }
@@ -252,6 +262,7 @@ function toggleMode() {
             v-model="password"
             type="password"
             minlength="8"
+            maxlength="512"
             :placeholder="String(t('signed.passwordPlaceholder'))"
           />
         </label>
