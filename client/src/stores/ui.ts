@@ -4,6 +4,7 @@ import { i18n } from '../i18n'
 
 export const useUiStore = defineStore('ui', () => {
   const aboutOpen = ref(false)
+  const manageKeysOpen = ref(false)
 
   const themeMode = ref<'system' | 'dark' | 'light'>('system')
 
@@ -51,6 +52,14 @@ export const useUiStore = defineStore('ui', () => {
     aboutOpen.value = false
   }
 
+  function openManageKeys() {
+    manageKeysOpen.value = true
+  }
+
+  function closeManageKeys() {
+    manageKeysOpen.value = false
+  }
+
   // Initialize + persist theme.
   loadTheme()
   watch(
@@ -68,10 +77,13 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     aboutOpen,
+    manageKeysOpen,
     themeMode,
     themeLabel,
     cycleTheme,
     openAbout,
     closeAbout,
+    openManageKeys,
+    closeManageKeys,
   }
 })

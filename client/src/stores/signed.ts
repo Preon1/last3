@@ -437,13 +437,19 @@ export const useSignedStore = defineStore('signed', () => {
     const j = await r.json().catch(() => ({}))
     if (!r.ok) {
       if (r.status === 401) {
-        // Token expired / server restarted (tokens are in-memory). Cleanly reset signed session.
-        try {
-          logout()
-        } catch {
-          // ignore
+        const msg = typeof j?.error === 'string' ? j.error : 'Unauthorized'
+
+        // If we had a token, it likely expired / server restarted (tokens are in-memory).
+        // For login/register (no token yet), don't clear local state.
+        if (token.value) {
+          try {
+            logout()
+          } catch {
+            // ignore
+          }
         }
-        throw new Error('Unauthorized')
+
+        throw new Error(msg)
       }
       const msg = typeof j?.error === 'string' ? j.error : 'Request failed'
       throw new Error(msg)

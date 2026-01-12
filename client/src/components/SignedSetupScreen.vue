@@ -1,36 +1,88 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { storeToRefs } from 'pinia'
 import { cycleLocale } from '../i18n'
 import { useSignedStore } from '../stores/signed'
 
-const emit = defineEmits<{
-  (e: 'login', v: { username: string; password: string }): void
-  (e: 'register', v: { username: string; password: string; expirationDays: number; extraEntropy?: Uint8Array }): void
-}>()
-
 const ui = useUiStore()
 const { themeLabel } = storeToRefs(ui)
 const { t, locale } = useI18n()
 
 const signed = useSignedStore()
-const { lastUsername } = storeToRefs(signed)
+const { lastUsername, username: restoredUsername } = storeToRefs(signed)
 
-const username = ref(lastUsername.value || '')
+const username = ref(lastUsername.value || restoredUsername.value || '')
 const password = ref('')
 const expirationDays = ref(30)
 
 const mode = ref<'login' | 'register'>('login')
 const isRegister = computed(() => mode.value === 'register')
 
-const subtitle = computed(() => {
-  // Keep i18n keys minimal by composing existing translations.
-  return isRegister.value ? `${t('signed.subtitle')} ${t('signed.register')}.` : `${t('signed.subtitle')} ${t('signed.login')}.`
+const canLogin = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8))
+const canRegister = computed(() => Boolean(username.value.trim().length >= 1 && password.value.length >= 8))
+
+const busy = ref(false)
+const err = ref('')
+
+type HelpKey = 'username' | 'password' | 'expirationDays'
+const openHelp = ref<HelpKey | null>(null)
+
+function toggleHelp(key: HelpKey) {
+  openHelp.value = openHelp.value === key ? null : key
+}
+
+function closeHelp() {
+  openHelp.value = null
+}
+
+watchEffect((onCleanup) => {
+  if (!openHelp.value) return
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') closeHelp()
+  }
+
+  document.addEventListener('keydown', onKeyDown)
+  onCleanup(() => {
+    document.removeEventListener('keydown', onKeyDown)
+  })
 })
 
-const canSubmit = computed(() => Boolean(username.value.trim() && password.value))
+const helpTitle = computed(() => {
+  if (openHelp.value === 'username') return String(t('signed.username'))
+  if (openHelp.value === 'password') return String(t('signed.password'))
+  if (openHelp.value === 'expirationDays') return String(t('signed.expirationDays'))
+  return ''
+})
+
+const helpBody = computed(() => {
+  if (openHelp.value === 'username') return String(t('signed.help.username'))
+  if (openHelp.value === 'password') return String(t('signed.help.password'))
+  if (openHelp.value === 'expirationDays') return String(t('signed.help.expirationDays'))
+  return ''
+})
+
+function onHelpBackdropClick(e: MouseEvent) {
+  if (e.target && e.target === e.currentTarget) closeHelp()
+}
+
+function toUserError(e: any): string {
+  const msg = typeof e?.message === 'string' ? e.message : String(e)
+  if (msg === 'No local key found') return String(t('signed.errNoLocalKey'))
+  if (msg === 'Invalid credentials') return String(t('signed.errInvalidCredentials'))
+  if (msg === 'Unauthorized') return String(t('signed.errUnauthorized'))
+  if (msg === 'Request failed') return String(t('signed.genericError'))
+  return msg
+}
+
+watch(
+  () => [username.value, password.value, mode.value],
+  () => {
+    if (err.value) err.value = ''
+  },
+)
 
 const entropyOpen = ref(false)
 const entropyHits = ref<Array<{ x: number; y: number; ms: number }>>([])
@@ -75,7 +127,17 @@ async function finalizeEntropyAndRegister() {
 
     entropyOpen.value = false
     resetEntropy()
-    emit('register', { ...p, extraEntropy })
+
+    err.value = ''
+    busy.value = true
+    try {
+      await signed.register({ ...p, extraEntropy })
+      password.value = ''
+    } catch (e: any) {
+      err.value = toUserError(e)
+    } finally {
+      busy.value = false
+    }
   } finally {
     entropyBusy.value = false
   }
@@ -103,13 +165,23 @@ function onCycleLanguage() {
   cycleLocale()
 }
 
-function onLogin() {
-  if (!canSubmit.value) return
-  emit('login', { username: username.value.trim(), password: password.value })
+async function onLogin() {
+  err.value = ''
+  if (!canLogin.value) return
+  busy.value = true
+  try {
+    await signed.login({ username: username.value.trim(), password: password.value })
+    password.value = ''
+  } catch (e: any) {
+    err.value = toUserError(e)
+  } finally {
+    busy.value = false
+  }
 }
 
 function onRegister() {
-  if (!canSubmit.value) return
+  err.value = ''
+  if (!canRegister.value) return
 
   // Collect user interaction entropy before triggering register.
   pendingRegister.value = { username: username.value.trim(), password: password.value, expirationDays: Number(expirationDays.value) }
@@ -130,20 +202,30 @@ function toggleMode() {
           <img class="logo logo-lg" src="/lrcom_logo.png" alt="Last" />
           <div>
             <div class="setup-title">Last</div>
-            <div class="setup-subtitle muted">{{ subtitle }}</div>
+            <div class="setup-subtitle muted">{{ t('signed.subtitle') }}</div>
           </div>
         </div>
 
-        <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+        <div class="setup-toggle">
           <button class="secondary" type="button" @click="toggleMode">
             {{ isRegister ? t('signed.login') : t('signed.register') }}
           </button>
         </div>
       </div>
 
-      <form class="setup-form" autocomplete="off" @submit.prevent>
+      <form class="setup-form" autocomplete="off" @submit.prevent="isRegister ? onRegister() : onLogin()">
         <label class="field" for="signed-username">
-          <span class="field-label">{{ t('signed.username') }}</span>
+          <div class="field-label-row">
+            <span class="field-label">{{ t('signed.username') }}</span>
+            <button
+              class="help"
+              type="button"
+              :aria-label="String(t('signed.help.usernameAria'))"
+              @click="toggleHelp('username')"
+            >
+              ?
+            </button>
+          </div>
           <input
             id="signed-username"
             v-model="username"
@@ -154,7 +236,17 @@ function toggleMode() {
         </label>
 
         <label class="field" for="signed-password">
-          <span class="field-label">{{ t('signed.password') }}</span>
+          <div class="field-label-row">
+            <span class="field-label">{{ t('signed.password') }}</span>
+            <button
+              class="help"
+              type="button"
+              :aria-label="String(t('signed.help.passwordAria'))"
+              @click="toggleHelp('password')"
+            >
+              ?
+            </button>
+          </div>
           <input
             id="signed-password"
             v-model="password"
@@ -165,14 +257,26 @@ function toggleMode() {
         </label>
 
         <label v-if="isRegister" class="field" for="signed-exp">
-          <span class="field-label">{{ t('signed.expirationDays') }}</span>
+          <div class="field-label-row">
+            <span class="field-label">{{ t('signed.expirationDays') }}</span>
+            <button
+              class="help"
+              type="button"
+              :aria-label="String(t('signed.help.expirationDaysAria'))"
+              @click="toggleHelp('expirationDays')"
+            >
+              ?
+            </button>
+          </div>
           <input id="signed-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
         </label>
 
         <div class="setup-actions">
-          <button v-if="!isRegister" class="join" type="button" :disabled="!canSubmit" @click="onLogin">{{ t('signed.login') }}</button>
-          <button v-else class="join" type="button" :disabled="!canSubmit" @click="onRegister">{{ t('signed.register') }}</button>
+          <button v-if="!isRegister" class="join" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
+          <button v-else class="join" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
         </div>
+
+        <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
 
         <div class="setup-header-actions">
           <button class="secondary" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
@@ -181,6 +285,8 @@ function toggleMode() {
           <button class="secondary" type="button" :aria-label="String(t('common.language'))" @click="onCycleLanguage">
             {{ t('common.language') }}: {{ t(`lang.${String(locale)}`) }}
           </button>
+          <button class="secondary" type="button" @click="ui.openManageKeys">{{ t('common.manageKeys') }}</button>
+          <button class="secondary" type="button" @click="ui.openAbout">{{ t('common.about') }}</button>
         </div>
       </form>
     </div>
@@ -212,5 +318,50 @@ function toggleMode() {
         </div>
       </div>
     </div>
+
+    <div
+      v-if="openHelp"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="helpTitle"
+      @click="onHelpBackdropClick"
+    >
+      <div class="modal-card">
+        <div class="modal-title" id="helpTitle">{{ helpTitle }}</div>
+        <div class="muted" style="white-space: pre-line;">{{ helpBody }}</div>
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button class="secondary" type="button" @click="closeHelp">{{ t('common.close') }}</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
+
+<style scoped>
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.help {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--input-border);
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+</style>

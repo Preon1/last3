@@ -21,6 +21,10 @@ function onAbout() {
   ui.openAbout()
 }
 
+function onManageKeys() {
+  ui.openManageKeys()
+}
+
 function onLogout() {
   if (!confirmLeave('Last')) return
   signed.logout(true)
@@ -77,6 +81,8 @@ async function onToggleHiddenMode(ev: Event) {
         <button class="secondary" type="button" :aria-label="String(t('common.language'))" @click="onCycleLanguage">
           {{ t('common.language') }}: {{ t(`lang.${String(locale)}`) }}
         </button>
+
+        <button class="secondary" type="button" @click="onManageKeys">{{ t('common.manageKeys') }}</button>
 
         <button class="secondary" type="button" @click="onAbout">{{ t('common.about') }}</button>
 

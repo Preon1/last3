@@ -39,6 +39,7 @@ export const messages = {
   en: {
     common: {
       about: 'About',
+      manageKeys: 'Manage keys',
       back: 'Back',
       chat: 'Chat',
       close: 'Close',
@@ -69,7 +70,30 @@ export const messages = {
       join: 'Join',
     },
     signed: {
-      subtitle: 'Signed mode: password login + encrypted message history.',
+      keys: {
+        title: 'Manage keys',
+        description:
+          'Back up your encrypted keys to move your account to another device or to keep a safe copy.\n\nThis file contains encrypted key material stored in your browser. Do not share it.',
+        countOnDevice: 'Keys on this device: {count}',
+        download: 'Download',
+        downloadUser: 'Download {username} key',
+        downloadAll: 'Download all keys',
+        downloadSpecific: 'Download a specific key',
+        addFromFile: 'Add key(s) from file',
+        removeAll: 'Remove all local keys',
+        downloadAllOk: 'Downloaded {count} key(s).',
+        downloadOneOk: 'Downloaded key.',
+        importBadFormat: 'Invalid file format. Expected a JSON key entry or array of key entries.',
+        importResult: 'Read: {read}. Added: {added}. Ignored (already exists): {ignored}. Invalid: {invalid}.',
+        specificHint: 'Enter username and password to locate a matching encrypted entry. This does not log you in.',
+        specificMissing: 'Username and password required.',
+        specificNotFound: 'No matching key found (username/password mismatch).',
+        removeConfirm:
+          'This will permanently and irrecoverably delete ALL local keys for {count} account(s) created/imported on this device.\n\nYou will be logged out.',
+        removeAllConfirm: 'Remove all keys',
+        removeAllOk: 'All local keys removed.',
+      },
+      subtitle: 'Your own private messenger. Fully encrypted, no logs, no traces.',
       username: 'Username',
       usernamePlaceholder: 'e.g. alice',
       password: 'Password',
@@ -100,6 +124,20 @@ export const messages = {
       deleteAccount: 'Delete account',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',
+      errInvalidCredentials: 'Invalid username or password.',
+      errUnauthorized: 'Session expired. Please log in again.',
+      errNoLocalKey: 'No local key found for this user on this device. Use the correct password, or register again to create new keys.',
+      help: {
+        usernameAria: 'Help: username',
+        passwordAria: 'Help: password',
+        expirationDaysAria: 'Help: account expiration',
+        username:
+          'Limitations: 3–64 characters.\nSecurity note: (fill later)\nTip: usernames are case-sensitive on login.',
+        password:
+          'Limitations: at least 8 characters.\nSecurity note: (fill later)\nTip: your password is used to decrypt your private key locally.',
+        expirationDays:
+          'Limitations: 7–365 days.\nSecurity note: (fill later)\nTip: activity extends expiration (with privacy jitter).',
+      },
       genericError: 'Something went wrong.',
     },
     about: {

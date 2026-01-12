@@ -202,6 +202,12 @@ body {
   margin-bottom: 12px;
 }
 
+.setup-toggle{
+  position: absolute;
+  top: -19px;
+  right: -18px;
+}
+
 .setup-header-actions {
   display: flex;
   gap: 10px;
@@ -307,6 +313,11 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.join {
+  width: 100%;
+  margin: 15px 0;
 }
 
 .chat-send{
