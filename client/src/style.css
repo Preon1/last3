@@ -363,6 +363,10 @@ button.secondary {
   backdrop-filter: blur(var(--glass-blur));
 }
 
+button.small-font {
+  font-size: 1em;
+}
+
 .text-link {
   background: transparent;
   border: 0;

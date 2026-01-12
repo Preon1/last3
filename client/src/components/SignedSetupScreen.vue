@@ -295,14 +295,14 @@ function toggleMode() {
         <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
 
         <div class="setup-header-actions">
-          <button class="secondary" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
+          <button class="secondary small-font" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
             {{ themeLabel }}
           </button>
-          <button class="secondary" type="button" :aria-label="String(t('common.language'))" @click="onCycleLanguage">
+          <button class="secondary small-font" type="button" :aria-label="String(t('common.language'))" @click="onCycleLanguage">
             {{ t('common.language') }}: {{ t(`lang.${String(locale)}`) }}
           </button>
-          <button class="secondary" type="button" @click="ui.openManageKeys">{{ t('common.manageKeys') }}</button>
-          <button class="secondary" type="button" @click="ui.openAbout">{{ t('common.about') }}</button>
+          <button class="secondary small-font" type="button" @click="ui.openManageKeys">{{ t('common.manageKeys') }}</button>
+          <button class="secondary small-font" type="button" @click="ui.openAbout">{{ t('common.about') }}</button>
         </div>
       </form>
     </div>
