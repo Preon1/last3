@@ -232,7 +232,7 @@ watch([view, activeChatId], () => {
     <div class="page-info">
       <div class="page-info-title">{{ chatTitle }}</div>
       <span
-        v-if="view === 'chat' && chatOnlineState !== null"
+        v-if="view === 'chat' && activeChat?.type === 'personal' && chatOnlineState !== null"
         class="status-dot"
         :class="{ online: chatOnlineState === 'online', offline: chatOnlineState === 'offline', busy: chatOnlineState === 'busy' }"
         aria-hidden="true"

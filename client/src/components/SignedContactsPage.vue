@@ -98,7 +98,7 @@ function closeAdd() {
               <button class="contact-row" type="button" :class="{ active: isActive(c.id) }" @click="onOpen(c.id)">
                 <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
                   <span
-                    v-if="signed.getChatOnlineState(c.id)"
+                    v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
                     class="status-dot"
                     :class="signed.getChatOnlineState(c.id)"
                     aria-hidden="true"
