@@ -12,6 +12,7 @@ const { t } = useI18n()
 const { activeChatId, messagesByChatId, chats, userId, membersByChatId } = storeToRefs(signed)
 
 const chatInput = ref('')
+const chatRootEl = ref<HTMLElement | null>(null)
 const chatMessagesEl = ref<HTMLDivElement | null>(null)
 const chatInputEl = ref<HTMLTextAreaElement | null>(null)
 
@@ -423,9 +424,18 @@ async function deleteMsg(chatId: string, messageId: string, senderId: string) {
 }
 
 function scrollToBottom() {
-  const el = chatMessagesEl.value
-  if (!el) return
-  el.scrollTop = el.scrollHeight
+  const root = chatRootEl.value
+  const msgs = chatMessagesEl.value
+
+  // Primary: the whole chat section (user-requested scroll container)
+  if (root) {
+    root.scrollTop = root.scrollHeight
+  }
+
+  // Also keep messages scroller aligned if present
+  if (msgs) {
+    msgs.scrollTop = msgs.scrollHeight
+  }
 }
 
 function cssEscape(s: string) {
@@ -656,6 +666,9 @@ function onChatKeydown(e: KeyboardEvent) {
       if (typeof m.text !== 'string' || !m.text.trim()) continue
       startEdit(m)
       e.preventDefault()
+      void nextTick(() => {
+        scrollToBottom()
+      })
       return
     }
     return
@@ -704,7 +717,7 @@ function onMessagesScroll() {
 </script>
 
 <template>
-  <section class="chat">
+  <section ref="chatRootEl" class="chat">
     <div v-if="isGroup" class="chat-input" style="padding-bottom: 8px;">
       <input
         v-model="memberUsername"
