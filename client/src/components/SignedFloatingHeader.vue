@@ -29,6 +29,10 @@ const renameName = ref('')
 const renameBusy = ref(false)
 const renameReport = ref('')
 
+const deleteOpen = ref(false)
+const deleteBusy = ref(false)
+const deleteReport = ref('')
+
 const activeChat = computed(() => {
   const cid = activeChatId.value
   if (!cid) return null
@@ -82,14 +86,41 @@ const canOpenOtherMenu = computed(() => {
   return true
 })
 
-function onDeleteChat() {
+const deleteTitle = computed(() => {
+  return activeChat.value?.type === 'group' ? String(t('signed.leaveGroup')) : String(t('signed.deleteChat'))
+})
+
+const deleteBody = computed(() => {
+  if (activeChat.value?.type === 'group') return String(t('signed.leaveGroupWarning'))
+  return String(t('signed.deleteChatWarning'))
+})
+
+function openDeleteConfirm() {
+  closeOtherMenu()
+  deleteOpen.value = true
+  deleteBusy.value = false
+  deleteReport.value = ''
+}
+
+function closeDeleteConfirm() {
+  deleteOpen.value = false
+  deleteBusy.value = false
+  deleteReport.value = ''
+}
+
+async function onConfirmDelete() {
   const cid = activeChatId.value
   if (!cid) return
-  const isGroup = activeChat.value?.type === 'group'
-  const ok = window.confirm(String(isGroup ? t('confirm.leaveGroup') : t('confirm.deleteChat')))
-  if (!ok) return
-  otherMenuOpen.value = false
-  void signed.deleteChat(cid)
+  deleteBusy.value = true
+  deleteReport.value = ''
+  try {
+    await signed.deleteChat(cid)
+    closeDeleteConfirm()
+  } catch (e: any) {
+    deleteReport.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+  } finally {
+    deleteBusy.value = false
+  }
 }
 
 function onCall() {
@@ -254,6 +285,11 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     closeRenameGroup()
     return
   }
+  if (deleteOpen.value) {
+    e.preventDefault()
+    closeDeleteConfirm()
+    return
+  }
   if (otherMenuOpen.value) {
     e.preventDefault()
     closeOtherMenu()
@@ -276,6 +312,7 @@ watch([view, activeChatId], () => {
   closeAddMember()
   closeMembersList()
   closeRenameGroup()
+  closeDeleteConfirm()
 })
 </script>
 
@@ -366,10 +403,31 @@ watch([view, activeChatId], () => {
             type="button"
             role="menuitem"
             :disabled="!canDeleteChat"
-            @click="onDeleteChat"
+            @click="openDeleteConfirm"
           >
             {{ activeChat?.type === 'group' ? t('signed.leaveGroup') : t('signed.deleteChat') }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="deleteOpen"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="deleteChatTitleSigned"
+      @click="(e) => { if (e.target === e.currentTarget) closeDeleteConfirm() }"
+    >
+      <div class="modal-card">
+        <div class="modal-title" id="deleteChatTitleSigned">{{ deleteTitle }}</div>
+
+        <div class="muted" style="margin-top: 8px;">{{ deleteBody }}</div>
+        <div v-if="deleteReport" class="status" aria-live="polite" style="margin-top: 8px;">{{ deleteReport }}</div>
+
+        <div class="modal-actions">
+          <button class="secondary" type="button" :disabled="deleteBusy" @click="closeDeleteConfirm">{{ t('common.cancel') }}</button>
+          <button class="danger" type="button" :disabled="deleteBusy" @click="onConfirmDelete">{{ deleteTitle }}</button>
         </div>
       </div>
     </div>

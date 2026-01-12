@@ -401,10 +401,9 @@ async function onFileSelected(ev: Event) {
         </button>
         <button
           v-if="!removeDone"
-          class="secondary"
+          class="secondary danger"
           type="button"
           :disabled="removeBusy"
-          style="background: rgba(255,0,0,0.10); border-color: rgba(255,0,0,0.45); color: var(--danger);"
           @click="removeAllLocalKeys"
         >
           {{ t('signed.keys.removeAllConfirm') }}

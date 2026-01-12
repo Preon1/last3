@@ -134,6 +134,10 @@ export const messages = {
       renameGroup: 'Rename group',
       renameGroupPlaceholder: 'New group name',
       renameGroupBadLength: 'Name must be 3–64 characters.',
+      deleteChatWarning:
+        'This will permanently delete this chat and remove all messages for both you and your friend. This cannot be undone.',
+      leaveGroupWarning:
+        'You will leave this group. It will disappear from your chat list and you will stop receiving messages from it.',
       noChats: 'No chats yet. Add a friend by username.',
       youSignedInAs: 'Signed in as',
       hiddenMode: 'Hidden mode',
@@ -322,6 +326,10 @@ export const messages = {
       renameGroup: 'Groep hernoemen',
       renameGroupPlaceholder: 'Nieuwe groepsnaam',
       renameGroupBadLength: 'Naam moet 3–64 tekens zijn.',
+      deleteChatWarning:
+        'Dit verwijdert deze chat permanent en wist alle berichten voor zowel jou als je vriend. Dit kan niet ongedaan worden gemaakt.',
+      leaveGroupWarning:
+        'Je verlaat deze groep. De groep verdwijnt uit je chatlijst en je ontvangt geen berichten meer.',
     },
     about: {
       title: 'Over',
@@ -487,6 +495,10 @@ export const messages = {
       renameGroup: 'Renommer le groupe',
       renameGroupPlaceholder: 'Nouveau nom du groupe',
       renameGroupBadLength: 'Le nom doit contenir 3 à 64 caractères.',
+      deleteChatWarning:
+        'Cela supprimera définitivement cette discussion et effacera tous les messages pour vous et votre ami. Cette action est irréversible.',
+      leaveGroupWarning:
+        'Vous allez quitter ce groupe. Il disparaîtra de votre liste et vous ne recevrez plus de messages.',
     },
     about: {
       title: 'À propos',
@@ -645,6 +657,10 @@ export const messages = {
       renameGroup: 'Gruppe umbenennen',
       renameGroupPlaceholder: 'Neuer Gruppenname',
       renameGroupBadLength: 'Name muss 3–64 Zeichen lang sein.',
+      deleteChatWarning:
+        'Dies löscht diesen Chat dauerhaft und entfernt alle Nachrichten für dich und deinen Freund. Das kann nicht rückgängig gemacht werden.',
+      leaveGroupWarning:
+        'Du wirst diese Gruppe verlassen. Sie verschwindet aus deiner Chatliste und du erhältst keine Nachrichten mehr.',
       deleteChat: 'Chat löschen',
       leaveGroup: 'Gruppe verlassen',
     },
@@ -811,6 +827,10 @@ export const messages = {
       renameGroup: 'Переименовать группу',
       renameGroupPlaceholder: 'Новое название группы',
       renameGroupBadLength: 'Название должно быть длиной 3–64 символа.',
+      deleteChatWarning:
+        'Это навсегда удалит чат и удалит все сообщения как у вас, так и у вашего собеседника. Отменить это нельзя.',
+      leaveGroupWarning:
+        'Вы выйдете из этой группы. Она исчезнет из списка чатов, и вы перестанете получать сообщения.',
     },
     about: {
       title: 'О приложении',

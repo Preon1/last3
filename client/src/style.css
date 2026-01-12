@@ -341,6 +341,12 @@ button {
   fill: none;
 }
 
+button.danger {
+  background: rgba(255, 0, 0, 0.1);
+  border-color: rgba(255, 0, 0, 0.45);
+  color: var(--danger);
+}
+
 button.icon-only {
   padding: 10px;
 }
