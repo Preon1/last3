@@ -154,6 +154,8 @@ export const messages = {
       introvertModeHelp:
         'When enabled, others cannot create new chats with you or add you to groups. Calls are only allowed for users who already share a private chat with you.',
       deleteAccount: 'Delete account',
+      deleteAccountWarning:
+        'This action is unrecoverable. Your account will be deleted and all of your messages in all chats will be permanently removed. This cannot be undone.',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',
       errInvalidCredentials: 'Invalid username or password.',
@@ -338,6 +340,9 @@ export const messages = {
       groupNamePlaceholder: 'bijv. Team',
       createGroup: 'Groep maken',
       noChats: 'Nog geen chats. Voeg een vriend toe op gebruikersnaam.',
+      deleteAccount: 'Account verwijderen',
+      deleteAccountWarning:
+        'Deze actie is onomkeerbaar. Je account wordt verwijderd en al je berichten in alle chats worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.',
       deleteChat: 'Chat verwijderen',
       leaveGroup: 'Groep verlaten',
       addMember: 'Lid toevoegen',
@@ -526,6 +531,9 @@ export const messages = {
       groupNamePlaceholder: 'ex. Équipe',
       createGroup: 'Créer un groupe',
       noChats: "Aucune discussion. Ajoutez un ami par nom d'utilisateur.",
+      deleteAccount: 'Supprimer le compte',
+      deleteAccountWarning:
+        "Cette action est irréversible. Votre compte sera supprimé et tous vos messages dans toutes les discussions seront définitivement effacés. Cela ne peut pas être annulé.",
       deleteChat: 'Supprimer la discussion',
       leaveGroup: 'Quitter le groupe',
       addMember: 'Ajouter un membre',
@@ -709,6 +717,9 @@ export const messages = {
       groupNamePlaceholder: 'z. B. Team',
       createGroup: 'Gruppe erstellen',
       noChats: 'Noch keine Chats. Füge einen Freund per Benutzername hinzu.',
+      deleteAccount: 'Konto löschen',
+      deleteAccountWarning:
+        'Diese Aktion ist unwiderruflich. Dein Konto wird gelöscht und alle deine Nachrichten in allen Chats werden dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.',
       addMember: 'Mitglied hinzufügen',
       memberPlaceholder: 'Benutzername',
       memberAddedOk: 'Mitglied hinzugefügt.',
@@ -896,6 +907,9 @@ export const messages = {
       groupNamePlaceholder: 'напр. Команда',
       createGroup: 'Создать группу',
       noChats: 'Пока нет чатов. Добавьте друга по имени пользователя.',
+      deleteAccount: 'Удалить аккаунт',
+      deleteAccountWarning:
+        'Это действие необратимо. Ваш аккаунт будет удалён, и все ваши сообщения во всех чатах будут удалены навсегда. Это нельзя отменить.',
       deleteChat: 'Удалить чат',
       leaveGroup: 'Выйти из группы',
       addMember: 'Добавить участника',

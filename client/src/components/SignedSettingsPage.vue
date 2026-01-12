@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { cycleLocale } from '../i18n'
@@ -12,6 +13,10 @@ const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
 const { username, hiddenMode, introvertMode } = storeToRefs(signed)
+
+const deleteAccountOpen = ref(false)
+const deleteAccountBusy = ref(false)
+const deleteAccountErr = ref<string>('')
 
 function onCycleLanguage() {
   cycleLocale()
@@ -31,14 +36,43 @@ function onLogout() {
 }
 
 async function onDeleteAccount() {
+  deleteAccountErr.value = ''
+  deleteAccountOpen.value = true
+}
+
+function closeDeleteAccount() {
+  if (deleteAccountBusy.value) return
+  deleteAccountOpen.value = false
+  deleteAccountErr.value = ''
+}
+
+async function onConfirmDeleteAccount() {
+  deleteAccountErr.value = ''
+  deleteAccountBusy.value = true
   try {
-    const ok = window.confirm(String(t('confirm.deleteAccount', { appName: 'Last' })))
-    if (!ok) return
     await signed.deleteAccount()
+    deleteAccountOpen.value = false
   } catch {
-    // ignore
+    deleteAccountErr.value = String(t('signed.genericError'))
+  } finally {
+    deleteAccountBusy.value = false
   }
 }
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (!deleteAccountOpen.value) return
+  e.preventDefault()
+  closeDeleteAccount()
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onGlobalKeyDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onGlobalKeyDown)
+})
 
 async function onToggleHiddenMode(ev: Event) {
   const target = ev.target as HTMLInputElement | null
@@ -109,7 +143,7 @@ async function onToggleIntrovertMode(ev: Event) {
 
         <button class="secondary" type="button" @click="onAbout">{{ t('common.about') }}</button>
 
-        <button class="secondary" type="button" @click="onDeleteAccount">{{ t('signed.deleteAccount') }}</button>
+        <button class="secondary danger" type="button" @click="onDeleteAccount">{{ t('signed.deleteAccount') }}</button>
 
         <button
           class="secondary icon-only"
@@ -120,6 +154,29 @@ async function onToggleIntrovertMode(ev: Event) {
         >
           <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#logout"></use></svg>
         </button>
+      </div>
+
+      <div
+        v-if="deleteAccountOpen"
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deleteAccountTitleSigned"
+        @click="(e) => { if (e.target === e.currentTarget) closeDeleteAccount() }"
+      >
+        <div class="modal-card">
+          <div class="modal-title" id="deleteAccountTitleSigned">{{ t('signed.deleteAccount') }}</div>
+
+          <div class="muted" style="margin-top: 8px;">{{ t('signed.deleteAccountWarning') }}</div>
+          <div v-if="deleteAccountErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ deleteAccountErr }}</div>
+
+          <div class="modal-actions">
+            <button type="button" :disabled="deleteAccountBusy" @click="closeDeleteAccount">{{ t('common.cancel') }}</button>
+            <button class="danger" type="button" :disabled="deleteAccountBusy" @click="onConfirmDeleteAccount">
+              {{ t('signed.deleteAccount') }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </section>

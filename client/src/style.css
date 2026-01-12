@@ -342,9 +342,9 @@ button {
 }
 
 button.danger {
-  background: rgba(255, 0, 0, 0.1);
-  border-color: rgba(255, 0, 0, 0.45);
-  color: var(--danger);
+  background: rgba(255, 0, 0, 0.1) !important;
+  border-color: rgba(255, 0, 0, 0.45) !important;
+  color: var(--danger) !important;
 }
 
 button.icon-only {
@@ -1129,7 +1129,7 @@ button.small{
   max-height: 70svh;
   overflow: auto;
   scrollbar-width: thin;
-  width: min(520px, 70vw);
+  width: min(520px, calc(100vw - 28px));
 }
 
 .modal-title {
