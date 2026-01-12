@@ -1,7 +1,10 @@
 services:
   # Reverse proxy: terminates HTTPS (Let's Encrypt) on :443 and proxies to lrcom.
   caddy:
-    image: caddy:2
+    build:
+      context: .
+      dockerfile: ./caddy/Dockerfile
+    image: lrcom-caddy:local
     restart: unless-stopped
     logging:
       driver: none

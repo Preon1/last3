@@ -11,11 +11,137 @@
     key_type rsa4096
   }
 
-  # Proxy everything (HTTP + WebSocket) to the app running HTTPS inside the network.
-  reverse_proxy https://lrcom:8443 {
-    transport http {
-      # The app uses an internal/self-signed cert by default.
-      tls_insecure_skip_verify
+
+  route {
+    # Per-endpoint rate limiting (requires Caddy built with github.com/mholt/caddy-ratelimit)
+    # Keyed by client IP.
+    rate_limit {
+      zone api_global {
+        match {
+          path /api/*
+        }
+        key    {remote_host}
+        events 1200
+        window 1m
+      }
+
+      zone turn_unauth {
+        match {
+          path /turn
+          method GET
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone auth_login {
+        match {
+          path /api/auth/login
+          method POST
+        }
+        key    {remote_host}
+        events 20
+        window 1m
+      }
+
+      zone auth_register {
+        match {
+          path /api/auth/register
+          method POST
+        }
+        key    {remote_host}
+        events 20
+        window 1m
+      }
+
+      zone auth_check_username {
+        match {
+          path /api/auth/check-username
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone signed_presence {
+        match {
+          path /api/signed/presence
+          method POST
+        }
+        key    {remote_host}
+        events 150
+        window 1m
+      }
+
+      zone signed_message_send {
+        match {
+          path /api/signed/messages/send
+          method POST
+        }
+        key    {remote_host}
+        events 120
+        window 1m
+      }
+
+      zone signed_message_update {
+        match {
+          path /api/signed/messages/update
+          method POST
+        }
+        key    {remote_host}
+        events 120
+        window 1m
+      }
+
+      zone signed_message_delete {
+        match {
+          path /api/signed/messages/delete
+          method POST
+        }
+        key    {remote_host}
+        events 120
+        window 1m
+      }
+
+      zone signed_create_chat {
+        match {
+          path /api/signed/chats/create-personal /api/signed/chats/create-group
+          method POST
+        }
+        key    {remote_host}
+        events 20
+        window 1m
+      }
+
+      zone signed_group_admin {
+        match {
+          path /api/signed/chats/add-member /api/signed/chats/rename-group
+          method POST
+        }
+        key    {remote_host}
+        events 30
+        window 1m
+      }
+
+      zone signed_account_delete {
+        match {
+          path /api/signed/account/delete
+          method POST
+        }
+        key    {remote_host}
+        events 20
+        window 1m
+      }
+    }
+
+    # Proxy everything (HTTP + WebSocket) to the app running HTTPS inside the network.
+    reverse_proxy https://lrcom:8443 {
+      transport http {
+        # The app uses an internal/self-signed cert by default.
+        tls_insecure_skip_verify
+      }
     }
   }
 }
