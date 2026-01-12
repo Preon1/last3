@@ -232,6 +232,20 @@ export async function signedCreateGroupChat(userId, chatName) {
 export async function signedListChatMembers(userId, chatId) {
   await assertChatMember(userId, chatId)
 
+  const chat = await query(
+    `SELECT chat_type
+     FROM chats
+     WHERE id = $1
+     LIMIT 1`,
+    [chatId],
+  )
+  if (chat.rows.length === 0) return []
+  if (String(chat.rows[0].chat_type) !== 'group') {
+    const err = new Error('Not a group')
+    err.code = 'not_group'
+    throw err
+  }
+
   const r = await query(
     `SELECT u.id, u.username, u.public_key
      FROM chat_members cm

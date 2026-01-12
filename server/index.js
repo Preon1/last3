@@ -366,6 +366,7 @@ app.get('/api/signed/chats/members', requireSignedAuth, async (req, res) => {
     res.json({ success: true, members });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
+    if (e && e.code === 'not_group') return res.status(400).json({ error: 'not_group' });
     res.status(500).json({ error: 'Server error' });
   }
 });
