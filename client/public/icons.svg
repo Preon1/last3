@@ -28,4 +28,10 @@
 <path d="M14 6L8 12L14 18" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 </symbol>
 
+<symbol id="dots-vertical" viewBox="0 0 24 24">
+<circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/>
+<circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+<circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/>
+</symbol>
+
 </svg>
