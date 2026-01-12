@@ -67,34 +67,34 @@ async function onToggleIntrovertMode(ev: Event) {
       <div class="headergap"></div>
 
       <div class="settings-tech">
-        <div v-if="username" class="status">{{ t('signed.youSignedInAs') }} <strong>{{ username }}</strong></div>
+        <div v-if="username">{{ t('signed.youSignedInAs') }} <strong>{{ username }}</strong></div>
       </div>
 
       <div class="settings-actions">
-        <label class="secondary" style="display:flex; gap: 10px; align-items:center; justify-content:space-between;">
-          <span>
-            <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.hiddenModeHelp') }}</div>
-          </span>
+        <label class="secondary">
           <input
             type="checkbox"
             :checked="Boolean(hiddenMode)"
             @change="onToggleHiddenMode"
             :aria-label="String(t('signed.hiddenMode'))"
           />
+          <span>
+            <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.hiddenModeHelp') }}</div>
+          </span>
         </label>
 
-        <label class="secondary" style="display:flex; gap: 10px; align-items:center; justify-content:space-between;">
-          <span>
-            <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.introvertModeHelp') }}</div>
-          </span>
+        <label class="secondary">
           <input
             type="checkbox"
             :checked="Boolean(introvertMode)"
             @change="onToggleIntrovertMode"
             :aria-label="String(t('signed.introvertMode'))"
           />
+          <span>
+            <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.introvertModeHelp') }}</div>
+          </span>
         </label>
 
         <button class="secondary" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
