@@ -269,6 +269,19 @@ async function onAddMember() {
   if (!u) return
   addMemberBusy.value = true
   try {
+    // Ensure we check against an up-to-date member list.
+    try {
+      await signed.fetchChatMembers(cid)
+    } catch {
+      // ignore
+    }
+    const curMembers = membersByChatId.value[cid] ?? []
+    const exists = curMembers.some((m) => String(m.username || '').toLowerCase() === u.toLowerCase())
+    if (exists) {
+      addMemberReport.value = String(t('signed.memberAlreadyInGroup'))
+      return
+    }
+
     await signed.addGroupMember(cid, u)
 
     // Requirement: send an automated message after successful member add.
@@ -285,6 +298,10 @@ async function onAddMember() {
     const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
     if (isIntrovert) {
       addMemberReport.value = msg === 'introvert' ? String(t('toast.introvertBody')) : msg
+      return
+    }
+    if (msg === 'already_member') {
+      addMemberReport.value = String(t('signed.memberAlreadyInGroup'))
       return
     }
     addMemberReport.value = msg

@@ -287,12 +287,14 @@ export async function signedAddGroupMember(userId, chatId, username) {
   // Introvert mode: user cannot be added to chats by others.
   if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
 
-  await query(
+  const ins = await query(
     `INSERT INTO chat_members (chat_id, user_id)
      VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
+     ON CONFLICT DO NOTHING
+     RETURNING user_id`,
     [chatId, otherUserId],
   )
+  if (!ins.rows.length) return { ok: false, reason: 'already_member' }
 
   return {
     ok: true,
