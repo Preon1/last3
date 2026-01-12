@@ -735,7 +735,7 @@ button:disabled {
   scrollbar-width: thin;
 }
 
-.page-panel {
+.page-top {
   width: 100%;
   margin: 0;
   background: transparent;
@@ -749,9 +749,18 @@ button:disabled {
   flex-direction: column;
 }
 
+.page-panel{
+  display: flex;
+  gap: 12px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 .page-title {
   font-weight: 800;
-  margin-bottom: 12px;
 }
 
 .contacts {

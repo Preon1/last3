@@ -84,73 +84,74 @@ function closeAdd() {
 <template>
   <section class="page">
     <div class="page-inner">
-      <div class="page-panel">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <div class="page-title" style="margin-bottom: 0;">{{ t('signed.chats') }}</div>
+      <div class="page-top">
+        <div class="page-panel">
+          <div class="page-title">{{ t('signed.chats') }}</div>
           <button class="secondary" type="button" :disabled="busy" @click="openAdd">{{ t('signed.add') }}</button>
         </div>
 
         <div v-if="err" class="status" aria-live="polite" style="margin-top: 12px;">{{ err }}</div>
 
-        <ul class="contacts">
-          <template v-if="sortedChats.length">
-            <li v-for="c in sortedChats" :key="c.id">
-              <button class="contact-row" type="button" :class="{ active: isActive(c.id) }" @click="onOpen(c.id)">
-                <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
-                  <span
-                    v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
-                    class="status-dot"
-                    :class="signed.getChatOnlineState(c.id)"
-                    aria-hidden="true"
-                  ></span>
-                  {{ c.type === 'personal' ? (c.otherUsername ?? c.id) : (c.name ?? c.id) }}
-                </span>
-                <span v-if="unreadByChatId[c.id]" class="unread-badge" :aria-label="String(t('common.unreadMessages'))">
-                  {{ unreadByChatId[c.id] }}
-                </span>
-              </button>
-            </li>
-          </template>
-          <li v-else>
-            <div class="muted">{{ t('signed.noChats') }}</div>
+      </div>
+
+      <ul class="contacts">
+        <template v-if="sortedChats.length">
+          <li v-for="c in sortedChats" :key="c.id">
+            <button class="contact-row" type="button" :class="{ active: isActive(c.id) }" @click="onOpen(c.id)">
+              <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
+                <span
+                  v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
+                  class="status-dot"
+                  :class="signed.getChatOnlineState(c.id)"
+                  aria-hidden="true"
+                ></span>
+                {{ c.type === 'personal' ? (c.otherUsername ?? c.id) : (c.name ?? c.id) }}
+              </span>
+              <span v-if="unreadByChatId[c.id]" class="unread-badge" :aria-label="String(t('common.unreadMessages'))">
+                {{ unreadByChatId[c.id] }}
+              </span>
+            </button>
           </li>
-        </ul>
+        </template>
+        <li v-else>
+          <div class="muted">{{ t('signed.noChats') }}</div>
+        </li>
+      </ul>
 
-        <div
-          v-if="showAddModal"
-          class="modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="signedAddTitle"
-          @click="(e) => { if (e.target === e.currentTarget) closeAdd() }"
-        >
-          <div class="modal-card">
-            <div class="modal-title" id="signedAddTitle">{{ t('signed.add') }}</div>
+      <div
+        v-if="showAddModal"
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signedAddTitle"
+        @click="(e) => { if (e.target === e.currentTarget) closeAdd() }"
+      >
+        <div class="modal-card">
+          <div class="modal-title" id="signedAddTitle">{{ t('signed.add') }}</div>
 
-            <label class="field" for="friend">
-              <span class="field-label">{{ t('signed.addFriend') }}</span>
-              <input id="friend" v-model="friend" maxlength="64" :placeholder="String(t('signed.friendPlaceholder'))" />
-            </label>
-            <button class="secondary" type="button" :disabled="busy || !friend.trim()" @click="onAddFriend">
-              {{ t('signed.createChat') }}
-            </button>
+          <label class="field" for="friend">
+            <span class="field-label">{{ t('signed.addFriend') }}</span>
+            <input id="friend" v-model="friend" maxlength="64" :placeholder="String(t('signed.friendPlaceholder'))" />
+          </label>
+          <button class="secondary" type="button" :disabled="busy || !friend.trim()" @click="onAddFriend">
+            {{ t('signed.createChat') }}
+          </button>
 
-            <label class="field" for="group-name" style="margin-top: 12px;">
-              <span class="field-label">{{ t('signed.groupName') }}</span>
-              <input
-                id="group-name"
-                v-model="groupName"
-                maxlength="64"
-                :placeholder="String(t('signed.groupNamePlaceholder'))"
-              />
-            </label>
-            <button class="secondary" type="button" :disabled="busy || !groupName.trim()" @click="onCreateGroup">
-              {{ t('signed.createGroup') }}
-            </button>
+          <label class="field" for="group-name" style="margin-top: 12px;">
+            <span class="field-label">{{ t('signed.groupName') }}</span>
+            <input
+              id="group-name"
+              v-model="groupName"
+              maxlength="64"
+              :placeholder="String(t('signed.groupNamePlaceholder'))"
+            />
+          </label>
+          <button class="secondary" type="button" :disabled="busy || !groupName.trim()" @click="onCreateGroup">
+            {{ t('signed.createGroup') }}
+          </button>
 
-            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-              <button class="secondary" type="button" :disabled="busy" @click="closeAdd">{{ t('common.close') }}</button>
-            </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+            <button class="secondary" type="button" :disabled="busy" @click="closeAdd">{{ t('common.close') }}</button>
           </div>
         </div>
       </div>
