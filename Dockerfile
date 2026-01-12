@@ -9,12 +9,15 @@ RUN npm run build
 
 FROM node:20-alpine
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl libstdc++
 
 WORKDIR /app
 
 COPY server/package.json ./server/package.json
-RUN cd server && npm install --omit=dev
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+	&& cd server \
+	&& npm_config_build_from_source=true npm install --omit=dev \
+	&& apk del .build-deps
 
 COPY server ./server
 COPY --from=client-build /app/client/dist ./client/dist
