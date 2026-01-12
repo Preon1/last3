@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useSignedStore } from '../stores/signed'
@@ -143,6 +143,14 @@ const editBusy = ref(false)
 const replyingToId = ref<string | null>(null)
 const replyingToLabel = ref<string>('')
 
+const msgMenuOpen = ref(false)
+const msgMenuX = ref(0)
+const msgMenuY = ref(0)
+const msgMenuMsg = ref<any | null>(null)
+const msgMenuEl = ref<HTMLElement | null>(null)
+
+type LinkPart = { text: string; href?: string }
+
 function isMineMessage(senderId: string) {
   return Boolean(userId.value && senderId === userId.value)
 }
@@ -175,6 +183,177 @@ function cancelEdit() {
   editingId.value = null
   editingText.value = ''
 }
+
+function closeMsgMenu() {
+  msgMenuOpen.value = false
+  msgMenuMsg.value = null
+}
+
+function focusChatInputSoon() {
+  if (window.innerWidth <= 768) return
+  if (!activeChatId.value) return
+  if (editingId.value) return
+
+  window.setTimeout(() => {
+    if (window.innerWidth <= 768) return
+    if (!activeChatId.value) return
+    if (editingId.value) return
+    try {
+      chatInputEl.value?.focus()
+    } catch {
+      // ignore
+    }
+  }, 50)
+}
+
+function normalizeTel(raw: string) {
+  const s = String(raw ?? '').trim()
+  const hasPlus = s.startsWith('+')
+  const digits = s.replace(/\D/g, '')
+  if (!digits) return null
+  return `${hasPlus ? '+' : ''}${digits}`
+}
+
+function linkifyText(raw: string): LinkPart[] {
+  const text = String(raw ?? '')
+  if (!text) return [{ text: '' }]
+
+  // URL / email / phone
+  const re = /(\bhttps?:\/\/[^\s<]+|\bwww\.[^\s<]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\+?\d[\d\s().-]{6,}\d)/g
+  const parts: LinkPart[] = []
+
+  let lastIndex = 0
+  for (let match = re.exec(text); match; match = re.exec(text)) {
+    const idx = match.index ?? 0
+    const token = String(match[0] ?? '')
+
+    if (idx > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, idx) })
+    }
+
+    let href: string | undefined
+    const lower = token.toLowerCase()
+
+    if (token.includes('@') && !lower.startsWith('http') && !lower.startsWith('www.')) {
+      href = `mailto:${token}`
+    } else if (lower.startsWith('http://') || lower.startsWith('https://')) {
+      href = token
+    } else if (lower.startsWith('www.')) {
+      href = `https://${token}`
+    } else {
+      const tel = normalizeTel(token)
+      const digitCount = tel ? tel.replace(/\D/g, '').length : 0
+      if (tel && digitCount >= 8) {
+        href = `tel:${tel}`
+      }
+    }
+
+    parts.push(href ? { text: token, href } : { text: token })
+    lastIndex = idx + token.length
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex) })
+  }
+
+  return parts.length ? parts : [{ text }]
+}
+
+async function copyText(text: string) {
+  const s = String(text ?? '')
+  try {
+    await navigator.clipboard.writeText(s)
+    toast.push({ title: String(t('toast.copiedTitle')), message: String(t('toast.copiedBody')), variant: 'info', timeoutMs: 2000 })
+    return
+  } catch {
+    // ignore, fallback below
+  }
+
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = s
+    ta.setAttribute('readonly', 'true')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    ta.style.top = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (!ok) throw new Error('execCommand(copy) failed')
+    toast.push({ title: String(t('toast.copiedTitle')), message: String(t('toast.copiedBody')), variant: 'info', timeoutMs: 2000 })
+  } catch {
+    toast.error(String(t('toast.copyFailedTitle')), String(t('toast.copyFailedBody')))
+  }
+}
+
+function openMsgMenu(e: MouseEvent, m: any) {
+  e.preventDefault()
+  e.stopPropagation()
+  msgMenuMsg.value = m
+  msgMenuOpen.value = true
+  msgMenuX.value = e.clientX
+  msgMenuY.value = e.clientY
+
+  void nextTick(() => {
+    const el = msgMenuEl.value
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const pad = 8
+    const maxX = Math.max(pad, window.innerWidth - r.width - pad)
+    const maxY = Math.max(pad, window.innerHeight - r.height - pad)
+    msgMenuX.value = Math.min(Math.max(msgMenuX.value, pad), maxX)
+    msgMenuY.value = Math.min(Math.max(msgMenuY.value, pad), maxY)
+  })
+}
+
+function onMsgMenuReply() {
+  if (!msgMenuMsg.value) return
+  startReply(msgMenuMsg.value)
+  closeMsgMenu()
+}
+
+function onMsgMenuEdit() {
+  if (!msgMenuMsg.value) return
+  startEdit(msgMenuMsg.value)
+  closeMsgMenu()
+}
+
+function onMsgMenuDelete() {
+  const m = msgMenuMsg.value
+  if (!m) return
+  void deleteMsg(String(m.chatId), String(m.id), String(m.senderId))
+  closeMsgMenu()
+}
+
+function onMsgMenuCopy() {
+  const m = msgMenuMsg.value
+  if (!m) return
+  void copyText(String(m.text ?? ''))
+  closeMsgMenu()
+}
+
+function onGlobalPointerDown(e: PointerEvent) {
+  if (!msgMenuOpen.value) return
+  const el = msgMenuEl.value
+  if (!el) return
+  if (!(e.target instanceof Node)) return
+  if (el.contains(e.target)) return
+  closeMsgMenu()
+}
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (!msgMenuOpen.value) return
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  closeMsgMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onGlobalPointerDown)
+  document.addEventListener('keydown', onGlobalKeyDown)
+  focusChatInputSoon()
+})
 
 function showSendError(e: any) {
   const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
@@ -276,17 +455,21 @@ watch(
   () => activeChatId.value,
   async () => {
     disconnectObserver()
+    closeMsgMenu()
     didInitialScroll.value = false
     loadMoreHasMore.value = true
     loadMoreBusy.value = false
     isPrepending.value = false
     await nextTick()
     ensureObserver()
+    focusChatInputSoon()
   },
 )
 
 onBeforeUnmount(() => {
   disconnectObserver()
+  document.removeEventListener('pointerdown', onGlobalPointerDown)
+  document.removeEventListener('keydown', onGlobalKeyDown)
 })
 
 async function onSend() {
@@ -305,11 +488,21 @@ async function onSend() {
   }
 }
 
-function fmtIso(iso: string) {
+function fmtMessageTime(iso: string) {
   try {
     const d = new Date(iso)
     if (Number.isNaN(d.getTime())) return ''
-    return d.toLocaleString()
+    const now = new Date()
+    const isToday =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    if (isToday) return time
+
+    const date = d.toLocaleDateString()
+    return `${date} ${time}`
   } catch {
     return ''
   }
@@ -388,11 +581,49 @@ async function onAddMember() {
 }
 
 function onChatKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowUp') {
+    if (editBusy.value) return
+    if (editingId.value) return
+    const cid = activeChatId.value
+    if (!cid) return
+
+    const el = chatInputEl.value
+    const atTop = Boolean(el && el.selectionStart === 0 && el.selectionEnd === 0)
+    const empty = !chatInput.value.trim()
+    if (!atTop || !empty) return
+
+    const uid = userId.value
+    if (!uid) return
+    const list = rendered.value
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m: any = list[i]
+      if (!m) continue
+      if (String(m.senderId) !== String(uid)) continue
+      if (typeof m.text !== 'string' || !m.text.trim()) continue
+      startEdit(m)
+      e.preventDefault()
+      void nextTick(() => {
+        try {
+          const root = chatMessagesEl.value
+          if (!root) return
+          const msgEl = root.querySelector(`[data-msg-id="${cssEscape(String(m.id))}"]`) as HTMLElement | null
+          const ta = msgEl?.querySelector('textarea') as HTMLTextAreaElement | null
+          ta?.focus()
+        } catch {
+          // ignore
+        }
+      })
+      return
+    }
+    return
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     void onSend()
   }
 }
+
 
 async function tryLoadMore() {
   const cid = activeChatId.value
@@ -426,6 +657,7 @@ function onMessagesScroll() {
     void tryLoadMore()
   }
 }
+
 </script>
 
 <template>
@@ -447,63 +679,26 @@ function onMessagesScroll() {
     <div v-if="memberErr" class="status" aria-live="polite" style="margin: 0 12px 8px;">{{ memberErr }}</div>
 
     <div ref="chatMessagesEl" class="chat-messages" aria-live="polite" @scroll="onMessagesScroll">
-      <div v-for="m in rendered" :key="m.id" class="chat-line" :ref="(el) => setMessageEl(m.id, el as any)" :data-msg-id="m.id">
+      <div
+        v-for="m in rendered"
+        :key="m.id"
+        class="chat-line"
+        :class="{ 'chat-line--reply-target': replyingToId === m.id }"
+        :ref="(el) => setMessageEl(m.id, el as any)"
+        :data-msg-id="m.id"
+        @contextmenu.prevent="openMsgMenu($event, m)"
+      >
         <div class="chat-meta">
           <span>{{ m.fromUsername }}</span>
 
           <span class="muted" style="margin-left: 10px;">
             <template v-if="m.modifiedAtIso">
-              {{ t('common.modified') }} {{ fmtIso(String(m.modifiedAtIso)) }}
+              {{ t('common.modified') }} {{ fmtMessageTime(String(m.modifiedAtIso)) }}
             </template>
             <template v-else>
-              {{ fmtIso(m.atIso) }}
+              {{ fmtMessageTime(m.atIso) }}
             </template>
           </span>
-
-          <div
-            v-if="isMineMessage(m.senderId) && editingId !== m.id"
-            style="margin-left: auto; display: flex; gap: 8px; align-items: center;"
-          >
-            <button
-              class="reply-btn"
-              type="button"
-              style="margin-left: 0;"
-              :disabled="editBusy || editingId !== null"
-              @click="startReply(m)"
-            >
-              {{ t('common.reply') }}
-            </button>
-            <button
-              class="reply-btn"
-              type="button"
-              style="margin-left: 0;"
-              :disabled="editBusy || (editingId !== null && editingId !== m.id)"
-              @click="startEdit(m)"
-            >
-              {{ t('common.edit') }}
-            </button>
-            <button
-              class="reply-btn"
-              type="button"
-              style="margin-left: 0;"
-              :disabled="editBusy || editingId !== null"
-              @click="deleteMsg(m.chatId, m.id, m.senderId)"
-            >
-              {{ t('common.delete') }}
-            </button>
-          </div>
-
-          <div v-else style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
-            <button
-              class="reply-btn"
-              type="button"
-              style="margin-left: 0;"
-              :disabled="editBusy || editingId !== null"
-              @click="startReply(m)"
-            >
-              {{ t('common.reply') }}
-            </button>
-          </div>
         </div>
 
         <div v-if="m.replyToId" class="muted" style="margin-top: 4px; font-size: 12px;">
@@ -522,14 +717,78 @@ function onMessagesScroll() {
             <button type="button" :disabled="editBusy || !editingText.trim()" @click="saveEdit(m.chatId, m.id)">{{ t('common.save') }}</button>
           </div>
         </div>
-        <div v-else class="chat-text">{{ m.text }}</div>
+        <div v-else class="chat-text">
+          <template v-for="(p, i) in linkifyText(String(m.text ?? ''))" :key="i">
+            <a
+              v-if="p.href"
+              class="chat-link"
+              :href="p.href"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ p.text }}</a>
+            <span v-else>{{ p.text }}</span>
+          </template>
+        </div>
       </div>
     </div>
 
+    <div
+      v-if="msgMenuOpen && msgMenuMsg"
+      ref="msgMenuEl"
+      class="msg-menu"
+      role="menu"
+      :style="{ left: msgMenuX + 'px', top: msgMenuY + 'px' }"
+    >
+      <button
+        class="secondary msg-menu-item"
+        type="button"
+        role="menuitem"
+        :disabled="editBusy || editingId !== null"
+        @click="onMsgMenuReply"
+      >
+        {{ t('common.reply') }}
+      </button>
+
+      <button
+        class="secondary msg-menu-item"
+        type="button"
+        role="menuitem"
+        :disabled="!isMineMessage(String(msgMenuMsg.senderId)) || editBusy || (editingId !== null && editingId !== String(msgMenuMsg.id))"
+        @click="onMsgMenuEdit"
+      >
+        {{ t('common.edit') }}
+      </button>
+
+      <button
+        class="secondary msg-menu-item"
+        type="button"
+        role="menuitem"
+        @click="onMsgMenuCopy"
+      >
+        {{ t('common.copy') }}
+      </button>
+
+      <button
+        class="secondary msg-menu-item"
+        type="button"
+        role="menuitem"
+        :disabled="!isMineMessage(String(msgMenuMsg.senderId)) || editBusy || editingId !== null"
+        @click="onMsgMenuDelete"
+      >
+        {{ t('common.delete') }}
+      </button>
+    </div>
+
     <div class="chat-input">
-      <div v-if="replyingToId" class="muted" style="margin: 0 0 6px; display: flex; justify-content: space-between; gap: 12px;">
-        <span>{{ t('chat.replying') }}: {{ replyingToLabel }}</span>
-        <button class="secondary" type="button" @click="cancelReply">{{ t('common.cancel') }}</button>
+      <div v-if="replyingToId" class="muted chat-submode-cancel">
+        <button
+          class="secondary icon-only"
+          type="button"
+          :aria-label="String(t('common.cancel'))"
+          @click="cancelReply"
+        >
+          <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#x"></use></svg>
+        </button>
       </div>
       <textarea
         ref="chatInputEl"

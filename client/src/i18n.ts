@@ -58,6 +58,7 @@ export const messages = {
       delete: 'Delete',
       save: 'Save',
       modified: 'modified',
+      copy: 'Copy',
     },
     toast: {
       chatSendFailedTitle: 'Message not sent',
@@ -67,6 +68,10 @@ export const messages = {
       introvertTitle: 'Cannot add user',
       introvertBody:
         'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
+      copiedTitle: 'Copied',
+      copiedBody: 'Message copied to clipboard.',
+      copyFailedTitle: 'Copy failed',
+      copyFailedBody: 'Could not copy message to clipboard.',
     },
     setup: {
       subtitle: 'Anonymous, encrypted voice web messenger with no registration and no chat history.',
@@ -306,6 +311,7 @@ export const messages = {
       title: 'Over',
       description:
         'Last is een gratis, anonieme, tijdelijke webmessenger met open source-code. Dit betekent dat er geen installatie of registratie nodig is, dat het niet gekoppeld is aan een telefoonnummer, e-mail of naam, geen logs, gesprekken of logins opslaat, geen sessies of cookies aanmaakt en geen statistieken verzamelt. Iedereen (personen of bedrijven) kan een geïsoleerde kopie van deze app opzetten voor eigen communicatiedoeleinden.<br>Spraakcommunicatie is versleuteld en berichten worden verstuurd via een met SSL versleuteld kanaal. (In de volgende versie wordt de berichtendienst ook voorzien van een extra client-naar-client versleutelingslaag om toegang via een aanval op de server te voorkomen).<br>De naam "Last" komt van "last resort communication".<br>Wat is er op dit moment gerealiseerd:<br>1. Groepschat en privéchats.<br>2. Spraakgesprekken<br>3. Groepsspraakgesprekken<br>4. Meerdere talen.<br>Wat zijn de nadelen van deze aanpak?<br>1. Geen gespreksgeschiedenis. Die wordt zelfs niet op je apparaat opgeslagen. Tabblad sluiten en opnieuw openen — alles is verdwenen.<br>2. Je kunt geen bericht sturen of bellen naar iemand die niet online is. Je berichten worden alleen ontvangen door mensen die nu online zijn. Als je iemand iets hebt gestuurd en daarna jij en je gesprekspartner offline gaan, bestaan die berichten niet meer. Communicatie is dus sessiegebonden: spreek vooraf af, praat, en ga weer weg. Je kunt ook gewoon online blijven.<br>3. Je weet mogelijk niet met wie je precies praat. Voor toegang is alleen een willekeurige nickname nodig, dus de verantwoordelijkheid om de identiteit van de ander te begrijpen ligt volledig bij de gebruiker.<br>4. (In de huidige versie) Communicatie in een kleine kring. Je hebt geen lijst met persoonlijke contacten. Je ziet iedereen die nu online is, dus één app-instantie* is niet bedoeld voor massaal gebruik door miljoenen of zelfs duizenden gebruikers. Ook zijn er grenzen aan hoeveel audioconferenties de server tegelijkertijd kan ondersteunen.<br>*Een app-instantie is een kopie die op een private server draait en bereikbaar is via één of meerdere webadressen of een IP-adres. Een groep gebruikers wordt dus alleen verbonden door het kennen van dat adres. Het aantal instanties is onbeperkt.<br>De ontwikkelaar van de applicatie is niet verantwoordelijk voor hoe deze wordt gebruikt en welke gegevens er via worden verzonden. De code van de applicatie mag door iedereen worden gekopieerd en aangepast voor eigen gebruik, mits de link naar de oorspronkelijke repository behouden blijft in de sectie "Over". De volledige licentie is beschikbaar in Git.',
+      copy: 'Kopiëren',
       repoLink: 'Git-repository',
     },
     theme: {
@@ -313,6 +319,10 @@ export const messages = {
       system: 'Systeem',
       dark: 'Donker',
       light: 'Licht',
+      copiedTitle: 'Gekopieerd',
+      copiedBody: 'Bericht gekopieerd naar klembord.',
+      copyFailedTitle: 'Kopiëren mislukt',
+      copyFailedBody: 'Kon bericht niet naar klembord kopiëren.',
       toggleAria: 'Thema wisselen',
     },
     settings: {
@@ -461,6 +471,7 @@ export const messages = {
     },
     theme: {
       label: 'Thème : {mode}',
+      copy: 'Copier',
       system: 'Système',
       dark: 'Sombre',
       light: 'Clair',
@@ -468,6 +479,10 @@ export const messages = {
     },
     settings: {
       title: 'Paramètres',
+      copiedTitle: 'Copié',
+      copiedBody: 'Message copié dans le presse-papiers.',
+      copyFailedTitle: 'Échec de la copie',
+      copyFailedBody: "Impossible de copier le message dans le presse-papiers.",
       youLabel: 'Vous :',
     },
     notifications: {
@@ -604,6 +619,7 @@ export const messages = {
     theme: {
       label: 'Thema: {mode}',
       system: 'System',
+      copy: 'Kopieren',
       dark: 'Dunkel',
       light: 'Hell',
       toggleAria: 'Thema wechseln',
@@ -611,6 +627,10 @@ export const messages = {
       modified: 'bearbeitet',
     settings: {
       title: 'Einstellungen',
+      copiedTitle: 'Kopiert',
+      copiedBody: 'Nachricht in die Zwischenablage kopiert.',
+      copyFailedTitle: 'Kopieren fehlgeschlagen',
+      copyFailedBody: 'Nachricht konnte nicht in die Zwischenablage kopiert werden.',
       youLabel: 'Du:',
     },
     notifications: {
@@ -753,6 +773,7 @@ export const messages = {
     },
     theme: {
       label: 'Тема: {mode}',
+      copy: 'Копировать',
       system: 'Системная',
       dark: 'Тёмная',
       light: 'Светлая',
@@ -760,6 +781,10 @@ export const messages = {
     },
     settings: {
       title: 'Настройки',
+      copiedTitle: 'Скопировано',
+      copiedBody: 'Сообщение скопировано в буфер обмена.',
+      copyFailedTitle: 'Не удалось скопировать',
+      copyFailedBody: 'Не удалось скопировать сообщение в буфер обмена.',
       youLabel: 'Вы:',
     },
     notifications: {
