@@ -1,8 +1,14 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { notify } from '../utils/notify'
 import { tryGetWebPushSubscriptionJson } from '../utils/push'
-import { closeNotificationsByTag, getNotificationsEnabled, setNotificationsEnabled } from '../utils/notificationPrefs'
+import {
+  broadcastAppStateToServiceWorker,
+  closeAllNotifications,
+  closeNotificationsByTag,
+  getNotificationsEnabled,
+  setNotificationsEnabled,
+} from '../utils/notificationPrefs'
 import {
   decryptPrivateKeyJwk,
   decryptSignedMessage,
@@ -165,6 +171,37 @@ export const useSignedStore = defineStore('signed', () => {
   let presenceTimer: number | null = null
 
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
+  async function syncAppStateToServiceWorker() {
+    try {
+      const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
+      await broadcastAppStateToServiceWorker({ foreground, view: view.value })
+
+      if (foreground && view.value === 'contacts') {
+        await closeAllNotifications()
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Keep SW aware of whether it should suppress push while user is in-app.
+  watch(
+    () => view.value,
+    () => {
+      void syncAppStateToServiceWorker()
+    },
+    { immediate: true },
+  )
+
+  try {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        void syncAppStateToServiceWorker()
+      })
+    }
+  } catch {
+    // ignore
+  }
 
   let tokenRefreshTimer: number | null = null
 

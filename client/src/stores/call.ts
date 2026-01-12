@@ -560,14 +560,22 @@ export const useCallStore = defineStore('call', () => {
 
       // Best-effort alerts (no permission prompts here).
       startRingtone()
-      notify(
-        String(i18n.global.t('call.incomingCall')),
-        pendingIncomingFromName.value
-          ? String(i18n.global.t('call.from', { name: pendingIncomingFromName.value }))
-          : String(i18n.global.t('call.incomingCall')),
-        { tag: 'lrcom-call' },
-      )
-      vibrate([200, 100, 200, 100, 400])
+
+      // Suppress OS-level notifications when user is actively in the app on
+      // contacts list (they can already see incoming-call UI).
+      const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
+      const onContacts = signed.view === 'contacts'
+      const shouldSystemNotify = !(foreground && onContacts)
+      if (shouldSystemNotify) {
+        notify(
+          String(i18n.global.t('call.incomingCall')),
+          pendingIncomingFromName.value
+            ? String(i18n.global.t('call.from', { name: pendingIncomingFromName.value }))
+            : String(i18n.global.t('call.incomingCall')),
+          { tag: 'lrcom-call' },
+        )
+        vibrate([200, 100, 200, 100, 400])
+      }
       return
     }
 
