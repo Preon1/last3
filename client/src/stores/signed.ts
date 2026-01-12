@@ -63,6 +63,13 @@ const SS_LAST_USERNAME = 'lrcom-signed-last-username'
 
 const MAX_PASSWORD_LEN = 512
 
+const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
+const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large'
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
 type StoredKeyV2 = {
   v: 2
   encryptedUsername: string
@@ -753,6 +760,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function updateMessage(chatId: string, messageId: string, encryptedData: string) {
+    if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
     await fetchJson('/api/signed/messages/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -792,6 +800,8 @@ export const useSignedStore = defineStore('signed', () => {
       plaintext: { text: t, atIso, replyToId, modifiedAtIso },
       recipients,
     })
+
+    if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
     await updateMessage(chatId, messageId, encryptedData)
 
@@ -1061,6 +1071,8 @@ export const useSignedStore = defineStore('signed', () => {
       plaintext: { text: t, atIso, replyToId, modifiedAtIso: null },
       recipients,
     })
+
+    if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
     const j = await fetchJson('/api/signed/messages/send', {
       method: 'POST',

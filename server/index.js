@@ -401,12 +401,19 @@ app.get('/api/signed/messages/unread', requireSignedAuth, async (req, res) => {
   }
 });
 
+const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024;
+const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large';
+
 app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
   try {
     const senderId = String(req._signedUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
     if (!chatId || !encryptedData) return res.status(400).json({ error: 'chatId and encryptedData required' });
+
+    if (Buffer.byteLength(encryptedData, 'utf8') > MAX_ENCRYPTED_MESSAGE_BYTES) {
+      return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
+    }
 
     const senderUsernameRes = await query('SELECT username FROM users WHERE id = $1 LIMIT 1', [senderId]);
     const senderUsername = String(senderUsernameRes?.rows?.[0]?.username ?? '');
@@ -468,6 +475,10 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
     if (!chatId || !messageId || !encryptedData) {
       return res.status(400).json({ error: 'chatId, messageId, encryptedData required' });
+    }
+
+    if (Buffer.byteLength(encryptedData, 'utf8') > MAX_ENCRYPTED_MESSAGE_BYTES) {
+      return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
     }
 
     const r = await signedUpdateMessage({ userId, chatId, messageId, encryptedData });

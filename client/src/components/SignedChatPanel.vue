@@ -3,8 +3,10 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useSignedStore } from '../stores/signed'
+import { useToastStore } from '../stores/toast'
 
 const signed = useSignedStore()
+const toast = useToastStore()
 const { t } = useI18n()
 
 const { activeChatId, messagesByChatId, chats, userId, membersByChatId } = storeToRefs(signed)
@@ -173,6 +175,15 @@ function cancelEdit() {
   editingText.value = ''
 }
 
+function showSendError(e: any) {
+  const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+  if (msg === 'Encrypted message too large') {
+    toast.error(String(t('toast.chatTooLargeTitle')), String(t('toast.chatTooLargeBody')))
+    return
+  }
+  toast.error(String(t('toast.chatSendFailedTitle')), msg)
+}
+
 async function saveEdit(chatId: string, messageId: string) {
   if (!chatId) return
   if (!messageId) return
@@ -182,6 +193,8 @@ async function saveEdit(chatId: string, messageId: string) {
   try {
     await signed.updateMessageText(chatId, messageId, next)
     cancelEdit()
+  } catch (e: any) {
+    showSendError(e)
   } finally {
     editBusy.value = false
   }
@@ -280,10 +293,14 @@ async function onSend() {
   if (!cid) return
   const t0 = chatInput.value.trim()
   if (!t0) return
-  chatInput.value = ''
   const rid = replyingToId.value
-  cancelReply()
-  await signed.sendMessage(cid, t0, { replyToId: rid })
+  try {
+    await signed.sendMessage(cid, t0, { replyToId: rid })
+    chatInput.value = ''
+    cancelReply()
+  } catch (e: any) {
+    showSendError(e)
+  }
 }
 
 function fmtIso(iso: string) {
@@ -452,7 +469,6 @@ function onMessagesScroll() {
           <textarea
             v-model="editingText"
             rows="2"
-            maxlength="500"
             autocomplete="off"
             style="width: 100%; margin-top: 6px;"
           ></textarea>
@@ -474,7 +490,6 @@ function onMessagesScroll() {
         v-model="chatInput"
         :disabled="!activeChatId"
         rows="1"
-        maxlength="500"
         autocomplete="off"
         :placeholder="String(t('chat.typeMessage'))"
         @keydown="onChatKeydown"

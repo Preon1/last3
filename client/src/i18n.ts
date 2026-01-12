@@ -62,6 +62,8 @@ export const messages = {
     toast: {
       chatSendFailedTitle: 'Message not sent',
       chatSendFailedBody: "Couldn't reach the server. Please check your connection and try again.",
+      chatTooLargeTitle: 'Message not sent',
+      chatTooLargeBody: 'Message is too large to send.',
     },
     setup: {
       subtitle: 'Anonymous, encrypted voice web messenger with no registration and no chat history.',
