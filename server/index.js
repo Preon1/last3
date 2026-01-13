@@ -525,8 +525,8 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
         const r = await query(
           `SELECT DISTINCT other.user_id::text AS other_user_id
            FROM chats c
-           INNER JOIN chat_members me_cm ON me_cm.chat_id = c.id AND me_cm.user_id = $1
-           INNER JOIN chat_members other ON other.chat_id = c.id AND other.user_id <> $1
+           INNER JOIN chat_members me_cm ON me_cm.chat_id = c.id AND me_cm.user_id::text = $1
+           INNER JOIN chat_members other ON other.chat_id = c.id AND other.user_id::text <> $1
            WHERE c.chat_type = 'personal'`,
           [me],
         );

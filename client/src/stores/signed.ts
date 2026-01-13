@@ -186,6 +186,7 @@ export const useSignedStore = defineStore('signed', () => {
   let presenceTimer: number | null = null
 
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
+  const signedReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value))
   async function syncAppStateToServiceWorker() {
     try {
       const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
@@ -232,6 +233,17 @@ export const useSignedStore = defineStore('signed', () => {
       presenceTimer = null
     }
   }
+
+  // Presence polling should not depend on WS open: if WS is delayed/blocked
+  // we still want to query presence for known correspondents.
+  watch(
+    () => signedReadyForPresence.value,
+    (ready) => {
+      if (ready) startPresencePolling()
+      else clearPresenceTimer()
+    },
+    { immediate: true },
+  )
 
   function clearTokenRefreshTimer() {
     if (tokenRefreshTimer != null) {
@@ -458,11 +470,11 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function refreshPresence() {
+
     if (!token.value || !userId.value) return
 
-    // Privacy + load: presence can only be requested for correspondents in
-    // personal chats. If we're actively viewing a personal chat, request only
-    // the current correspondent.
+    // Always send a presence request, even if there are no contacts.
+    // If there are no contacts, send an empty list to act as a keepalive.
     const list: string[] = []
 
     if (view.value === 'chat' && activeChatId.value) {
@@ -478,10 +490,7 @@ export const useSignedStore = defineStore('signed', () => {
       list.push(...Array.from(ids))
     }
 
-    if (!list.length) {
-      onlineByUserId.value = {}
-      return
-    }
+    // Always send the request, even if list is empty.
 
     try {
       const j = await fetchJson('/api/signed/presence', {
@@ -500,6 +509,11 @@ export const useSignedStore = defineStore('signed', () => {
       busyByUserId.value = nextBusy
     } catch {
       // ignore
+    }
+    // If list is empty, still update state to empty objects (no one online/busy)
+    if (!list.length) {
+      onlineByUserId.value = {}
+      busyByUserId.value = {}
     }
   }
 
