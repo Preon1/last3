@@ -1,6 +1,13 @@
 # Public site (set LRCOM_DOMAIN in your .env). The default keeps the file
 # parseable if the env var is missing.
-{$LRCOM_DOMAIN:localhost} {
+#
+# Force HTTP -> HTTPS redirect.
+http://{$LRCOM_DOMAIN:localhost} {
+  redir https://{host}{uri} permanent
+}
+
+# HTTPS site (adds HSTS).
+https://{$LRCOM_DOMAIN:localhost} {
   # Disable all access logs (no connection tracking, no IPs logged)
   log {
     output discard
@@ -13,6 +20,11 @@
 
 
   route {
+    # HSTS: after the first successful HTTPS response, browsers will automatically
+    # upgrade future navigations to HTTPS.
+    # NOTE: This is sticky in browsers; keep it enabled only when you're sure HTTPS is correct.
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
     # Cache static files copied from client/public/ (these end up at the site root).
     # Note: service worker updates can get sticky if cached; keep sw.js no-cache.
     @service_worker {
