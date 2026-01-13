@@ -7,9 +7,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username VARCHAR(64) UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
   public_key TEXT NOT NULL,
-  expiration_days INTEGER NOT NULL CHECK (expiration_days >= 7 AND expiration_days <= 365),
+  vault TEXT NOT NULL DEFAULT '',
   remove_date TIMESTAMP NOT NULL,
   hidden_mode BOOLEAN NOT NULL DEFAULT FALSE,
   introvert_mode BOOLEAN NOT NULL DEFAULT FALSE

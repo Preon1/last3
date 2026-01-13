@@ -15,7 +15,23 @@ const { lastUsername, username: restoredUsername } = storeToRefs(signed)
 
 const username = ref(lastUsername.value || restoredUsername.value || '')
 const password = ref('')
-const expirationDays = ref(30)
+
+function randomIntInclusive(min: number, max: number) {
+  const lo = Math.min(min, max)
+  const hi = Math.max(min, max)
+  const range = hi - lo + 1
+  try {
+    const u32 = new Uint32Array(1)
+    crypto.getRandomValues(u32)
+    const v = u32[0] ?? 0
+    return lo + (v % range)
+  } catch {
+    return lo + Math.floor(Math.random() * range)
+  }
+}
+
+// Prefill with a random value each time the setup screen is opened.
+const expirationDays = ref(randomIntInclusive(180, 365))
 
 const MAX_PASSWORD_LEN = 512
 
@@ -185,7 +201,7 @@ async function onLogin() {
   }
 }
 
-function onRegister() {
+async function onRegister() {
   err.value = ''
   if (!canRegister.value) return
   if (password.value.length > MAX_PASSWORD_LEN) {
@@ -193,8 +209,32 @@ function onRegister() {
     return
   }
 
+  const u = username.value.trim()
+  if (!u) return
+
+  // Check name availability before asking the user for entropy.
+  busy.value = true
+  try {
+    const r = await fetch('/api/auth/check-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u }),
+    })
+    const j = await r.json().catch(() => ({} as any))
+    if (!r.ok) throw new Error(typeof (j as any)?.error === 'string' ? String((j as any).error) : 'Request failed')
+    if ((j as any)?.exists === true) {
+      err.value = String(t('signed.errUsernameExists'))
+      return
+    }
+  } catch (e: any) {
+    err.value = toUserError(e)
+    return
+  } finally {
+    busy.value = false
+  }
+
   // Collect user interaction entropy before triggering register.
-  pendingRegister.value = { username: username.value.trim(), password: password.value, expirationDays: Number(expirationDays.value) }
+  pendingRegister.value = { username: u, password: password.value, expirationDays: Number(expirationDays.value) }
   entropyHits.value = []
   entropyOpen.value = true
 }

@@ -171,6 +171,27 @@ export async function importRsaPrivateKeyJwk(jwkJson: string) {
   )
 }
 
+export async function encryptSmallStringWithPublicKeyJwk(params: {
+  plaintext: string
+  publicKeyJwkJson: string
+}) {
+  const pt = String(params.plaintext)
+  // RSA-OAEP has a maximum plaintext size; keep this bounded.
+  if (pt.length > 1024) throw new Error('Plaintext too large')
+  const pub = await importRsaPublicKeyJwk(params.publicKeyJwkJson)
+  const ct = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pub, encUtf8(pt))
+  return b64(ct)
+}
+
+export async function decryptSmallStringWithPrivateKey(params: {
+  ciphertextB64: string
+  privateKey: CryptoKey
+}) {
+  const wrapped = unb64(String(params.ciphertextB64))
+  const pt = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, params.privateKey, wrapped)
+  return decUtf8(pt)
+}
+
 export async function encryptSignedMessage(params: {
   plaintext: {
     text: string

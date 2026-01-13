@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
 import { initDatabase, query, runMigrations } from './db.js';
-import { registerUser, loginUser, getUserByUsername } from './auth.js';
+import { registerUser, findUserByUsernameAndPublicKey, getUserByUsername } from './auth.js';
 import { issueToken, getUserIdForToken, requireSignedAuth, parseAuthTokenFromReq, revokeToken } from './signedSession.js';
 import {
   signedListChats,
@@ -67,6 +67,58 @@ const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? '';
 const PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 
 const VAPID_SUBJECT = (process.env.VAPID_SUBJECT ?? '').trim() || 'mailto:admin@localhost';
+
+// Login challenges are RAM-only. Server restart => login retry required.
+// challengeId -> { userId: string, challenge: string, expiresAtMs: number }
+const loginChallenges = new Map();
+const LOGIN_CHALLENGE_TTL_MS = 60_000;
+
+function cleanupLoginChallenges() {
+  const now = Date.now();
+  for (const [id, entry] of loginChallenges.entries()) {
+    if (!entry || typeof entry.expiresAtMs !== 'number' || entry.expiresAtMs <= now) {
+      loginChallenges.delete(id);
+    }
+  }
+}
+
+setInterval(cleanupLoginChallenges, 30_000).unref?.();
+
+function parseRsaPublicJwkString(jwkString) {
+  if (!jwkString || typeof jwkString !== 'string') return null;
+  try {
+    const jwk = JSON.parse(jwkString);
+    const kty = typeof jwk?.kty === 'string' ? jwk.kty : null;
+    const n = typeof jwk?.n === 'string' ? jwk.n : null;
+    const e = typeof jwk?.e === 'string' ? jwk.e : null;
+    if (kty !== 'RSA' || !n || !e) return null;
+    return { kty: 'RSA', n, e, ext: true, key_ops: ['encrypt'] };
+  } catch {
+    return null;
+  }
+}
+
+function encryptWithUserPublicKey(publicKeyJwkString, plaintext) {
+  const jwk = parseRsaPublicJwkString(publicKeyJwkString);
+  if (!jwk) throw new Error('Invalid public key');
+  const keyObj = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+  const ct = crypto.publicEncrypt(
+    { key: keyObj, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+    Buffer.from(String(plaintext), 'utf8'),
+  );
+  return ct.toString('base64');
+}
+
+function safeTimingEqual(a, b) {
+  const ab = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ab.length !== bb.length) return false;
+  try {
+    return crypto.timingSafeEqual(ab, bb);
+  } catch {
+    return false;
+  }
+}
 
 if (PUSH_ENABLED) {
   try {
@@ -216,21 +268,21 @@ app.get('/api/config', (req, res) => {
   res.json({ appName: APP_NAME });
 });
 
-// Auth endpoints for authenticated mode
+// Auth endpoints (password is local-only; server never sees it)
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, password, publicKey, expirationDays } = req.body;
-    
-    if (!username || !password || !publicKey || !expirationDays) {
+    const username = typeof req.body?.username === 'string' ? req.body.username : '';
+    const publicKey = typeof req.body?.publicKey === 'string' ? req.body.publicKey : '';
+    const removeDateIso = typeof req.body?.removeDate === 'string' ? req.body.removeDate : '';
+    const vault = typeof req.body?.vault === 'string' ? req.body.vault : '';
+
+    if (!username || !publicKey || !removeDateIso || !vault) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const user = await registerUser({
-      username,
-      password,
-      publicKey,
-      expirationDays: parseInt(expirationDays, 10),
-    });
+    const removeDate = new Date(removeDateIso);
+
+    const user = await registerUser({ username, publicKey, removeDate, vault });
 
     const { token, expiresAt } = issueToken(String(user.id));
 
@@ -244,41 +296,151 @@ app.post('/api/auth/register', async (req, res) => {
       introvertMode: Boolean(user.introvert_mode),
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ error: error?.message || 'Bad request' });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+// Step 1: init login with username + public key, return encrypted challenge.
+app.post('/api/auth/login-init', async (req, res) => {
   try {
-    const { username, password, publicKey } = req.body;
-    
-    if (!username || !password || !publicKey) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const username = typeof req.body?.username === 'string' ? req.body.username : '';
+    const publicKey = typeof req.body?.publicKey === 'string' ? req.body.publicKey : '';
+    if (!username || !publicKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const result = await loginUser({ username, password, publicKey });
+    const user = await findUserByUsernameAndPublicKey({ username, publicKey });
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-    const { token, expiresAt } = issueToken(String(result.userId));
+    const challenge = crypto.randomBytes(32).toString('base64url');
+    const challengeId = crypto.randomBytes(16).toString('base64url');
+    loginChallenges.set(challengeId, { userId: String(user.id), challenge, expiresAtMs: Date.now() + LOGIN_CHALLENGE_TTL_MS });
+
+    const encryptedChallengeB64 = encryptWithUserPublicKey(String(user.public_key), challenge);
+    res.json({ success: true, challengeId, encryptedChallengeB64 });
+  } catch {
+    // No details.
+    res.status(401).json({ error: 'Unauthorized' });
+  }
+});
+
+// Step 2: finalize login by proving the private key (decrypt challenge).
+app.post('/api/auth/login-final', async (req, res) => {
+  try {
+    const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+    const response = typeof req.body?.response === 'string' ? req.body.response : '';
+    if (!challengeId || !response) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    cleanupLoginChallenges();
+    const entry = loginChallenges.get(challengeId);
+    if (!entry || typeof entry?.userId !== 'string' || typeof entry?.challenge !== 'string') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (typeof entry.expiresAtMs !== 'number' || entry.expiresAtMs <= Date.now()) {
+      loginChallenges.delete(challengeId);
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const ok = safeTimingEqual(response, entry.challenge);
+    // One-shot challenge.
+    loginChallenges.delete(challengeId);
+
+    if (!ok) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = String(entry.userId);
+    const u = await query(
+      'SELECT id, username, public_key, hidden_mode, introvert_mode, vault FROM users WHERE id = $1',
+      [userId],
+    );
+    const user = u?.rows?.[0];
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { token, expiresAt } = issueToken(userId);
 
     res.json({
       success: true,
       token,
       expiresAt,
-      ...result,
+      userId: String(user.id),
+      username: String(user.username),
+      hiddenMode: Boolean(user.hidden_mode),
+      introvertMode: Boolean(user.introvert_mode),
+      vault: typeof user.vault === 'string' ? user.vault : '',
     });
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid credentials' });
+  } catch {
+    res.status(401).json({ error: 'Unauthorized' });
   }
 });
 
+app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+
+    const hiddenMode = req.body?.hiddenMode;
+    const introvertMode = req.body?.introvertMode;
+    const removeDateIso = req.body?.removeDate;
+    const vault = req.body?.vault;
+
+    const sets = [];
+    const params = [userId];
+
+    if (hiddenMode !== undefined) {
+      if (typeof hiddenMode !== 'boolean') return res.status(400).json({ error: 'hiddenMode boolean required' });
+      params.push(hiddenMode);
+      sets.push(`hidden_mode = $${params.length}`);
+    }
+
+    if (introvertMode !== undefined) {
+      if (typeof introvertMode !== 'boolean') return res.status(400).json({ error: 'introvertMode boolean required' });
+      params.push(introvertMode);
+      sets.push(`introvert_mode = $${params.length}`);
+    }
+
+    if (removeDateIso !== undefined) {
+      if (typeof removeDateIso !== 'string') return res.status(400).json({ error: 'removeDate string required' });
+      const d = new Date(removeDateIso);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'removeDate invalid' });
+      params.push(d);
+      sets.push(`remove_date = $${params.length}`);
+    }
+
+    if (vault !== undefined) {
+      if (typeof vault !== 'string') return res.status(400).json({ error: 'vault string required' });
+      if (vault.length > 100_000) return res.status(400).json({ error: 'vault too large' });
+      params.push(vault);
+      sets.push(`vault = $${params.length}`);
+    }
+
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+
+    await query(
+      `UPDATE users
+       SET ${sets.join(', ')}
+       WHERE id = $1`,
+      params,
+    );
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Backwards-compatible endpoints (legacy clients)
 app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
     const hiddenMode = req.body?.hiddenMode;
     if (typeof hiddenMode !== 'boolean') return res.status(400).json({ error: 'hiddenMode boolean required' });
-
     await query('UPDATE users SET hidden_mode = $2 WHERE id = $1', [userId, hiddenMode]);
-
     res.json({ success: true, hiddenMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -290,9 +452,7 @@ app.post('/api/signed/account/introvert-mode', requireSignedAuth, async (req, re
     const userId = String(req._signedUserId);
     const introvertMode = req.body?.introvertMode;
     if (typeof introvertMode !== 'boolean') return res.status(400).json({ error: 'introvertMode boolean required' });
-
     await query('UPDATE users SET introvert_mode = $2 WHERE id = $1', [userId, introvertMode]);
-
     res.json({ success: true, introvertMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -308,10 +468,9 @@ app.post('/api/auth/check-username', async (req, res) => {
     }
 
     const user = await getUserByUsername(username);
-    
+
     res.json({
       exists: !!user,
-      publicKey: user ? user.public_key : null,
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -350,20 +509,6 @@ app.post('/api/signed/chats/last-messages', requireSignedAuth, async (req, res) 
 app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
   try {
     const me = String(req._signedUserId);
-
-    // Refresh account expiration on activity (presence poll).
-    // Add random jitter (0..86400s) to reduce ability to infer exact activity time.
-    try {
-      const jitterSeconds = crypto.randomInt(0, 86401);
-      await query(
-        `UPDATE users
-         SET remove_date = NOW() + (expiration_days * INTERVAL '1 day') + ($2::int * INTERVAL '1 second')
-         WHERE id = $1`,
-        [me, jitterSeconds],
-      );
-    } catch {
-      // ignore
-    }
 
     const raw = req.body?.userIds;
     const idsRaw = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];

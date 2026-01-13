@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { cycleLocale } from '../i18n'
@@ -12,7 +12,11 @@ const signed = useSignedStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username, hiddenMode, introvertMode, notificationsEnabled } = storeToRefs(signed)
+const { username, hiddenMode, introvertMode, notificationsEnabled, vaultPlain, publicKeyJwk } = storeToRefs(signed)
+
+const expirationDaysDraft = ref<string>('')
+const expirationBusy = ref(false)
+const expirationErr = ref<string>('')
 
 const deleteAccountOpen = ref(false)
 const deleteAccountBusy = ref(false)
@@ -74,6 +78,16 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeyDown)
 })
 
+watch(
+  () => vaultPlain.value?.expirationDays,
+  (next) => {
+    if (expirationBusy.value) return
+    if (!next) return
+    expirationDaysDraft.value = String(next)
+  },
+  { immediate: true },
+)
+
 async function onToggleHiddenMode(ev: Event) {
   const target = ev.target as HTMLInputElement | null
   if (!target) return
@@ -125,6 +139,23 @@ async function onToggleNotifications(ev: Event) {
   }
 }
 
+async function onSaveExpirationDays() {
+  expirationErr.value = ''
+  expirationBusy.value = true
+  try {
+    const n = Number(expirationDaysDraft.value)
+    if (!Number.isFinite(n) || n < 7 || n > 365) {
+      expirationErr.value = String(t('signed.expirationDaysRangeError'))
+      return
+    }
+    await signed.updateExpirationDays(n)
+  } catch {
+    expirationErr.value = String(t('signed.genericError'))
+  } finally {
+    expirationBusy.value = false
+  }
+}
+
 function notificationStateLabel() {
   try {
     if (typeof Notification === 'undefined') return String(t('notifications.state.default'))
@@ -160,6 +191,32 @@ function notificationStateLabel() {
             <div style="opacity: 0.8; font-size: 0.95em;">{{ t('notifications.settingsHint') }}</div>
           </span>
         </label>
+
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
+          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysSettingsHelp') }}</div>
+          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysRangeInfo') }}</div>
+          <div v-if="!publicKeyJwk" class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysUnlockHint') }}</div>
+
+          <div class="row" style="margin-top: 10px;">
+            <input
+              v-model="expirationDaysDraft"
+              type="number"
+              inputmode="numeric"
+              min="7"
+              max="365"
+              :disabled="expirationBusy || !publicKeyJwk"
+              style="max-width: 140px;"
+              :aria-label="String(t('signed.expirationDays'))"
+              @keydown.enter.prevent="onSaveExpirationDays"
+            />
+            <button class="secondary" type="button" :disabled="expirationBusy || !publicKeyJwk" @click="onSaveExpirationDays">
+              {{ t('common.save') }}
+            </button>
+          </div>
+
+          <div v-if="expirationErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ expirationErr }}</div>
+        </div>
 
         <label class="secondary">
           <input

@@ -11,9 +11,11 @@ import {
 } from '../utils/notificationPrefs'
 import {
   decryptPrivateKeyJwk,
+  decryptSmallStringWithPrivateKey,
   decryptSignedMessage,
   decryptStringWithPassword,
   encryptPrivateKeyJwk,
+  encryptSmallStringWithPublicKeyJwk,
   encryptSignedMessage,
   encryptStringWithPassword,
   generateRsaKeyPair,
@@ -88,6 +90,8 @@ const SS_USER = 'lrcom-signed-user'
 const SS_EXPIRES_AT = 'lrcom-signed-expires-at'
 const SS_LAST_USERNAME = 'lrcom-signed-last-username'
 const SS_ADD_USERNAME = 'lrcom-add-username'
+const SS_VAULT = 'lrcom-signed-vault'
+const SS_REMOVE_DATE = 'lrcom-signed-remove-date'
 
 const MAX_PASSWORD_LEN = 512
 
@@ -126,6 +130,10 @@ type StoredUser = {
   introvertMode?: boolean
 }
 
+type VaultPlain = {
+  expirationDays: number
+}
+
 export const useSignedStore = defineStore('signed', () => {
   const token = ref<string | null>(null)
   const expiresAtMs = ref<number | null>(null)
@@ -135,6 +143,10 @@ export const useSignedStore = defineStore('signed', () => {
   const introvertMode = ref<boolean>(false)
   const publicKeyJwk = ref<string | null>(null)
   const privateKey = ref<CryptoKey | null>(null)
+
+  const vaultEncrypted = ref<string>('')
+  const vaultPlain = ref<VaultPlain | null>(null)
+  const removeDateIso = ref<string | null>(null)
 
   const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
 
@@ -208,6 +220,8 @@ export const useSignedStore = defineStore('signed', () => {
 
   let tokenRefreshTimer: number | null = null
 
+  let removeDateSyncTimer: number | null = null
+
   function clearPresenceTimer() {
     if (presenceTimer != null) {
       try {
@@ -228,6 +242,133 @@ export const useSignedStore = defineStore('signed', () => {
       }
       tokenRefreshTimer = null
     }
+  }
+
+  function clearRemoveDateSyncTimer() {
+    if (removeDateSyncTimer != null) {
+      try {
+        window.clearInterval(removeDateSyncTimer)
+      } catch {
+        // ignore
+      }
+      removeDateSyncTimer = null
+    }
+  }
+
+  function parseVaultPlain(raw: string): VaultPlain | null {
+    try {
+      const obj = JSON.parse(raw) as any
+      const exp = Number(obj?.expirationDays)
+      if (!Number.isFinite(exp) || exp < 7 || exp > 365) return null
+      return { expirationDays: exp }
+    } catch {
+      return null
+    }
+  }
+
+  function randomIntInclusive(min: number, max: number) {
+    const lo = Math.min(min, max)
+    const hi = Math.max(min, max)
+    const range = hi - lo + 1
+    try {
+      const u32 = new Uint32Array(1)
+      crypto.getRandomValues(u32)
+      const v = u32[0] ?? 0
+      return lo + (v % range)
+    } catch {
+      return lo + Math.floor(Math.random() * range)
+    }
+  }
+
+  function computeRemoveDateIsoForNow(expirationDays: number) {
+    const jitterSeconds = randomIntInclusive(0, 86400)
+    const ms = Date.now() + expirationDays * 86400_000 + jitterSeconds * 1000
+    return new Date(ms).toISOString()
+  }
+
+  function storeVaultPlain(rawJson: string) {
+    try {
+      sessionStorage.setItem(SS_VAULT, rawJson)
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadVaultPlain(): VaultPlain | null {
+    try {
+      const raw = String(sessionStorage.getItem(SS_VAULT) ?? '')
+      return raw ? parseVaultPlain(raw) : null
+    } catch {
+      return null
+    }
+  }
+
+  function clearVaultPlain() {
+    try {
+      sessionStorage.removeItem(SS_VAULT)
+    } catch {
+      // ignore
+    }
+  }
+
+  function storeRemoveDateIso(iso: string) {
+    try {
+      sessionStorage.setItem(SS_REMOVE_DATE, iso)
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadRemoveDateIso(): string | null {
+    try {
+      const raw = String(sessionStorage.getItem(SS_REMOVE_DATE) ?? '').trim()
+      return raw ? raw : null
+    } catch {
+      return null
+    }
+  }
+
+  function clearRemoveDateIso() {
+    try {
+      sessionStorage.removeItem(SS_REMOVE_DATE)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function updateAccount(fields: {
+    hiddenMode?: boolean
+    introvertMode?: boolean
+    removeDate?: string
+    vault?: string
+  }) {
+    await fetchJson('/api/signed/account/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(fields),
+    })
+  }
+
+  async function bestEffortSyncRemoveDateNow() {
+    if (!signedIn.value) return
+    const exp = vaultPlain.value?.expirationDays
+    if (!exp || !Number.isFinite(exp)) return
+    const iso = computeRemoveDateIsoForNow(exp)
+    removeDateIso.value = iso
+    storeRemoveDateIso(iso)
+    try {
+      await updateAccount({ removeDate: iso })
+    } catch {
+      // ignore
+    }
+  }
+
+  function startRemoveDateSyncTimer() {
+    clearRemoveDateSyncTimer()
+    // Every 10 minutes.
+    removeDateSyncTimer = window.setInterval(() => {
+      void bestEffortSyncRemoveDateNow()
+    }, 10 * 60 * 1000)
   }
 
   function scheduleTokenRefresh() {
@@ -1570,14 +1711,18 @@ export const useSignedStore = defineStore('signed', () => {
     // the session as "signed in but locked" mid-register and auto-logout.
     const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
 
+    const vaultJson = JSON.stringify({ expirationDays: exp } satisfies VaultPlain)
+    const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
+    const removeDate = computeRemoveDateIsoForNow(exp)
+
     const j = await fetchJson('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: u,
-        password: params.password,
         publicKey: publicJwk,
-        expirationDays: exp,
+        removeDate,
+        vault: vaultEnc,
       }),
     })
 
@@ -1588,6 +1733,13 @@ export const useSignedStore = defineStore('signed', () => {
     hiddenMode.value = Boolean(j?.hiddenMode)
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
+
+    vaultEncrypted.value = vaultEnc
+    vaultPlain.value = parseVaultPlain(vaultJson)
+    storeVaultPlain(vaultJson)
+
+    removeDateIso.value = removeDate
+    storeRemoveDateIso(removeDate)
 
     privateKey.value = importedPrivateKey
 
@@ -1607,6 +1759,7 @@ export const useSignedStore = defineStore('signed', () => {
     void maybeAddChatFromUrl()
     void maybeOpenChatFromUrl()
     scheduleTokenRefresh()
+    startRemoveDateSyncTimer()
     void trySyncPushSubscription()
     view.value = 'contacts'
   }
@@ -1627,10 +1780,22 @@ export const useSignedStore = defineStore('signed', () => {
 
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
 
-    const j = await fetchJson('/api/auth/login', {
+    const init = await fetchJson('/api/auth/login-init', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: params.password, publicKey: publicJwk }),
+      body: JSON.stringify({ username: u, publicKey: publicJwk }),
+    })
+
+    const challengeId = typeof (init as any)?.challengeId === 'string' ? String((init as any).challengeId) : ''
+    const encryptedChallengeB64 = typeof (init as any)?.encryptedChallengeB64 === 'string' ? String((init as any).encryptedChallengeB64) : ''
+    if (!challengeId || !encryptedChallengeB64) throw new Error('Login failed')
+
+    const challengePlain = await decryptSmallStringWithPrivateKey({ ciphertextB64: encryptedChallengeB64, privateKey: priv })
+
+    const j = await fetchJson('/api/auth/login-final', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId, response: challengePlain }),
     })
 
     token.value = typeof j.token === 'string' ? j.token : null
@@ -1641,6 +1806,21 @@ export const useSignedStore = defineStore('signed', () => {
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
     privateKey.value = priv
+
+    vaultEncrypted.value = typeof (j as any)?.vault === 'string' ? String((j as any).vault) : ''
+    if (vaultEncrypted.value) {
+      try {
+        const vaultJson = await decryptSmallStringWithPrivateKey({ ciphertextB64: vaultEncrypted.value, privateKey: priv })
+        const parsed = parseVaultPlain(vaultJson)
+        vaultPlain.value = parsed
+        if (parsed) storeVaultPlain(vaultJson)
+      } catch {
+        // ignore
+      }
+    }
+    if (!vaultPlain.value) {
+      vaultPlain.value = loadVaultPlain()
+    }
 
     if (token.value && userId.value && username.value) {
       storeSession(
@@ -1658,16 +1838,33 @@ export const useSignedStore = defineStore('signed', () => {
     void maybeAddChatFromUrl()
     void maybeOpenChatFromUrl()
     scheduleTokenRefresh()
+    // Separate call after login.
+    void bestEffortSyncRemoveDateNow()
+    startRemoveDateSyncTimer()
     void trySyncPushSubscription()
     view.value = 'contacts'
   }
 
   function logout(wipeSessionStorage = false) {
+    // Best-effort: update remove_date on logout.
+    try {
+      const exp = vaultPlain.value?.expirationDays
+      const currentToken = token.value
+      if (currentToken && exp && Number.isFinite(exp)) {
+        const iso = computeRemoveDateIsoForNow(exp)
+        const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` }
+        void fetch('/api/signed/account/update', { method: 'POST', headers, body: JSON.stringify({ removeDate: iso }) }).catch(() => {})
+      }
+    } catch {
+      // ignore
+    }
+
     wsShouldReconnect.value = false
     clearWsReconnectTimer()
     clearPresenceTimer()
     disconnectWs()
     clearTokenRefreshTimer()
+    clearRemoveDateSyncTimer()
     token.value = null
     expiresAtMs.value = null
     userId.value = null
@@ -1676,6 +1873,9 @@ export const useSignedStore = defineStore('signed', () => {
     introvertMode.value = false
     publicKeyJwk.value = null
     privateKey.value = null
+    vaultEncrypted.value = ''
+    vaultPlain.value = null
+    removeDateIso.value = null
     chats.value = []
     unreadByChatId.value = {}
     messagesByChatId.value = {}
@@ -1694,6 +1894,9 @@ export const useSignedStore = defineStore('signed', () => {
     } else {
       clearSession()
     }
+
+    clearVaultPlain()
+    clearRemoveDateIso()
   }
 
   async function deleteAccount() {
@@ -1722,6 +1925,9 @@ export const useSignedStore = defineStore('signed', () => {
     introvertMode.value = Boolean(restored.u.introvertMode)
     expiresAtMs.value = restored.e
     publicKeyJwk.value = null
+    vaultPlain.value = loadVaultPlain()
+    removeDateIso.value = loadRemoveDateIso()
+    startRemoveDateSyncTimer()
   }
 
   // Capture invite links on initial load, before login/register.
@@ -1733,12 +1939,7 @@ export const useSignedStore = defineStore('signed', () => {
     const prev = hiddenMode.value
     hiddenMode.value = Boolean(next)
     try {
-      const j = await fetchJson('/api/signed/account/hidden-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ hiddenMode: hiddenMode.value }),
-      })
-      hiddenMode.value = Boolean(j?.hiddenMode)
+      await updateAccount({ hiddenMode: hiddenMode.value })
 
       if (token.value && userId.value && username.value) {
         storeSession(
@@ -1758,12 +1959,7 @@ export const useSignedStore = defineStore('signed', () => {
     const prev = introvertMode.value
     introvertMode.value = Boolean(next)
     try {
-      const j = await fetchJson('/api/signed/account/introvert-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ introvertMode: introvertMode.value }),
-      })
-      introvertMode.value = Boolean(j?.introvertMode)
+      await updateAccount({ introvertMode: introvertMode.value })
 
       if (token.value && userId.value && username.value) {
         storeSession(
@@ -1778,6 +1974,29 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  async function updateExpirationDays(next: number) {
+    if (!token.value) throw new Error('Not logged in')
+    if (!publicKeyJwk.value) throw new Error('Missing public key')
+
+    const exp = Number(next)
+    if (!Number.isFinite(exp) || exp < 7 || exp > 365) {
+      throw new Error('Expiration days must be between 7 and 365')
+    }
+
+    const vaultJson = JSON.stringify({ expirationDays: exp })
+    const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicKeyJwk.value })
+    const removeDate = computeRemoveDateIsoForNow(exp)
+
+    await updateAccount({ vault: vaultEnc, removeDate })
+
+    vaultEncrypted.value = vaultEnc
+    vaultPlain.value = parseVaultPlain(vaultJson)
+    storeVaultPlain(vaultJson)
+
+    removeDateIso.value = removeDate
+    storeRemoveDateIso(removeDate)
+  }
+
   // For convenience in setup screen.
   lastUsername.value = loadLastUsername()
 
@@ -1788,6 +2007,8 @@ export const useSignedStore = defineStore('signed', () => {
     username,
     hiddenMode,
     introvertMode,
+    vaultPlain,
+    removeDateIso,
     notificationsEnabled,
     publicKeyJwk,
     privateKey,
@@ -1812,6 +2033,7 @@ export const useSignedStore = defineStore('signed', () => {
     deleteAccount,
     updateHiddenMode,
     updateIntrovertMode,
+    updateExpirationDays,
     refreshChats,
     fetchChatMembers,
     openChat,

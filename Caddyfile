@@ -74,7 +74,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone auth_login {
         match {
-          path /api/auth/login
+          path /api/auth/login /api/auth/login-init /api/auth/login-final
           method POST
         }
         key    {remote_host}
@@ -169,6 +169,16 @@ https://{$LRCOM_DOMAIN:localhost} {
         }
         key    {remote_host}
         events 20
+        window 1m
+      }
+
+      zone signed_account_update {
+        match {
+          path /api/signed/account/update
+          method POST
+        }
+        key    {remote_host}
+        events 120
         window 1m
       }
     }

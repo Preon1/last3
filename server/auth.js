@@ -1,8 +1,4 @@
-import crypto from 'crypto'
-import bcrypt from 'bcryptjs'
-import { query, transaction } from './db.js'
-
-const SALT_ROUNDS = 12
+import { query } from './db.js'
 
 function parseRsaPublicJwk(jwkString) {
   if (!jwkString || typeof jwkString !== 'string') return null
@@ -25,19 +21,19 @@ function normalizeRsaPublicJwkString(jwkString) {
   return JSON.stringify({ kty: 'RSA', n: parsed.n, e: parsed.e, ext: true, key_ops: ['encrypt'] })
 }
 
+export function normalizePublicKeyJwkString(jwkString) {
+  return normalizeRsaPublicJwkString(jwkString)
+}
+
 /**
  * Register a new user
  */
-export async function registerUser({ username, password, publicKey, expirationDays }) {
+export async function registerUser({ username, publicKey, removeDate, vault }) {
   // Validate inputs
   if (!username || username.length < 3 || username.length > 64) {
     throw new Error('Username must be between 3 and 64 characters')
   }
-  
-  if (!password || password.length < 8) {
-    throw new Error('Password must be at least 8 characters')
-  }
-  
+
   if (!publicKey) {
     throw new Error('Public key is required')
   }
@@ -46,9 +42,18 @@ export async function registerUser({ username, password, publicKey, expirationDa
   if (!normalizedPublicKey) {
     throw new Error('Public key is required')
   }
-  
-  if (!expirationDays || expirationDays < 7 || expirationDays > 365) {
-    throw new Error('Expiration days must be between 7 and 365')
+
+  if (!(removeDate instanceof Date) || Number.isNaN(removeDate.getTime())) {
+    throw new Error('removeDate is required')
+  }
+
+  if (typeof vault !== 'string') {
+    throw new Error('vault is required')
+  }
+
+  // Guard against accidental large writes.
+  if (vault.length > 100_000) {
+    throw new Error('vault too large')
   }
 
   // Check if username already exists
@@ -61,95 +66,32 @@ export async function registerUser({ username, password, publicKey, expirationDa
     throw new Error('Username already exists')
   }
 
-  // Hash password
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
-  
-  // Calculate remove date
-  const removeDate = new Date()
-  removeDate.setDate(removeDate.getDate() + expirationDays)
-
   // Insert user
   const result = await query(
-    `INSERT INTO users (username, password_hash, public_key, expiration_days, remove_date)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, username, public_key, expiration_days, remove_date, hidden_mode, introvert_mode`,
-    [username, passwordHash, normalizedPublicKey, expirationDays, removeDate]
+    `INSERT INTO users (username, public_key, remove_date, vault)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, username, public_key, remove_date, hidden_mode, introvert_mode, vault`,
+    [username, normalizedPublicKey, removeDate, vault]
   )
 
   return result.rows[0]
 }
 
 /**
- * Authenticate user and return user data with chats
+ * Find a user by username+publicKey exact match.
  */
-export async function loginUser({ username, password, publicKey }) {
-  // Get user
+export async function findUserByUsernameAndPublicKey({ username, publicKey }) {
+  if (!username || typeof username !== 'string') return null
+  if (!publicKey || typeof publicKey !== 'string') return null
+  const normalizedPublicKey = normalizeRsaPublicJwkString(publicKey)
+  if (!normalizedPublicKey) return null
+
   const userResult = await query(
-    'SELECT id, username, password_hash, public_key, expiration_days, remove_date, hidden_mode, introvert_mode FROM users WHERE username = $1',
-    [username]
+    'SELECT id, username, public_key, remove_date, hidden_mode, introvert_mode, vault FROM users WHERE username = $1 AND public_key = $2',
+    [username, normalizedPublicKey],
   )
 
-  if (userResult.rows.length === 0) {
-    throw new Error('Invalid credentials')
-  }
-
-  const user = userResult.rows[0]
-
-  // Verify password
-  const passwordValid = await bcrypt.compare(password, user.password_hash)
-  if (!passwordValid) {
-    throw new Error('Invalid credentials')
-  }
-
-  // Verify public key matches
-  const storedParsed = parseRsaPublicJwk(String(user.public_key))
-  const providedParsed = parseRsaPublicJwk(String(publicKey))
-  if (storedParsed && providedParsed) {
-    if (storedParsed.n !== providedParsed.n || storedParsed.e !== providedParsed.e) {
-      throw new Error('Invalid credentials')
-    }
-  } else {
-    // Fallback for legacy/non-JSON stored formats.
-    if (String(user.public_key) !== String(publicKey)) {
-      throw new Error('Invalid credentials')
-    }
-  }
-
-  // Update remove date (reset expiration) with jitter to reduce timing inference.
-  const jitterSeconds = crypto.randomInt(0, 86401)
-  await query(
-    `UPDATE users
-     SET remove_date = NOW() + (expiration_days * INTERVAL '1 day') + ($2::int * INTERVAL '1 second')
-     WHERE id = $1`,
-    [user.id, jitterSeconds],
-  )
-
-  // Get user's chats
-  const chatsResult = await query(
-    `SELECT DISTINCT c.id, c.chat_type, c.chat_name
-     FROM chats c
-     INNER JOIN chat_members cm ON c.id = cm.chat_id
-     WHERE cm.user_id = $1
-     ORDER BY c.id DESC`,
-    [user.id]
-  )
-
-  // Get unread messages
-  const unreadResult = await query(
-    `SELECT message_id, chat_id
-     FROM unread_messages
-     WHERE user_id = $1`,
-    [user.id]
-  )
-
-  return {
-    userId: user.id,
-    username: user.username,
-    hiddenMode: Boolean(user.hidden_mode),
-    introvertMode: Boolean(user.introvert_mode),
-    chats: chatsResult.rows,
-    unreadMessages: unreadResult.rows,
-  }
+  return userResult.rows[0] || null
 }
 
 /**
@@ -179,7 +121,7 @@ export async function getUserById(userId) {
  */
 export async function getUserByUsername(username) {
   const result = await query(
-    'SELECT id, username, public_key FROM users WHERE username = $1',
+    'SELECT id, username, public_key, vault, remove_date FROM users WHERE username = $1',
     [username]
   )
   return result.rows[0] || null
