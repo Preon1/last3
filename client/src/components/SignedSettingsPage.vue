@@ -192,32 +192,6 @@ function notificationStateLabel() {
           </span>
         </label>
 
-        <div class="card" style="margin-bottom: 0;">
-          <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
-          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysSettingsHelp') }}</div>
-          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysRangeInfo') }}</div>
-          <div v-if="!publicKeyJwk" class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysUnlockHint') }}</div>
-
-          <div class="row" style="margin-top: 10px;">
-            <input
-              v-model="expirationDaysDraft"
-              type="number"
-              inputmode="numeric"
-              min="7"
-              max="365"
-              :disabled="expirationBusy || !publicKeyJwk"
-              style="max-width: 140px;"
-              :aria-label="String(t('signed.expirationDays'))"
-              @keydown.enter.prevent="onSaveExpirationDays"
-            />
-            <button class="secondary" type="button" :disabled="expirationBusy || !publicKeyJwk" @click="onSaveExpirationDays">
-              {{ t('common.save') }}
-            </button>
-          </div>
-
-          <div v-if="expirationErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ expirationErr }}</div>
-        </div>
-
         <label class="secondary">
           <input
             type="checkbox"
@@ -255,6 +229,32 @@ function notificationStateLabel() {
         <button class="secondary" type="button" @click="onManageKeys">{{ t('common.manageKeys') }}</button>
 
         <button class="secondary" type="button" @click="onAbout">{{ t('common.about') }}</button>
+
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
+          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysSettingsHelp') }}</div>
+          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysRangeInfo') }}</div>
+          <div v-if="!publicKeyJwk" class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysUnlockHint') }}</div>
+
+          <div class="row" style="margin-top: 10px;">
+            <input
+              v-model="expirationDaysDraft"
+              type="number"
+              inputmode="numeric"
+              min="7"
+              max="365"
+              :disabled="expirationBusy || !publicKeyJwk"
+              style="max-width: 140px;"
+              :aria-label="String(t('signed.expirationDays'))"
+              @keydown.enter.prevent="onSaveExpirationDays"
+            />
+            <button class="secondary" type="button" :disabled="expirationBusy || !publicKeyJwk" @click="onSaveExpirationDays">
+              {{ t('common.save') }}
+            </button>
+          </div>
+
+          <div v-if="expirationErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ expirationErr }}</div>
+        </div>
 
         <button class="secondary danger" type="button" @click="onDeleteAccount">{{ t('signed.deleteAccount') }}</button>
 
