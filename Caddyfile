@@ -181,6 +181,16 @@ https://{$LRCOM_DOMAIN:localhost} {
         events 120
         window 1m
       }
+
+      zone signed_session_refresh {
+        match {
+          path /api/signed/session/refresh
+          method POST
+        }
+        key    {remote_host}
+        events 3
+        window 1m
+      }
     }
 
     # Proxy everything (HTTP + WebSocket) to the app running HTTPS inside the network.
