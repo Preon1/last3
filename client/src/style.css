@@ -52,7 +52,7 @@
     --glass-bg: rgba(18, 24, 38, 0.72);
     --glass-border: rgba(231, 236, 244, 0.10);
     --glass-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
-    --glass-blur: 14px;
+    --glass-blur: 5px;
 
     /* Background spots (dark) */
     --spot-1: rgba(0, 113, 183, 0.14);
@@ -82,7 +82,7 @@ html[data-theme="light"] {
   --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(255, 255, 255, 0.55);
   --glass-shadow: 0 16px 38px rgba(16, 24, 40, 0.10);
-  --glass-blur: 14px;
+  --glass-blur: 5px;
 
   --spot-1: rgba(0, 113, 183, 0.12);
   --spot-2: rgba(34, 67, 93, 0.10);
@@ -110,7 +110,7 @@ html[data-theme="dark"] {
   --glass-bg: rgba(18, 24, 38, 0.72);
   --glass-border: rgba(231, 236, 244, 0.10);
   --glass-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
-  --glass-blur: 14px;
+  --glass-blur: 5px;
 
   --spot-1: rgba(0, 113, 183, 0.14);
   --spot-2: rgba(34, 67, 93, 0.12);
