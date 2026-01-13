@@ -5,7 +5,6 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
 import { useToastStore } from '../stores/toast'
-import QRCode from 'qrcode'
 
 const ui = useUiStore()
 const signed = useSignedStore()
@@ -36,6 +35,7 @@ watchEffect(async () => {
   }
 
   try {
+    const QRCode = await import('qrcode')
     qrDataUrl.value = await QRCode.toDataURL(l, { width: 256, margin: 1 })
   } catch {
     qrDataUrl.value = ''

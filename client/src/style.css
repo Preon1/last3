@@ -1129,8 +1129,8 @@ button.small{
   border-radius: 12px;
   padding: 14px;
   height: auto;
-  max-height: 70vh;
-  max-height: 70svh;
+  max-height: 86vh;
+  max-height: 86svh;
   overflow: auto;
   scrollbar-width: thin;
   width: min(520px, calc(100vw - 28px));

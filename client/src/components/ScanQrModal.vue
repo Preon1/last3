@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
 import { useToastStore } from '../stores/toast'
-import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
+import type { IScannerControls } from '@zxing/browser'
 
 const ui = useUiStore()
 const signed = useSignedStore()
@@ -18,7 +18,7 @@ const videoEl = ref<HTMLVideoElement | null>(null)
 const status = ref<string>('')
 const busy = ref(false)
 
-let reader: BrowserMultiFormatReader | null = null
+let reader: any | null = null
 let controls: IScannerControls | null = null
 let scanSession = 0
 let lastText = ''
@@ -99,6 +99,7 @@ async function startScanning() {
     return
   }
 
+  const { BrowserMultiFormatReader } = await import('@zxing/browser')
   reader = new BrowserMultiFormatReader()
 
   try {
