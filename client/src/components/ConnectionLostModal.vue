@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSignedStore } from '../stores/signed'
 
 const signed = useSignedStore()
+const { t } = useI18n()
 
 const open = computed(() => Boolean(signed.wsPermanentlyFailed && signed.signedIn))
 
@@ -24,18 +26,18 @@ function onLogout() {
 </script>
 
 <template>
-  <div v-if="open" class="modal" role="dialog" aria-modal="true" aria-label="Connection lost">
+  <div v-if="open" class="modal" role="dialog" aria-modal="true" :aria-label="t('signed.connectionLost.title')">
     <div class="modal-backdrop" />
 
     <div class="modal-card">
-      <div class="modal-title">Connection lost</div>
+      <div class="modal-title">{{ t('signed.connectionLost.title') }}</div>
       <div class="modal-body">
-        Realtime connection failed after multiple attempts. You can reload the app or log out.
+        {{ t('signed.connectionLost.body') }}
       </div>
 
       <div class="modal-actions">
-        <button class="btn" @click="onLogout">Log out</button>
-        <button class="btn primary" @click="onReload">Reload</button>
+        <button class="btn" @click="onLogout">{{ t('common.logout') }}</button>
+        <button class="btn primary" @click="onReload">{{ t('common.reload') }}</button>
       </div>
     </div>
   </div>

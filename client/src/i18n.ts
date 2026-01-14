@@ -56,6 +56,7 @@ const baseMessages = {
       save: 'Save',
       modified: 'modified',
       copy: 'Copy',
+      reload: 'Reload',
     },
     toast: {
       chatSendFailedTitle: 'Message not sent',
@@ -198,6 +199,10 @@ const baseMessages = {
         hits: 'Hits: {hits}/{total}',
       },
       genericError: 'Something went wrong.',
+      connectionLost: {
+        title: 'Connection lost',
+        body: 'Realtime connection failed after multiple attempts. You can reload the app or log out.',
+      },
     },
     about: {
       title: 'About',
@@ -339,6 +344,7 @@ const baseMessages = {
       delete: 'Verwijderen',
       save: 'Opslaan',
       modified: 'bewerkt',
+      reload: 'Herladen',
     },
     toast: {
       chatSendFailedTitle: 'Bericht niet verzonden',
@@ -433,6 +439,10 @@ const baseMessages = {
         hits: 'Klikken: {hits}/{total}',
       },
       genericError: 'Er is iets misgegaan.',
+      connectionLost: {
+        title: 'Verbinding verloren',
+        body: 'Realtime-verbinding is na meerdere pogingen mislukt. Je kunt de app opnieuw laden of uitloggen.',
+      },
       chats: 'Chats',
       chat: 'Chat',
       add: 'Toevoegen',
@@ -615,6 +625,7 @@ const baseMessages = {
       delete: 'Supprimer',
       save: 'Enregistrer',
       modified: 'modifié',
+      reload: 'Recharger',
     },
     setup: {
       subtitle: 'Messagerie vocale web anonyme et chiffrée, sans inscription ni historique de conversation.',
@@ -706,6 +717,10 @@ const baseMessages = {
         hits: 'Clics : {hits}/{total}',
       },
       genericError: 'Une erreur est survenue.',
+      connectionLost: {
+        title: 'Connexion perdue',
+        body: "La connexion en temps réel a échoué après plusieurs tentatives. Vous pouvez recharger l’application ou vous déconnecter.",
+      },
       chats: 'Discussions',
       chat: 'Discussion',
       add: 'Ajouter',
@@ -885,6 +900,7 @@ const baseMessages = {
       unreadMessages: 'Ungelesene Nachrichten',
       logout: 'Abmelden',
       modified: 'bearbeitet',
+      reload: 'Neu laden',
     },
     toast: {
       chatSendFailedTitle: 'Nachricht nicht gesendet',
@@ -980,6 +996,10 @@ const baseMessages = {
         hits: 'Klicks: {hits}/{total}',
       },
       genericError: 'Etwas ist schiefgelaufen.',
+      connectionLost: {
+        title: 'Verbindung verloren',
+        body: 'Die Echtzeitverbindung ist nach mehreren Versuchen fehlgeschlagen. Du kannst die App neu laden oder dich abmelden.',
+      },
       chats: 'Chats',
       chat: 'Chat',
       add: 'Hinzufügen',
@@ -1160,6 +1180,7 @@ const baseMessages = {
       delete: 'Удалить',
       save: 'Сохранить',
       modified: 'изменено',
+      reload: 'Перезагрузить',
     },
     setup: {
       subtitle: 'Анонимный зашифрованный голосовой веб мессенджер без регистрации и хранения истории переписки',
@@ -1252,6 +1273,10 @@ const baseMessages = {
         hits: 'Нажатия: {hits}/{total}',
       },
       genericError: 'Что-то пошло не так.',
+      connectionLost: {
+        title: 'Соединение потеряно',
+        body: 'Соединение в реальном времени не удалось после нескольких попыток. Вы можете перезагрузить приложение или выйти.',
+      },
       chats: 'Чаты',
       chat: 'Чат',
       add: 'Добавить',
