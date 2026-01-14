@@ -139,11 +139,65 @@ export const useSignedStore = defineStore('signed', () => {
 
   const restoring = ref<boolean>(false)
 
+  let stayMirrorTimer: number | null = null
+  function clearStayMirrorTimer() {
+    if (stayMirrorTimer != null) {
+      try {
+        window.clearTimeout(stayMirrorTimer)
+      } catch {
+        // ignore
+      }
+      stayMirrorTimer = null
+    }
+  }
+
   const stayLoggedIn = ref<boolean>(false)
   stayLoggedIn.value = localData.getSignedStayLoggedIn()
 
   // Only show a restore/loading state when stay mode is enabled.
   restoring.value = stayLoggedIn.value
+
+  async function syncStayMirrorNow() {
+    try {
+      if (!stayLoggedIn.value) return
+
+      // Mirror session details.
+      if (token.value && userId.value && username.value) {
+        await localData.mirrorSignedSessionToIdb({
+          user: {
+            userId: userId.value,
+            username: username.value,
+            hiddenMode: hiddenMode.value,
+            introvertMode: introvertMode.value,
+          },
+          token: token.value,
+          expiresAtMs: expiresAtMs.value,
+        })
+      }
+
+      // Mirror vault/remove-date.
+      if (vaultPlain.value) {
+        await localData.idbSet(LocalEntity.IdbStayVault, JSON.stringify({ expirationDays: vaultPlain.value.expirationDays }))
+      }
+      if (removeDateIso.value) {
+        await localData.idbSet(LocalEntity.IdbStayRemoveDate, removeDateIso.value)
+      }
+
+      // Mirror device-bound unlock blob.
+      if (privateKey.value) await persistStayUnlockBlobFromCurrentKey()
+    } catch {
+      // ignore
+    }
+  }
+
+  function scheduleStayMirrorSync() {
+    clearStayMirrorTimer()
+    if (!stayLoggedIn.value) return
+    // Debounce to avoid writing IDB too frequently.
+    stayMirrorTimer = window.setTimeout(() => {
+      void syncStayMirrorNow()
+    }, 150)
+  }
 
   function setStayLoggedIn(next: boolean) {
     stayLoggedIn.value = Boolean(next)
@@ -170,9 +224,13 @@ export const useSignedStore = defineStore('signed', () => {
 
       // Variant B: auto-unlock is required for stay mode.
       void persistStayUnlockBlobFromCurrentKey()
+
+      // Ensure mirrors are present.
+      scheduleStayMirrorSync()
     }
 
     if (!stayLoggedIn.value) {
+      clearStayMirrorTimer()
       // Also wipe local DB state (session + device-bound auto-unlock blob).
       void localData.wipeIndexedDb()
     }
@@ -1953,6 +2011,13 @@ export const useSignedStore = defineStore('signed', () => {
           hiddenMode.value = Boolean(sess.u.hiddenMode)
           introvertMode.value = Boolean(sess.u.introvertMode)
           expiresAtMs.value = typeof sess.e === 'number' && Number.isFinite(sess.e) ? sess.e : null
+
+          // Repopulate sessionStorage so refreshes stay consistent.
+          storeSession(
+            { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+            token.value,
+            expiresAtMs.value,
+          )
         }
       }
 
@@ -1960,7 +2025,11 @@ export const useSignedStore = defineStore('signed', () => {
         const vaultRaw = await localData.idbGet<string>(LocalEntity.IdbStayVault)
         if (vaultRaw) {
           const parsed = parseVaultPlain(vaultRaw)
-          if (parsed) vaultPlain.value = parsed
+          if (parsed) {
+            vaultPlain.value = parsed
+            // Keep sessionStorage in sync.
+            storeVaultPlain(String(vaultRaw))
+          }
         }
       }
 
@@ -1969,6 +2038,7 @@ export const useSignedStore = defineStore('signed', () => {
         if (removeRaw) {
           const v = String(removeRaw).trim()
           removeDateIso.value = v ? v : null
+          if (removeDateIso.value) storeRemoveDateIso(removeDateIso.value)
         }
       }
 
@@ -2007,6 +2077,16 @@ export const useSignedStore = defineStore('signed', () => {
       restoring.value = false
     }
   })()
+
+  // Keep stay-login mirrors updated whenever relevant state changes.
+  watch([token, userId, username, expiresAtMs, hiddenMode, introvertMode, stayLoggedIn], () => scheduleStayMirrorSync(), { flush: 'post' })
+  watch(
+    () => vaultPlain.value?.expirationDays,
+    () => scheduleStayMirrorSync(),
+    { flush: 'post' },
+  )
+  watch(removeDateIso, () => scheduleStayMirrorSync(), { flush: 'post' })
+  watch(privateKey, () => scheduleStayMirrorSync(), { flush: 'post' })
 
   if (!stayLoggedIn.value) restoring.value = false
 
