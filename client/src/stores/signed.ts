@@ -253,7 +253,9 @@ export const useSignedStore = defineStore('signed', () => {
   const ws = ref<WebSocket | null>(null)
   const wsShouldReconnect = ref(false)
   const wsReconnectAttempt = ref(0)
+  const wsPermanentlyFailed = ref(false)
   let wsReconnectTimer: number | null = null
+  let wsGeneration = 0
 
   const turnConfig = ref<any | null>(null)
 
@@ -284,7 +286,7 @@ export const useSignedStore = defineStore('signed', () => {
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
   const locked = computed(() => Boolean(signedIn.value && !privateKey.value))
   const unlocking = ref(false)
-  const signedReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value))
+  const signedReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value && !wsPermanentlyFailed.value))
   async function syncAppStateToServiceWorker() {
     try {
       const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
@@ -682,7 +684,14 @@ export const useSignedStore = defineStore('signed', () => {
     if (!privateKey.value) return
 
     const maxAttempts = 3
-    if (wsReconnectAttempt.value >= maxAttempts) return
+    const retryDelayMs = 5000
+    if (wsReconnectAttempt.value >= maxAttempts) {
+      wsShouldReconnect.value = false
+      wsPermanentlyFailed.value = true
+      clearWsReconnectTimer()
+      clearPresenceTimer()
+      return
+    }
 
     clearWsReconnectTimer()
     const attempt = wsReconnectAttempt.value + 1
@@ -690,7 +699,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     wsReconnectTimer = window.setTimeout(() => {
       void connectWs()
-    }, 1000)
+    }, retryDelayMs)
   }
 
   function loadKeyEntries(): StoredKeyV2[] {
@@ -943,18 +952,127 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
-  async function fetchJson(path: string, init?: RequestInit) {
+  let reauthInFlight: Promise<boolean> | null = null
+
+  function withFreshAuth(init?: RequestInit): RequestInit | undefined {
+    if (!token.value) return init
+    const curHeaders = (init?.headers ?? {}) as any
+    const nextHeaders: Record<string, string> = {}
+    try {
+      if (curHeaders instanceof Headers) {
+        curHeaders.forEach((v: string, k: string) => {
+          nextHeaders[k] = v
+        })
+      } else if (Array.isArray(curHeaders)) {
+        for (const [k, v] of curHeaders) nextHeaders[String(k)] = String(v)
+      } else {
+        Object.assign(nextHeaders, curHeaders)
+      }
+    } catch {
+      // ignore
+    }
+    nextHeaders.Authorization = `Bearer ${token.value}`
+    return { ...(init ?? {}), headers: nextHeaders }
+  }
+
+  async function silentReauthIfPossible(): Promise<boolean> {
+    if (!stayLoggedIn.value) return false
+    if (!username.value) return false
+
+    if (reauthInFlight) return await reauthInFlight
+
+    reauthInFlight = (async () => {
+      try {
+        // Ensure we have a private key to complete the challenge.
+        if (!privateKey.value) {
+          await tryRestoreStayUnlockBlob()
+        }
+        if (!privateKey.value) return false
+
+        const publicJwk =
+          publicKeyJwk.value ??
+          (lastPrivateJwkJsonForStay ? publicJwkFromPrivateJwk(lastPrivateJwkJsonForStay) : null)
+        if (!publicJwk) return false
+
+        const initRes = await fetch(`${apiBase()}/api/auth/login-init`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username.value, publicKey: publicJwk }),
+        })
+        const initJson = await initRes.json().catch(() => ({}))
+        if (!initRes.ok) return false
+
+        const challengeId = typeof (initJson as any)?.challengeId === 'string' ? String((initJson as any).challengeId) : ''
+        const encryptedChallengeB64 =
+          typeof (initJson as any)?.encryptedChallengeB64 === 'string' ? String((initJson as any).encryptedChallengeB64) : ''
+        if (!challengeId || !encryptedChallengeB64) return false
+
+        const challengePlain = await decryptSmallStringWithPrivateKey({ ciphertextB64: encryptedChallengeB64, privateKey: privateKey.value })
+
+        const finalRes = await fetch(`${apiBase()}/api/auth/login-final`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challengeId, response: challengePlain }),
+        })
+        const finalJson = await finalRes.json().catch(() => ({}))
+        if (!finalRes.ok) return false
+
+        token.value = typeof (finalJson as any)?.token === 'string' ? String((finalJson as any).token) : null
+        expiresAtMs.value = typeof (finalJson as any)?.expiresAt === 'number' ? Number((finalJson as any).expiresAt) : null
+        userId.value = typeof (finalJson as any)?.userId === 'string' ? String((finalJson as any).userId) : userId.value
+        username.value = typeof (finalJson as any)?.username === 'string' ? String((finalJson as any).username) : username.value
+        hiddenMode.value = Boolean((finalJson as any)?.hiddenMode)
+        introvertMode.value = Boolean((finalJson as any)?.introvertMode)
+        publicKeyJwk.value = publicJwk
+
+        if (token.value && userId.value && username.value) {
+          storeSession(
+            { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+            token.value,
+            expiresAtMs.value,
+          )
+          void localData.mirrorSignedSessionToIdb({
+            user: { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+            token: token.value,
+            expiresAtMs: expiresAtMs.value,
+          })
+        }
+
+        // Re-establish realtime with the new token.
+        void connectWs()
+        scheduleTokenRefresh()
+        return Boolean(token.value)
+      } catch {
+        return false
+      } finally {
+        reauthInFlight = null
+      }
+    })()
+
+    return await reauthInFlight
+  }
+
+  async function fetchJson(path: string, init?: RequestInit, allowReauth = true) {
     const r = await fetch(`${apiBase()}${path}`, init)
     const j = await r.json().catch(() => ({}))
     if (!r.ok) {
       if (r.status === 401) {
         const msg = typeof j?.error === 'string' ? j.error : 'Unauthorized'
 
-        // If we had a token, it likely expired / server restarted (tokens are in-memory).
-        // For login/register (no token yet), don't clear local state.
+        // If we had a token, it likely expired / server restarted.
+        // In stay-login mode, try to re-auth silently using the stored private key.
+        if (token.value && stayLoggedIn.value && allowReauth) {
+          const ok = await silentReauthIfPossible()
+          if (ok) {
+            return await fetchJson(path, withFreshAuth(init), false)
+          }
+        }
+
         if (token.value) {
           try {
-            logout()
+            // If we can't reauth in stay mode, wipe stay artifacts so the private key isn't left behind.
+            if (stayLoggedIn.value) logout(true)
+            else logout()
           } catch {
             // ignore
           }
@@ -998,7 +1116,12 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function connectWs() {
+    // Bump generation first so close/error events from older sockets are ignored.
+    wsGeneration += 1
+    const gen = wsGeneration
+
     wsShouldReconnect.value = true
+    wsPermanentlyFailed.value = false
     clearWsReconnectTimer()
     disconnectWs()
     if (!token.value) return
@@ -1007,13 +1130,16 @@ export const useSignedStore = defineStore('signed', () => {
     ws.value = sock
 
     sock.addEventListener('open', () => {
+      if (gen !== wsGeneration) return
       wsReconnectAttempt.value = 0
-      startPresencePolling()
+      // Presence polling is disabled after permanent WS failure.
+      if (!wsPermanentlyFailed.value) startPresencePolling()
       void syncAfterConnect()
       void trySyncPushSubscription()
     })
 
     sock.addEventListener('close', () => {
+      if (gen !== wsGeneration) return
       ws.value = null
       clearPresenceTimer()
       for (const h of disconnectHandlers) {
@@ -1027,9 +1153,13 @@ export const useSignedStore = defineStore('signed', () => {
     })
 
     sock.addEventListener('error', () => {
-      // no logs
-      clearPresenceTimer()
-      scheduleWsReconnect()
+      if (gen !== wsGeneration) return
+      // Some browsers fire error without a close; force close and let the close handler schedule reconnect.
+      try {
+        sock.close()
+      } catch {
+        // ignore
+      }
     })
 
     sock.addEventListener('message', async (ev) => {
@@ -1954,6 +2084,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     wsShouldReconnect.value = false
+    wsPermanentlyFailed.value = false
     clearWsReconnectTimer()
     clearPresenceTimer()
     disconnectWs()
@@ -2215,6 +2346,7 @@ export const useSignedStore = defineStore('signed', () => {
     locked,
     unlocking,
     ws,
+    wsPermanentlyFailed,
     turnConfig,
     signedIn,
     lastUsername,

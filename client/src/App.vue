@@ -8,6 +8,7 @@ import ManageKeysModal from './components/ManageKeysModal.vue'
 import ShareLinkModal from './components/ShareLinkModal.vue'
 import ScanQrModal from './components/ScanQrModal.vue'
 import ToastHost from './components/ToastHost.vue'
+import ConnectionLostModal from './components/ConnectionLostModal.vue'
 import { useWakeLock } from './utils/wakeLock'
 import { useBeforeUnloadConfirm } from './utils/beforeUnloadConfirm'
 import { useToastStore } from './stores/toast'
@@ -112,6 +113,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
     <ManageKeysModal />
     <ShareLinkModal />
     <ScanQrModal />
+    <ConnectionLostModal />
   </main>
 </template>
 
