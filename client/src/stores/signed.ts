@@ -730,13 +730,13 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function loadLastUsername(): string {
-    return String(localData.getString(LocalEntity.SignedLastUsername) ?? '').trim()
+    return String(localData.getString(LocalEntity.SignedUsername) ?? '').trim()
   }
 
   function storeLastUsername(u: string) {
     const v = (u ?? '').trim()
     lastUsername.value = v
-    localData.setString(LocalEntity.SignedLastUsername, v)
+    localData.setString(LocalEntity.SignedUsername, v)
   }
 
   function loadPendingAddUsername(): string {

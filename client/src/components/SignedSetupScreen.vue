@@ -332,21 +332,22 @@ function toggleMode() {
           <input tabindex="4" id="signed-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
         </label>
 
-        <div class="stay-row">
-          <label class="stay-check">
-            <input tabindex="10" type="checkbox" v-model="stayLoggedInModel" />
-            <span>{{ t('signed.stayLoggedIn') }}</span>
-          </label>
-          <div class="muted stay-help">{{ t('signed.stayLoggedInHelp') }}</div>
-          <div v-if="stayLoggedInModel" class="muted stay-help">{{ t('signed.autoUnlockOnDevice') }}</div>
-        </div>
-
+        
         <div class="setup-actions">
           <button v-if="!isRegister" class="join" tabindex="5" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
           <button v-else class="join" tabindex="6" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
         </div>
-
+        
         <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
+        
+        <div class="stay-row">
+          <label class="stay-check">
+            <input tabindex="10" type="checkbox" v-model="stayLoggedInModel" />
+            <span class="muted">{{ t('signed.stayLoggedIn') }}</span>
+          </label>
+          <div class="muted stay-help">{{ t('signed.stayLoggedInHelp') }}</div>
+          <div v-if="stayLoggedInModel" class="muted stay-help">{{ t('signed.autoUnlockOnDevice') }}</div>
+        </div>
 
         <div class="setup-header-actions">
           <button class="secondary small-font" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
@@ -421,13 +422,15 @@ function toggleMode() {
   border-radius: 999px;
   border: 1px solid var(--input-border);
   background: transparent;
-  color: var(--text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  line-height: 1;
   cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  color: var(--muted);
+  margin-bottom: -1px;
 }
 
 .help:hover {
@@ -439,6 +442,11 @@ function toggleMode() {
   margin-top: 6px;
   display: grid;
   gap: 6px;
+}
+
+.stay-row input{
+  flex-grow:0;
+  margin:0;
 }
 
 .stay-check {

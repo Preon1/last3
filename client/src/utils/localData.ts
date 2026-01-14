@@ -9,12 +9,14 @@ export const LocalEntity = {
   SignedKeys: 'signed.keys',
 
   SignedToken: 'signed.session.token',
-  SignedUser: 'signed.session.user',
+  SignedUserId: 'signed.session.userId',
+  SignedHiddenMode: 'signed.session.hiddenMode',
+  SignedIntrovertMode: 'signed.session.introvertMode',
   SignedExpiresAt: 'signed.session.expiresAt',
 
   SignedVault: 'signed.vault',
   SignedRemoveDate: 'signed.removeDate',
-  SignedLastUsername: 'signed.lastUsername',
+  SignedUsername: 'signed.username',
   SignedAddUsername: 'signed.addUsername',
 
   IdbStaySession: 'idb.stay.session',
@@ -164,11 +166,29 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedUser]: {
-    id: LocalEntity.SignedUser,
+  [LocalEntity.SignedUserId]: {
+    id: LocalEntity.SignedUserId,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-user',
-    codec: 'json',
+    key: 'lrcom-signed-user-id',
+    codec: 'string',
+    removeOnLogout: true,
+    removeOnLogoutWipe: true,
+    removeOnAccountDelete: true,
+  },
+  [LocalEntity.SignedHiddenMode]: {
+    id: LocalEntity.SignedHiddenMode,
+    backend: 'sessionStorage',
+    key: 'lrcom-signed-hidden-mode',
+    codec: 'bool01',
+    removeOnLogout: true,
+    removeOnLogoutWipe: true,
+    removeOnAccountDelete: true,
+  },
+  [LocalEntity.SignedIntrovertMode]: {
+    id: LocalEntity.SignedIntrovertMode,
+    backend: 'sessionStorage',
+    key: 'lrcom-signed-introvert-mode',
+    codec: 'bool01',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
@@ -202,12 +222,12 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     removeOnAccountDelete: true,
   },
 
-  [LocalEntity.SignedLastUsername]: {
-    id: LocalEntity.SignedLastUsername,
+  [LocalEntity.SignedUsername]: {
+    id: LocalEntity.SignedUsername,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-last-username',
+    key: 'lrcom-signed-username',
     codec: 'string',
-    removeOnLogout: true,
+    removeOnLogout: false,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
@@ -561,29 +581,53 @@ export class LocalData {
   }
 
   setSignedSession(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
+    const u = (params.user ?? {}) as any
     this.setString(LocalEntity.SignedToken, params.token)
-    this.setJson(LocalEntity.SignedUser, params.user)
+    this.setString(LocalEntity.SignedUserId, typeof u.userId === 'string' ? u.userId : '')
+
+    // Username is stored once under SignedUsername.
+    this.setString(LocalEntity.SignedUsername, typeof u.username === 'string' ? u.username : '')
+
+    this.setBool(LocalEntity.SignedHiddenMode, Boolean(u.hiddenMode))
+    this.setBool(LocalEntity.SignedIntrovertMode, Boolean(u.introvertMode))
     if (typeof params.expiresAtMs === 'number' && Number.isFinite(params.expiresAtMs)) this.setNumber(LocalEntity.SignedExpiresAt, params.expiresAtMs)
     else this.remove(LocalEntity.SignedExpiresAt)
   }
 
   getSignedSession(): { user: any; token: string; expiresAtMs: number | null } | null {
     const token = this.getString(LocalEntity.SignedToken)
-    const user = this.getJson<any>(LocalEntity.SignedUser)
-    if (!token || !user) return null
+
+    const userId = String(this.getString(LocalEntity.SignedUserId) ?? '').trim()
+    const username = String(this.getString(LocalEntity.SignedUsername) ?? '').trim()
+    if (!token || !userId || !username) return null
+
+    const user = {
+      userId,
+      username,
+      hiddenMode: this.getBool(LocalEntity.SignedHiddenMode, false),
+      introvertMode: this.getBool(LocalEntity.SignedIntrovertMode, false),
+    }
     const e = this.getNumber(LocalEntity.SignedExpiresAt)
     return { user, token, expiresAtMs: e }
   }
 
   clearSignedSession() {
     this.remove(LocalEntity.SignedToken)
-    this.remove(LocalEntity.SignedUser)
+    this.remove(LocalEntity.SignedUserId)
+    this.remove(LocalEntity.SignedHiddenMode)
+    this.remove(LocalEntity.SignedIntrovertMode)
     this.remove(LocalEntity.SignedExpiresAt)
   }
 
   async mirrorSignedSessionToIdb(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
+    const u = (params.user ?? {}) as any
     await this.idbSet(LocalEntity.IdbStaySession, {
-      u: params.user,
+      u: {
+        userId: typeof u.userId === 'string' ? u.userId : '',
+        username: typeof u.username === 'string' ? u.username : '',
+        hiddenMode: Boolean(u.hiddenMode),
+        introvertMode: Boolean(u.introvertMode),
+      },
       t: params.token,
       e: typeof params.expiresAtMs === 'number' && Number.isFinite(params.expiresAtMs) ? params.expiresAtMs : null,
     })
