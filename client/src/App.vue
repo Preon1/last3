@@ -16,13 +16,26 @@ import { LocalEntity, localData } from './utils/localData'
 const signed = useSignedStore()
 const toast = useToastStore()
 
+// On every cold start, if stay-login is not enabled, wipe any persisted
+// session/stay artifacts (equivalent to a normal logout).
+try {
+  if (!localData.getSignedStayLoggedIn()) {
+    void localData.cleanup('logout')
+    // Device key is only used for stay-login auto-unlock.
+    localData.remove(LocalEntity.StayDeviceKey)
+  }
+} catch {
+  // ignore
+}
+
 const signedIn = computed(() => signed.signedIn)
 const signedReady = computed(() => Boolean(signedIn.value && signed.privateKey))
 const restoring = computed(() => Boolean(signed.restoring))
 
 const inAnyApp = computed(() => Boolean(signedReady.value))
+const shouldConfirmUnload = computed(() => Boolean(signedReady.value && !signed.stayLoggedIn))
 useWakeLock(inAnyApp)
-useBeforeUnloadConfirm(inAnyApp)
+useBeforeUnloadConfirm(shouldConfirmUnload)
 
 // Handle POSTed .json key files from Web Share Target
 // Web Share Target API: handle POSTed .json key files

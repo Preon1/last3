@@ -23,6 +23,7 @@ import {
   publicJwkFromPrivateJwk,
 } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
+import { useToastStore } from './toast'
 
 export type SignedChat = {
   id: string
@@ -122,6 +123,7 @@ type VaultPlain = {
 }
 
 export const useSignedStore = defineStore('signed', () => {
+  const toast = useToastStore()
   const token = ref<string | null>(null)
   const expiresAtMs = ref<number | null>(null)
   const userId = ref<string | null>(null)
@@ -138,6 +140,8 @@ export const useSignedStore = defineStore('signed', () => {
   const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
 
   const restoring = ref<boolean>(false)
+
+  let lastPrivateJwkJsonForStay: string | null = null
 
   let stayMirrorTimer: number | null = null
   function clearStayMirrorTimer() {
@@ -184,7 +188,7 @@ export const useSignedStore = defineStore('signed', () => {
       }
 
       // Mirror device-bound unlock blob.
-      if (privateKey.value) await persistStayUnlockBlobFromCurrentKey()
+      // The stay-unlock blob is persisted at login/register time from the decrypted private JWK string.
     } catch {
       // ignore
     }
@@ -222,8 +226,9 @@ export const useSignedStore = defineStore('signed', () => {
         // ignore
       }
 
-      // Variant B: auto-unlock is required for stay mode.
-      void persistStayUnlockBlobFromCurrentKey()
+      // Variant B: if we already have key material in-memory (e.g. settings toggle while signed in),
+      // ensure the stay-unlock blob exists.
+      void ensureStayUnlockBlobIfPossible()
 
       // Ensure mirrors are present.
       scheduleStayMirrorSync()
@@ -231,8 +236,13 @@ export const useSignedStore = defineStore('signed', () => {
 
     if (!stayLoggedIn.value) {
       clearStayMirrorTimer()
-      // Also wipe local DB state (session + device-bound auto-unlock blob).
-      void localData.wipeIndexedDb()
+
+      // Clear stay artifacts stored in localStorage.
+      void localData.idbSet(LocalEntity.IdbStaySession, null)
+      void localData.idbSet(LocalEntity.IdbStayVault, null)
+      void localData.idbSet(LocalEntity.IdbStayRemoveDate, null)
+      void localData.idbSet(LocalEntity.IdbStayUnlockBlob, null)
+      localData.remove(LocalEntity.StayDeviceKey)
     }
   }
 
@@ -758,13 +768,40 @@ export const useSignedStore = defineStore('signed', () => {
     if (stayLoggedIn.value) void localData.clearIdbStaySession()
   }
 
-  async function persistStayUnlockBlobFromCurrentKey() {
+  async function persistStayUnlockBlobFromPrivateJwk(privateJwkJson: string) {
     try {
       if (!stayLoggedIn.value) return
-      if (!privateKey.value) return
-      const jwk = await crypto.subtle.exportKey('jwk', privateKey.value)
-      const blob = await localData.encryptStayString(JSON.stringify(jwk))
+      const blob = await localData.encryptStayString(String(privateJwkJson ?? ''))
       await localData.idbSet(LocalEntity.IdbStayUnlockBlob, blob)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function ensureStayUnlockBlobIfPossible(): Promise<void> {
+    try {
+      if (!stayLoggedIn.value) return
+      // If user enables stay mode before login, we don't have key material yet.
+      if (!token.value || !userId.value || !username.value) return
+
+      const existing = await localData.idbGet<string>(LocalEntity.IdbStayUnlockBlob)
+      if (existing) return
+
+      if (lastPrivateJwkJsonForStay) {
+        await persistStayUnlockBlobFromPrivateJwk(lastPrivateJwkJsonForStay)
+        return
+      }
+
+      // We cannot recover a private JWK from a non-extractable CryptoKey.
+      // In this scenario, user must re-login with stay mode enabled.
+      stayLoggedIn.value = false
+      localData.setSignedStayLoggedIn(false)
+      toast.push({
+        title: 'Keep logged in disabled',
+        message: 'Please log in again with "Keep logged in" enabled to allow auto-unlock.',
+        variant: 'info',
+        timeoutMs: 8000,
+      })
     } catch {
       // ignore
     }
@@ -779,6 +816,7 @@ export const useSignedStore = defineStore('signed', () => {
       const blob = await localData.idbGet<string>(LocalEntity.IdbStayUnlockBlob)
       if (!blob) return false
       const jwkJson = await localData.decryptStayString(blob)
+      lastPrivateJwkJsonForStay = jwkJson
       privateKey.value = await importRsaPrivateKeyJwk(jwkJson)
       publicKeyJwk.value = publicJwkFromPrivateJwk(jwkJson)
       return true
@@ -860,11 +898,12 @@ export const useSignedStore = defineStore('signed', () => {
     if (!encryptedPrivateKey) throw new Error('No local key found')
 
     const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    lastPrivateJwkJsonForStay = privateJwk
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
     publicKeyJwk.value = publicJwkFromPrivateJwk(privateJwk)
 
-    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
-    void persistStayUnlockBlobFromCurrentKey()
+    // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
+    void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     // Now that the password is known, ensure we persist only the low-profile entry.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
@@ -1751,6 +1790,9 @@ export const useSignedStore = defineStore('signed', () => {
     const { publicJwk, privateJwk } = await generateRsaKeyPair()
     const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password, extraEntropy: params.extraEntropy })
 
+    // Cache JWK for optional stay-login auto-unlock.
+    lastPrivateJwkJsonForStay = privateJwk
+
     // Import private key before setting token/userId so App.vue doesn't interpret
     // the session as "signed in but locked" mid-register and auto-logout.
     const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
@@ -1798,8 +1840,8 @@ export const useSignedStore = defineStore('signed', () => {
       )
     }
 
-    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
-    void persistStayUnlockBlobFromCurrentKey()
+    // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
+    void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     await refreshChats()
     await connectWs()
@@ -1823,6 +1865,8 @@ export const useSignedStore = defineStore('signed', () => {
     if (!encryptedPrivateKey) throw new Error('No local key found')
 
     const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    // Cache JWK for optional stay-login auto-unlock.
+    lastPrivateJwkJsonForStay = privateJwk
     const priv = await importRsaPrivateKeyJwk(privateJwk)
 
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
@@ -1877,8 +1921,8 @@ export const useSignedStore = defineStore('signed', () => {
       )
     }
 
-    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
-    void persistStayUnlockBlobFromCurrentKey()
+    // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
+    void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     // Migrate/ensure low-profile local storage now that we have the password.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
@@ -2047,7 +2091,8 @@ export const useSignedStore = defineStore('signed', () => {
       // Variant B requirement: stay mode must never leave us in a signed-but-locked state.
       if (token.value && userId.value && username.value && !privateKey.value) {
         try {
-          logout(true)
+          // Do not wipe local artifacts here; restore failures can be transient.
+          logout(false)
         } catch {
           // ignore
         }
@@ -2065,12 +2110,8 @@ export const useSignedStore = defineStore('signed', () => {
           void trySyncPushSubscription()
           view.value = 'contacts'
         } catch {
-          // Token may be invalid (server restart). Fall back to logged-out state.
-          try {
-            logout(true)
-          } catch {
-            // ignore
-          }
+          // Do not wipe local state here. fetchJson() already clears the session on 401.
+          // Other errors (offline/transient) should not destroy stay-login artifacts.
         }
       }
     } finally {

@@ -1,4 +1,4 @@
-import { wipeStayUnlockDb } from './stayUnlock'
+
 
 export const LocalEntity = {
   NotificationsEnabled: 'notifications.enabled',
@@ -619,11 +619,6 @@ export class LocalData {
     await this.idbSet(id, null)
   }
 
-  async wipeIndexedDb(): Promise<void> {
-    // We no longer use IndexedDB for stay-login state, but we still wipe the legacy DB
-    // on wipe/account-delete to clean up older installs.
-    await wipeStayUnlockDb()
-  }
 
   private async getOrCreateStayDeviceKey(): Promise<CryptoKey> {
     if (!isBrowser()) throw new Error('Not in browser')
@@ -747,9 +742,6 @@ export class LocalData {
 
       this.remove(def.id)
     }
-
-    // Legacy IndexedDB: wipe only on explicit wipe/account-delete flows.
-    if (reason === 'logout_wipe' || reason === 'account_delete') await this.wipeIndexedDb()
   }
 }
 
