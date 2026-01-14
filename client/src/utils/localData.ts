@@ -1,9 +1,11 @@
-import { decryptStayString, encryptStayString, stayDbGet, stayDbSet, wipeStayUnlockDb } from './stayUnlock'
+import { wipeStayUnlockDb } from './stayUnlock'
 
 export const LocalEntity = {
   NotificationsEnabled: 'notifications.enabled',
   UiTheme: 'ui.theme',
   Locale: 'i18n.locale',
+
+  StayDeviceKey: 'stay.deviceKey',
 
   SignedStay: 'signed.stay',
   SignedKeys: 'signed.keys',
@@ -52,6 +54,19 @@ function safeGetStorage(backend: 'localStorage' | 'sessionStorage'): Storage | n
   } catch {
     return null
   }
+}
+
+function b64Encode(bytes: Uint8Array): string {
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0)
+  return btoa(bin)
+}
+
+function b64Decode(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
 }
 
 function cookieGet(name: string): string | null {
@@ -132,6 +147,19 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     id: LocalEntity.Locale,
     backend: 'sessionStorage',
     key: 'lrcom-locale',
+    codec: 'string',
+    removeOnLogout: false,
+    removeOnLogoutWipe: true,
+    removeOnAccountDelete: true,
+  },
+
+  // Used to encrypt the stay-unlock blob (JWK) stored in localStorage.
+  // This used to be a non-extractable CryptoKey stored in IndexedDB; switching to localStorage
+  // trades some security for predictability across tabs/browsers.
+  [LocalEntity.StayDeviceKey]: {
+    id: LocalEntity.StayDeviceKey,
+    backend: 'localStorage',
+    key: 'lrcom-stay-device-key',
     codec: 'string',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
@@ -241,11 +269,11 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     removeOnAccountDelete: true,
   },
 
-  // IndexedDB keys are managed through stayUnlock's kv store.
+  // Stay-login mirror: stored in localStorage for predictability across tabs.
   [LocalEntity.IdbStaySession]: {
     id: LocalEntity.IdbStaySession,
-    backend: 'indexedDb',
-    key: 'stay-session',
+    backend: 'localStorage',
+    key: 'lrcom-stay-session',
     codec: 'json',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -253,8 +281,8 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   },
   [LocalEntity.IdbStayVault]: {
     id: LocalEntity.IdbStayVault,
-    backend: 'indexedDb',
-    key: 'stay-vault',
+    backend: 'localStorage',
+    key: 'lrcom-stay-vault',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -262,8 +290,8 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   },
   [LocalEntity.IdbStayRemoveDate]: {
     id: LocalEntity.IdbStayRemoveDate,
-    backend: 'indexedDb',
-    key: 'stay-remove-date',
+    backend: 'localStorage',
+    key: 'lrcom-stay-remove-date',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -271,8 +299,8 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   },
   [LocalEntity.IdbStayUnlockBlob]: {
     id: LocalEntity.IdbStayUnlockBlob,
-    backend: 'indexedDb',
-    key: 'stay-unlock-blob',
+    backend: 'localStorage',
+    key: 'lrcom-stay-unlock-blob',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -542,14 +570,49 @@ export class LocalData {
 
   async idbGet<T>(id: LocalEntityId): Promise<T | null> {
     const def = REGISTRY[id]
-    if (!def || def.backend !== 'indexedDb') return null
-    return await stayDbGet<T>(def.key)
+    if (!def) return null
+
+    // This method is kept async to avoid touching call sites.
+    // The backing store for these entities may change (IndexedDB/localStorage/etc).
+    if (def.backend === 'indexedDb') {
+      // Legacy support only (older versions stored stay-login state in IndexedDB).
+      // We no longer write to IndexedDB.
+      return null
+    }
+
+    if (def.codec === 'string') return (this.getString(def.id) as unknown as T | null) ?? null
+    if (def.codec === 'json') return (this.getJson<T>(def.id) as T | null) ?? null
+    if (def.codec === 'bool01') return (this.getBool(def.id, false) as unknown as T) ?? null
+    if (def.codec === 'number') return (this.getNumber(def.id) as unknown as T | null) ?? null
+    return null
   }
 
   async idbSet(id: LocalEntityId, value: unknown): Promise<void> {
     const def = REGISTRY[id]
-    if (!def || def.backend !== 'indexedDb') return
-    await stayDbSet(def.key, value)
+    if (!def) return
+
+    // Kept async to preserve a single API surface.
+    if (def.backend === 'indexedDb') {
+      // Legacy support only (older versions stored stay-login state in IndexedDB).
+      return
+    }
+
+    if (def.codec === 'string') {
+      this.setString(def.id, value == null ? null : String(value))
+      return
+    }
+    if (def.codec === 'json') {
+      this.setJson(def.id, value)
+      return
+    }
+    if (def.codec === 'bool01') {
+      this.setBool(def.id, value == null ? null : Boolean(value))
+      return
+    }
+    if (def.codec === 'number') {
+      this.setNumber(def.id, typeof value === 'number' ? value : value == null ? null : Number(value))
+      return
+    }
   }
 
   async idbRemove(id: LocalEntityId): Promise<void> {
@@ -557,15 +620,47 @@ export class LocalData {
   }
 
   async wipeIndexedDb(): Promise<void> {
+    // We no longer use IndexedDB for stay-login state, but we still wipe the legacy DB
+    // on wipe/account-delete to clean up older installs.
     await wipeStayUnlockDb()
   }
 
+  private async getOrCreateStayDeviceKey(): Promise<CryptoKey> {
+    if (!isBrowser()) throw new Error('Not in browser')
+    if (!globalThis.crypto?.subtle) throw new Error('WebCrypto unavailable')
+
+    const existingB64 = String(this.getString(LocalEntity.StayDeviceKey) ?? '').trim()
+    if (existingB64) {
+      const raw = b64Decode(existingB64)
+      if (raw.byteLength === 32) {
+        const keyData = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer
+        return await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+      }
+    }
+
+    const raw = crypto.getRandomValues(new Uint8Array(32))
+    this.setString(LocalEntity.StayDeviceKey, b64Encode(raw))
+    const keyData = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer
+    return await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+  }
+
   async encryptStayString(plaintext: string): Promise<string> {
-    return await encryptStayString(plaintext)
+    const key = await this.getOrCreateStayDeviceKey()
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const pt = new TextEncoder().encode(String(plaintext ?? ''))
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt)
+    return `${b64Encode(iv)}.${b64Encode(new Uint8Array(ct))}`
   }
 
   async decryptStayString(blob: string): Promise<string> {
-    return await decryptStayString(blob)
+    const raw = String(blob ?? '')
+    const parts = raw.split('.')
+    if (parts.length !== 2) throw new Error('Bad stay blob')
+    const iv = b64Decode(parts[0] ?? '')
+    const ct = b64Decode(parts[1] ?? '')
+    const key = await this.getOrCreateStayDeviceKey()
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, new Uint8Array(ct).buffer)
+    return new TextDecoder().decode(pt)
   }
 
   // -----------------
@@ -650,15 +745,10 @@ export class LocalData {
 
       if (!shouldRemove) continue
 
-      if (def.backend === 'indexedDb') {
-        // Normal logout clears only registered IDB entities; full DB wipe is reserved for wipe/account-delete.
-        await stayDbSet(def.key, null)
-      } else {
-        this.remove(def.id)
-      }
+      this.remove(def.id)
     }
 
-    // IndexedDB: wipe the whole DB only on explicit wipe/account-delete flows.
+    // Legacy IndexedDB: wipe only on explicit wipe/account-delete flows.
     if (reason === 'logout_wipe' || reason === 'account_delete') await this.wipeIndexedDb()
   }
 }
