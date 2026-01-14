@@ -49,7 +49,7 @@ const canRegister = computed(() => Boolean(username.value.trim().length >= 1 && 
 const busy = ref(false)
 const err = ref('')
 
-type HelpKey = 'username' | 'password' | 'expirationDays'
+type HelpKey = 'username' | 'password' | 'expirationDays' | 'stayLoggedIn'
 const openHelp = ref<HelpKey | null>(null)
 
 function toggleHelp(key: HelpKey) {
@@ -77,6 +77,7 @@ const helpTitle = computed(() => {
   if (openHelp.value === 'username') return String(t('signed.username'))
   if (openHelp.value === 'password') return String(t('signed.password'))
   if (openHelp.value === 'expirationDays') return String(t('signed.expirationDays'))
+  if (openHelp.value === 'stayLoggedIn') return String(t('signed.stayLoggedIn'))
   return ''
 })
 
@@ -84,6 +85,9 @@ const helpBody = computed(() => {
   if (openHelp.value === 'username') return String(t('signed.help.username'))
   if (openHelp.value === 'password') return String(t('signed.help.password'))
   if (openHelp.value === 'expirationDays') return String(t('signed.help.expirationDays'))
+  if (openHelp.value === 'stayLoggedIn') {
+    return `${String(t('signed.stayLoggedInHelp'))}\n\n${String(t('signed.autoUnlockOnDevice'))}`
+  }
   return ''
 })
 
@@ -341,12 +345,19 @@ function toggleMode() {
         <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
         
         <div class="stay-row">
-          <label class="stay-check">
+          <div class="field-label-row">
             <input tabindex="10" type="checkbox" v-model="stayLoggedInModel" />
-            <span class="muted">{{ t('signed.stayLoggedIn') }}</span>
-          </label>
-          <div class="muted stay-help">{{ t('signed.stayLoggedInHelp') }}</div>
-          <div v-if="stayLoggedInModel" class="muted stay-help">{{ t('signed.autoUnlockOnDevice') }}</div>
+            <span class="field-label">{{ t('signed.stayLoggedIn') }}</span>
+            <button
+              class="help"
+              type="button"
+              :aria-label="String(t('signed.help.stayLoggedInAria'))"
+              @click="toggleHelp('stayLoggedIn')"
+              tabindex="11"
+            >
+              ?
+            </button>
+          </div>
         </div>
 
         <div class="setup-header-actions">
@@ -439,7 +450,6 @@ function toggleMode() {
 }
 
 .stay-row {
-  margin-top: 6px;
   display: grid;
   gap: 6px;
 }
@@ -447,13 +457,6 @@ function toggleMode() {
 .stay-row input{
   flex-grow:0;
   margin:0;
-}
-
-.stay-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  user-select: none;
 }
 
 .stay-help {

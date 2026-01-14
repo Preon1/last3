@@ -186,6 +186,7 @@ const baseMessages = {
         usernameAria: 'Help: username',
         passwordAria: 'Help: password',
         expirationDaysAria: 'Help: account expiration',
+        stayLoggedInAria: 'Help: stay logged in',
         username:
           'Limitations: 3–64 characters.\nSecurity note: (fill later)\nTip: usernames are case-sensitive on login.',
         password:
@@ -438,6 +439,7 @@ const baseMessages = {
         usernameAria: 'Hulp: gebruikersnaam',
         passwordAria: 'Hulp: wachtwoord',
         expirationDaysAria: 'Hulp: accountverval',
+        stayLoggedInAria: 'Hulp: ingelogd blijven',
         username:
           'Beperkingen: 3–64 tekens.\nBeveiligingsopmerking: (later invullen)\nTip: gebruikersnamen zijn hoofdlettergevoelig bij inloggen.',
         password:
@@ -728,6 +730,7 @@ const baseMessages = {
         usernameAria: "Aide : nom d'utilisateur",
         passwordAria: 'Aide : mot de passe',
         expirationDaysAria: "Aide : expiration du compte",
+        stayLoggedInAria: 'Aide : rester connecté',
         username:
           'Limites : 3–64 caractères.\nNote de sécurité : (à compléter)\nAstuce : les noms d’utilisateur sont sensibles à la casse à la connexion.',
         password:
@@ -1019,6 +1022,7 @@ const baseMessages = {
         usernameAria: 'Hilfe: Benutzername',
         passwordAria: 'Hilfe: Passwort',
         expirationDaysAria: 'Hilfe: Kontoablauf',
+        stayLoggedInAria: 'Hilfe: angemeldet bleiben',
         username:
           'Einschränkungen: 3–64 Zeichen.\nSicherheitshinweis: (später ausfüllen)\nTipp: Benutzernamen sind beim Login case-sensitiv.',
         password:
@@ -1308,6 +1312,7 @@ const baseMessages = {
         usernameAria: 'Справка: имя пользователя',
         passwordAria: 'Справка: пароль',
         expirationDaysAria: 'Справка: срок действия аккаунта',
+        stayLoggedInAria: 'Справка: оставаться в системе',
         username:
           'Ограничения: 3–64 символа.\nПримечание по безопасности: (заполнить позже)\nПодсказка: регистр в имени пользователя важен при входе.',
         password:
