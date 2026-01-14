@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
 import { decryptStringWithPassword } from '../utils/signedCrypto'
+import { LocalEntity, localData } from '../utils/localData'
 
 type StoredKeyV2 = {
   v: 2
@@ -12,8 +13,6 @@ type StoredKeyV2 = {
   encryptedPrivateKey: string
 }
 
-const LS_KEYS = 'lrcom-signed-keys'
-const LS_LEGACY_KEY = 'lrcom-signed-key'
 const DOWNLOAD_NAME = 'last_keys.json'
 
 const MAX_PASSWORD_LEN = 512
@@ -50,40 +49,24 @@ function refresh() {
 
 function loadKeyEntries(): StoredKeyV2[] {
   void refreshTick.value
-  try {
-    const raw = localStorage.getItem(LS_KEYS)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    const out: StoredKeyV2[] = []
-    for (const it of arr) {
-      if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
-        out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
-      }
+  const arr = localData.getJson<any[]>(LocalEntity.SignedKeys)
+  if (!Array.isArray(arr)) return []
+  const out: StoredKeyV2[] = []
+  for (const it of arr) {
+    if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
+      out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
     }
-    return out
-  } catch {
-    return []
   }
-}
-
-function hasLegacyKey(): boolean {
-  void refreshTick.value
-  try {
-    return Boolean(localStorage.getItem(LS_LEGACY_KEY))
-  } catch {
-    return false
-  }
+  return out
 }
 
 function saveKeyEntries(next: StoredKeyV2[]) {
-  localStorage.setItem(LS_KEYS, JSON.stringify(next))
+  localData.setJson(LocalEntity.SignedKeys, next)
 }
 
 const keyEntries = computed(() => loadKeyEntries())
 const v2KeyCount = computed(() => keyEntries.value.length)
-const legacyCount = computed(() => (hasLegacyKey() ? 1 : 0))
-const totalKeyCount = computed(() => v2KeyCount.value + legacyCount.value)
+const totalKeyCount = computed(() => v2KeyCount.value)
 const hasAnyKeys = computed(() => totalKeyCount.value > 0)
 
 const loggedInUsername = computed(() => {
@@ -199,12 +182,7 @@ function removeAllLocalKeys() {
   removeErr.value = ''
   removeBusy.value = true
   try {
-    try {
-      localStorage.removeItem(LS_KEYS)
-      localStorage.removeItem(LS_LEGACY_KEY)
-    } catch {
-      // ignore
-    }
+    localData.remove(LocalEntity.SignedKeys)
 
     try {
       // Force complete logout and clear session traces.

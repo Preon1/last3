@@ -22,7 +22,7 @@ import {
   importRsaPrivateKeyJwk,
   publicJwkFromPrivateJwk,
 } from '../utils/signedCrypto'
-import { decryptStayString, encryptStayString, stayDbGet, stayDbSet, wipeStayUnlockDb } from '../utils/stayUnlock'
+import { LocalEntity, localData } from '../utils/localData'
 
 export type SignedChat = {
   id: string
@@ -84,22 +84,7 @@ function wsSignedUrl(token: string) {
   return `${proto}//${location.host}/signed?token=${encodeURIComponent(token)}`
 }
 
-const LS_KEYS = 'lrcom-signed-keys'
-const LS_LEGACY_KEY = 'lrcom-signed-key'
-const SS_TOKEN = 'lrcom-signed-token'
-const SS_USER = 'lrcom-signed-user'
-const SS_EXPIRES_AT = 'lrcom-signed-expires-at'
-const SS_LAST_USERNAME = 'lrcom-signed-last-username'
-const SS_ADD_USERNAME = 'lrcom-add-username'
-const SS_VAULT = 'lrcom-signed-vault'
-const SS_REMOVE_DATE = 'lrcom-signed-remove-date'
-
-const LS_STAY = 'lrcom-signed-stay'
-
-const IDB_STAY_SESSION = 'stay-session'
-const IDB_STAY_VAULT = 'stay-vault'
-const IDB_STAY_REMOVE_DATE = 'stay-remove-date'
-const IDB_STAY_UNLOCK_BLOB = 'stay-unlock-blob'
+// NOTE: All locally persisted entities must be accessed via LocalData.
 
 const MAX_PASSWORD_LEN = 512
 
@@ -122,12 +107,6 @@ function utf8ByteLength(s: string): number {
 type StoredKeyV2 = {
   v: 2
   encryptedUsername: string
-  encryptedPrivateKey: string
-}
-
-type LegacyStoredKeyV1 = {
-  username: string
-  publicKeyJwk: string
   encryptedPrivateKey: string
 }
 
@@ -161,23 +140,14 @@ export const useSignedStore = defineStore('signed', () => {
   const restoring = ref<boolean>(false)
 
   const stayLoggedIn = ref<boolean>(false)
-  try {
-    stayLoggedIn.value = String(localStorage.getItem(LS_STAY) ?? '') === '1'
-  } catch {
-    stayLoggedIn.value = false
-  }
+  stayLoggedIn.value = localData.getSignedStayLoggedIn()
 
   // Only show a restore/loading state when stay mode is enabled.
   restoring.value = stayLoggedIn.value
 
   function setStayLoggedIn(next: boolean) {
     stayLoggedIn.value = Boolean(next)
-    try {
-      if (stayLoggedIn.value) localStorage.setItem(LS_STAY, '1')
-      else localStorage.removeItem(LS_STAY)
-    } catch {
-      // ignore
-    }
+    localData.setSignedStayLoggedIn(stayLoggedIn.value)
 
     if (stayLoggedIn.value) {
       try {
@@ -203,19 +173,8 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     if (!stayLoggedIn.value) {
-      try {
-        // Keep only encrypted key material (LS_KEYS) in localStorage.
-        localStorage.removeItem(SS_TOKEN)
-        localStorage.removeItem(SS_USER)
-        localStorage.removeItem(SS_EXPIRES_AT)
-        localStorage.removeItem(SS_VAULT)
-        localStorage.removeItem(SS_REMOVE_DATE)
-      } catch {
-        // ignore
-      }
-
       // Also wipe local DB state (session + device-bound auto-unlock blob).
-      void wipeStayUnlockDb()
+      void localData.wipeIndexedDb()
     }
   }
 
@@ -370,61 +329,33 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function storeVaultPlain(rawJson: string) {
-    try {
-      sessionStorage.setItem(SS_VAULT, rawJson)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_VAULT, rawJson)
+    localData.setString(LocalEntity.SignedVault, rawJson)
+    if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayVault, rawJson)
   }
 
   function loadVaultPlain(): VaultPlain | null {
-    try {
-      const raw = String(sessionStorage.getItem(SS_VAULT) ?? '')
-      return raw ? parseVaultPlain(raw) : null
-    } catch {
-      return null
-    }
+    const raw = String(localData.getString(LocalEntity.SignedVault) ?? '')
+    return raw ? parseVaultPlain(raw) : null
   }
 
   function clearVaultPlain() {
-    try {
-      sessionStorage.removeItem(SS_VAULT)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_VAULT, '')
+    localData.remove(LocalEntity.SignedVault)
+    if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayVault, null)
   }
 
   function storeRemoveDateIso(iso: string) {
-    try {
-      sessionStorage.setItem(SS_REMOVE_DATE, iso)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_REMOVE_DATE, iso)
+    localData.setString(LocalEntity.SignedRemoveDate, iso)
+    if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayRemoveDate, iso)
   }
 
   function loadRemoveDateIso(): string | null {
-    try {
-      const raw = String(sessionStorage.getItem(SS_REMOVE_DATE) ?? '').trim()
-      return raw ? raw : null
-    } catch {
-      return null
-    }
+    const raw = String(localData.getString(LocalEntity.SignedRemoveDate) ?? '').trim()
+    return raw ? raw : null
   }
 
   function clearRemoveDateIso() {
-    try {
-      sessionStorage.removeItem(SS_REMOVE_DATE)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_REMOVE_DATE, '')
+    localData.remove(LocalEntity.SignedRemoveDate)
+    if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayRemoveDate, null)
   }
 
   async function updateAccount(fields: {
@@ -695,50 +626,24 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function loadKeyEntries(): StoredKeyV2[] {
-    try {
-      const raw = localStorage.getItem(LS_KEYS)
-      if (!raw) return []
-      const arr = JSON.parse(raw)
-      if (!Array.isArray(arr)) return []
-      const out: StoredKeyV2[] = []
-      for (const it of arr) {
-        if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
-          out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
-        }
+    const arr = localData.getJson<any[]>(LocalEntity.SignedKeys)
+    if (!Array.isArray(arr)) return []
+    const out: StoredKeyV2[] = []
+    for (const it of arr) {
+      if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
+        out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
       }
-      return out
-    } catch {
-      return []
     }
+    return out
   }
 
   function saveKeyEntries(next: StoredKeyV2[]) {
-    try {
-      localStorage.setItem(LS_KEYS, JSON.stringify(next))
-    } catch {
-      // ignore
-    }
+    localData.setJson(LocalEntity.SignedKeys, next)
   }
 
-  function loadLegacyKeyMaterial(): LegacyStoredKeyV1 | null {
-    try {
-      const raw = localStorage.getItem(LS_LEGACY_KEY)
-      if (!raw) return null
-      const k = JSON.parse(raw)
-      if (!k?.username || !k?.publicKeyJwk || !k?.encryptedPrivateKey) return null
-      return { username: String(k.username), publicKeyJwk: String(k.publicKeyJwk), encryptedPrivateKey: String(k.encryptedPrivateKey) }
-    } catch {
-      return null
-    }
-  }
 
   function clearAllKeyMaterial() {
-    try {
-      localStorage.removeItem(LS_KEYS)
-      localStorage.removeItem(LS_LEGACY_KEY)
-    } catch {
-      // ignore
-    }
+    localData.remove(LocalEntity.SignedKeys)
   }
 
   async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string; extraEntropy?: Uint8Array }) {
@@ -760,12 +665,7 @@ export const useSignedStore = defineStore('signed', () => {
     kept.push({ v: 2, encryptedUsername, encryptedPrivateKey: params.encryptedPrivateKey })
     saveKeyEntries(kept)
 
-    // Remove legacy plaintext storage once password is known.
-    try {
-      localStorage.removeItem(LS_LEGACY_KEY)
-    } catch {
-      // ignore
-    }
+    // No legacy key storage is supported.
   }
 
   async function findEncryptedPrivateKeyForLogin(params: { username: string; password: string }) {
@@ -779,52 +679,25 @@ export const useSignedStore = defineStore('signed', () => {
       }
     }
 
-    const legacy = loadLegacyKeyMaterial()
-    if (legacy && legacy.username === params.username) return legacy.encryptedPrivateKey
     return null
   }
 
   function storeSession(u: StoredUser, t: string, expiresAt?: number | null) {
-    try {
-      sessionStorage.setItem(SS_TOKEN, t)
-      sessionStorage.setItem(SS_USER, JSON.stringify(u))
-      if (typeof expiresAt === 'number' && Number.isFinite(expiresAt)) sessionStorage.setItem(SS_EXPIRES_AT, String(expiresAt))
-      else sessionStorage.removeItem(SS_EXPIRES_AT)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) {
-      const e = typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null
-      void stayDbSet(IDB_STAY_SESSION, { u, t, e })
-    }
+    localData.setSignedSession({ user: u, token: t, expiresAtMs: expiresAt })
+    if (stayLoggedIn.value) void localData.mirrorSignedSessionToIdb({ user: u, token: t, expiresAtMs: expiresAt })
   }
 
   function loadSession(): { u: StoredUser; t: string; e: number | null } | null {
-    try {
-      const t = sessionStorage.getItem(SS_TOKEN)
-      const rawU = sessionStorage.getItem(SS_USER)
-      if (!t || !rawU) return null
-      const u = JSON.parse(rawU) as StoredUser
-      if (!u?.userId || !u?.username) return null
-      const rawE = sessionStorage.getItem(SS_EXPIRES_AT)
-      const e = rawE != null && rawE.trim() ? Number(rawE) : null
-      return { u, t, e: Number.isFinite(e as number) ? (e as number) : null }
-    } catch {
-      return null
-    }
+    const s = localData.getSignedSession()
+    if (!s?.token || !s.user) return null
+    const u = s.user as StoredUser
+    if (!u?.userId || !u?.username) return null
+    return { u, t: s.token, e: typeof s.expiresAtMs === 'number' && Number.isFinite(s.expiresAtMs) ? s.expiresAtMs : null }
   }
 
   function clearSession() {
-    try {
-      sessionStorage.removeItem(SS_TOKEN)
-      sessionStorage.removeItem(SS_USER)
-      sessionStorage.removeItem(SS_EXPIRES_AT)
-    } catch {
-      // ignore
-    }
-
-    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_SESSION, null)
+    localData.clearSignedSession()
+    if (stayLoggedIn.value) void localData.clearIdbStaySession()
   }
 
   async function persistStayUnlockBlobFromCurrentKey() {
@@ -832,8 +705,8 @@ export const useSignedStore = defineStore('signed', () => {
       if (!stayLoggedIn.value) return
       if (!privateKey.value) return
       const jwk = await crypto.subtle.exportKey('jwk', privateKey.value)
-      const blob = await encryptStayString(JSON.stringify(jwk))
-      await stayDbSet(IDB_STAY_UNLOCK_BLOB, blob)
+      const blob = await localData.encryptStayString(JSON.stringify(jwk))
+      await localData.idbSet(LocalEntity.IdbStayUnlockBlob, blob)
     } catch {
       // ignore
     }
@@ -845,9 +718,9 @@ export const useSignedStore = defineStore('signed', () => {
       if (!token.value || !userId.value || !username.value) return false
       if (privateKey.value) return true
 
-      const blob = await stayDbGet<string>(IDB_STAY_UNLOCK_BLOB)
+      const blob = await localData.idbGet<string>(LocalEntity.IdbStayUnlockBlob)
       if (!blob) return false
-      const jwkJson = await decryptStayString(blob)
+      const jwkJson = await localData.decryptStayString(blob)
       privateKey.value = await importRsaPrivateKeyJwk(jwkJson)
       publicKeyJwk.value = publicJwkFromPrivateJwk(jwkJson)
       return true
@@ -857,42 +730,23 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function loadLastUsername(): string {
-    try {
-      const v = sessionStorage.getItem(SS_LAST_USERNAME)
-      return (v ?? '').trim()
-    } catch {
-      return ''
-    }
+    return String(localData.getString(LocalEntity.SignedLastUsername) ?? '').trim()
   }
 
   function storeLastUsername(u: string) {
     const v = (u ?? '').trim()
     lastUsername.value = v
-    try {
-      if (v) sessionStorage.setItem(SS_LAST_USERNAME, v)
-      else sessionStorage.removeItem(SS_LAST_USERNAME)
-    } catch {
-      // ignore
-    }
+    localData.setString(LocalEntity.SignedLastUsername, v)
   }
 
   function loadPendingAddUsername(): string {
-    try {
-      return String(sessionStorage.getItem(SS_ADD_USERNAME) ?? '').trim()
-    } catch {
-      return ''
-    }
+    return String(localData.getString(LocalEntity.SignedAddUsername) ?? '').trim()
   }
 
   function storePendingAddUsername(u: string) {
     const v = String(u ?? '').trim()
     pendingAddUsername.value = v
-    try {
-      if (v) sessionStorage.setItem(SS_ADD_USERNAME, v)
-      else sessionStorage.removeItem(SS_ADD_USERNAME)
-    } catch {
-      // ignore
-    }
+    localData.setString(LocalEntity.SignedAddUsername, v)
   }
 
   function capturePendingAddFromUrl() {
@@ -2022,31 +1876,16 @@ export const useSignedStore = defineStore('signed', () => {
     view.value = 'contacts'
 
     if (wipeSessionStorage) {
-      try {
-        sessionStorage.clear()
-      } catch {
-        // ignore
-      }
       lastUsername.value = ''
       pendingAddUsername.value = ''
 
       // Settings logout should wipe everything except encrypted key material.
-      // Keep: LS_KEYS (encrypted key entries)
-      // Remove: all session/vault/prefs and stay-login artifacts.
-      try {
-        localStorage.removeItem(LS_STAY)
-        // Legacy keys from earlier iterations (best-effort cleanup).
-        localStorage.removeItem(SS_TOKEN)
-        localStorage.removeItem(SS_USER)
-        localStorage.removeItem(SS_EXPIRES_AT)
-        localStorage.removeItem(SS_VAULT)
-        localStorage.removeItem(SS_REMOVE_DATE)
-      } catch {
-        // ignore
-      }
-      void wipeStayUnlockDb()
+      // Keep: encrypted key entries
+      // Remove: all registered session/vault/prefs and stay-login artifacts.
+      void localData.cleanup('logout_wipe')
 
       stayLoggedIn.value = false
+      localData.setSignedStayLoggedIn(false)
     } else {
       clearSession()
     }
@@ -2106,7 +1945,7 @@ export const useSignedStore = defineStore('signed', () => {
       if (!stayLoggedIn.value) return
 
       if (!token.value) {
-        const sess = await stayDbGet<{ u: StoredUser; t: string; e: number | null }>(IDB_STAY_SESSION)
+        const sess = await localData.idbGet<{ u: StoredUser; t: string; e: number | null }>(LocalEntity.IdbStaySession)
         if (sess && sess.u?.userId && sess.u?.username && sess.t) {
           token.value = sess.t
           userId.value = sess.u.userId
@@ -2118,7 +1957,7 @@ export const useSignedStore = defineStore('signed', () => {
       }
 
       if (!vaultPlain.value) {
-        const vaultRaw = await stayDbGet<string>(IDB_STAY_VAULT)
+        const vaultRaw = await localData.idbGet<string>(LocalEntity.IdbStayVault)
         if (vaultRaw) {
           const parsed = parseVaultPlain(vaultRaw)
           if (parsed) vaultPlain.value = parsed
@@ -2126,7 +1965,7 @@ export const useSignedStore = defineStore('signed', () => {
       }
 
       if (!removeDateIso.value) {
-        const removeRaw = await stayDbGet<string>(IDB_STAY_REMOVE_DATE)
+        const removeRaw = await localData.idbGet<string>(LocalEntity.IdbStayRemoveDate)
         if (removeRaw) {
           const v = String(removeRaw).trim()
           removeDateIso.value = v ? v : null

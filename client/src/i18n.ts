@@ -1,9 +1,8 @@
 import { createI18n } from 'vue-i18n'
+import { LocalEntity, localData } from './utils/localData'
 
 export const supportedLocales = ['en', 'nl', 'fr', 'de', 'ru'] as const
 export type SupportedLocale = (typeof supportedLocales)[number]
-
-const STORAGE_KEY = 'lrcom-locale'
 
 function normalizeLocale(raw: string | null | undefined): SupportedLocale | null {
   const s = (raw ?? '').trim().toLowerCase()
@@ -20,12 +19,8 @@ function normalizeLocale(raw: string | null | undefined): SupportedLocale | null
 }
 
 function detectInitialLocale(): SupportedLocale {
-  try {
-    const saved = normalizeLocale(sessionStorage.getItem(STORAGE_KEY))
-    if (saved) return saved
-  } catch {
-    // ignore
-  }
+  const saved = normalizeLocale(localData.getString(LocalEntity.Locale))
+  if (saved) return saved
 
   const nav =
     normalizeLocale(navigator.language) ??
@@ -1455,11 +1450,7 @@ export function getLocale(): SupportedLocale {
 
 export function setLocale(next: SupportedLocale) {
   i18n.global.locale.value = next
-  try {
-    sessionStorage.setItem(STORAGE_KEY, next)
-  } catch {
-    // ignore
-  }
+  localData.setString(LocalEntity.Locale, next)
 }
 
 export function cycleLocale(): SupportedLocale {

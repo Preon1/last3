@@ -11,6 +11,7 @@ import ToastHost from './components/ToastHost.vue'
 import { useWakeLock } from './utils/wakeLock'
 import { useBeforeUnloadConfirm } from './utils/beforeUnloadConfirm'
 import { useToastStore } from './stores/toast'
+import { LocalEntity, localData } from './utils/localData'
 
 const signed = useSignedStore()
 const toast = useToastStore()
@@ -55,10 +56,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
               // Validate keys format: expect array of objects with encryptedUsername & encryptedPrivateKey
               if (Array.isArray(parsed) && parsed.every(k => k && typeof k.encryptedUsername === 'string' && typeof k.encryptedPrivateKey === 'string')) {
                 // Merge with existing keys
-                let existing = []
-                try {
-                  existing = JSON.parse(localStorage.getItem('lrcom-signed-keys') || '[]')
-                } catch {}
+                const existing = localData.getJson<any[]>(LocalEntity.SignedKeys) ?? []
                 const merged = [...existing]
                 let added = 0
                 for (const k of parsed) {
@@ -67,7 +65,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
                     added++
                   }
                 }
-                localStorage.setItem('lrcom-signed-keys', JSON.stringify(merged))
+                localData.setJson(LocalEntity.SignedKeys, merged)
                 if (added > 0) {
                   toast.push({ title: 'Keys Imported', message: `${added} new key(s) added.`, variant: 'info', timeoutMs: 6000 })
                 } else {

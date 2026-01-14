@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useSignedStore } from '../stores/signed'
-import SignedAppHeader from './SignedAppHeader.vue'
+import SignedAppHeader from './signedAppHeader.vue'
 import SignedContactsPage from './SignedContactsPage.vue'
 import SignedChatPanel from './SignedChatPanel.vue'
 import SignedSettingsPage from './SignedSettingsPage.vue'

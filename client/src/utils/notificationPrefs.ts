@@ -1,23 +1,11 @@
-const LS_NOTIFICATIONS_ENABLED = 'lrcom-notifications-enabled'
+import { LocalEntity, localData } from './localData'
 
 export function getNotificationsEnabled(): boolean {
-  try {
-    const raw = localStorage.getItem(LS_NOTIFICATIONS_ENABLED)
-    if (raw == null) return true
-    if (raw === '1' || raw === 'true') return true
-    if (raw === '0' || raw === 'false') return false
-    return true
-  } catch {
-    return true
-  }
+  return localData.getBool(LocalEntity.NotificationsEnabled, true)
 }
 
 export function setNotificationsEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(LS_NOTIFICATIONS_ENABLED, enabled ? '1' : '0')
-  } catch {
-    // ignore
-  }
+  localData.setBool(LocalEntity.NotificationsEnabled, Boolean(enabled))
 }
 
 export async function closeNotificationsByTag(tag: string) {

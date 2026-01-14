@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { i18n } from '../i18n'
+import { LocalEntity, localData } from '../utils/localData'
 
 export const useUiStore = defineStore('ui', () => {
   const aboutOpen = ref(false)
@@ -31,14 +32,8 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function loadTheme() {
-    try {
-      const raw = sessionStorage.getItem('lrcom-theme')
-      if (raw === 'dark' || raw === 'light' || raw === 'system') {
-        themeMode.value = raw
-      }
-    } catch {
-      // ignore
-    }
+    const raw = localData.getString(LocalEntity.UiTheme)
+    if (raw === 'dark' || raw === 'light' || raw === 'system') themeMode.value = raw
     applyTheme()
   }
 
@@ -83,11 +78,7 @@ export const useUiStore = defineStore('ui', () => {
   watch(
     themeMode,
     (v) => {
-      try {
-        sessionStorage.setItem('lrcom-theme', v)
-      } catch {
-        // ignore
-      }
+      localData.setString(LocalEntity.UiTheme, v)
       applyTheme()
     },
     { flush: 'post' },
