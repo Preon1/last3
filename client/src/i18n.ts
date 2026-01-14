@@ -203,6 +203,10 @@ const baseMessages = {
         title: 'Connection lost',
         body: 'Realtime connection failed after multiple attempts. You can reload the app or log out.',
       },
+      authorizationLost: {
+        title: 'Authorization lost',
+        body: 'This window has lost authorization (likely because you signed in on another device). Operations in this window are suspended.',
+      },
     },
     about: {
       title: 'About',
@@ -442,6 +446,10 @@ const baseMessages = {
       connectionLost: {
         title: 'Verbinding verloren',
         body: 'Realtime-verbinding is na meerdere pogingen mislukt. Je kunt de app opnieuw laden of uitloggen.',
+      },
+      authorizationLost: {
+        title: 'Autorisatie verloren',
+        body: 'Dit venster heeft de autorisatie verloren (waarschijnlijk omdat je op een ander apparaat bent ingelogd). Handelingen in dit venster zijn gepauzeerd.',
       },
       chats: 'Chats',
       chat: 'Chat',
@@ -720,6 +728,10 @@ const baseMessages = {
       connectionLost: {
         title: 'Connexion perdue',
         body: "La connexion en temps réel a échoué après plusieurs tentatives. Vous pouvez recharger l’application ou vous déconnecter.",
+      },
+      authorizationLost: {
+        title: 'Autorisation perdue',
+        body: "Cette fenêtre a perdu l’autorisation (probablement parce que vous vous êtes connecté sur un autre appareil). Les actions dans cette fenêtre sont suspendues.",
       },
       chats: 'Discussions',
       chat: 'Discussion',
@@ -1000,6 +1012,10 @@ const baseMessages = {
         title: 'Verbindung verloren',
         body: 'Die Echtzeitverbindung ist nach mehreren Versuchen fehlgeschlagen. Du kannst die App neu laden oder dich abmelden.',
       },
+      authorizationLost: {
+        title: 'Autorisierung verloren',
+        body: 'Dieses Fenster hat die Autorisierung verloren (wahrscheinlich, weil du dich auf einem anderen Gerät angemeldet hast). Aktionen in diesem Fenster sind ausgesetzt.',
+      },
       chats: 'Chats',
       chat: 'Chat',
       add: 'Hinzufügen',
@@ -1276,6 +1292,10 @@ const baseMessages = {
       connectionLost: {
         title: 'Соединение потеряно',
         body: 'Соединение в реальном времени не удалось после нескольких попыток. Вы можете перезагрузить приложение или выйти.',
+      },
+      authorizationLost: {
+        title: 'Авторизация потеряна',
+        body: 'Это окно потеряло авторизацию (вероятно, потому что вы вошли на другом устройстве). Действия в этом окне приостановлены.',
       },
       chats: 'Чаты',
       chat: 'Чат',

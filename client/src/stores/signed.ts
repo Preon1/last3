@@ -254,6 +254,7 @@ export const useSignedStore = defineStore('signed', () => {
   const wsShouldReconnect = ref(false)
   const wsReconnectAttempt = ref(0)
   const wsPermanentlyFailed = ref(false)
+  const authorizationLost = ref(false)
   let wsReconnectTimer: number | null = null
   let wsGeneration = 0
 
@@ -573,14 +574,30 @@ export const useSignedStore = defineStore('signed', () => {
     // Always send the request, even if list is empty.
 
     try {
-      const j = await fetchJson('/api/signed/presence', {
+      const r = await fetch(`${apiBase()}/api/signed/presence`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ userIds: list }),
       })
 
-      const online = new Set<string>(Array.isArray(j?.onlineUserIds) ? j.onlineUserIds.map(String) : [])
-      const busy = new Set<string>(Array.isArray(j?.busyUserIds) ? j.busyUserIds.map(String) : [])
+      if (r.status === 401) {
+        authorizationLost.value = true
+        // Stop realtime activity while suspended. Presence polling continues so we can auto-clear.
+        wsShouldReconnect.value = false
+        clearWsReconnectTimer()
+        disconnectWs()
+        return
+      }
+
+      if (!r.ok) return
+
+      // First successful presence refresh clears the suspended state.
+      if (authorizationLost.value) authorizationLost.value = false
+
+      const j = await r.json().catch(() => ({}))
+
+      const online = new Set<string>(Array.isArray((j as any)?.onlineUserIds) ? (j as any).onlineUserIds.map(String) : [])
+      const busy = new Set<string>(Array.isArray((j as any)?.busyUserIds) ? (j as any).busyUserIds.map(String) : [])
       const next: Record<string, boolean> = {}
       const nextBusy: Record<string, boolean> = {}
       for (const id of list) next[id] = online.has(id)
@@ -2085,6 +2102,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     wsShouldReconnect.value = false
     wsPermanentlyFailed.value = false
+    authorizationLost.value = false
     clearWsReconnectTimer()
     clearPresenceTimer()
     disconnectWs()
@@ -2347,6 +2365,7 @@ export const useSignedStore = defineStore('signed', () => {
     unlocking,
     ws,
     wsPermanentlyFailed,
+    authorizationLost,
     turnConfig,
     signedIn,
     lastUsername,
