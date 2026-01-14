@@ -5,10 +5,12 @@ import { useI18n } from 'vue-i18n'
 import { cycleLocale } from '../i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
+import { useToastStore } from '../stores/toast'
 import { confirmLeave } from '../utils/confirmLeave'
 
 const ui = useUiStore()
 const signed = useSignedStore()
+const toast = useToastStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
@@ -91,20 +93,56 @@ watch(
 async function onToggleHiddenMode(ev: Event) {
   const target = ev.target as HTMLInputElement | null
   if (!target) return
+  const next = Boolean(target.checked)
   try {
-    await signed.updateHiddenMode(Boolean(target.checked))
-  } catch {
-    // ignore
+    await signed.updateHiddenMode(next)
+    toast.push({
+      title: String(t('signed.settingsToast.savedTitle')),
+      message: String(t(next ? 'signed.settingsToast.hiddenModeOn' : 'signed.settingsToast.hiddenModeOff')),
+      variant: 'info',
+      timeoutMs: 3000,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const body =
+      msg === 'Unauthorized'
+        ? String(t('signed.errUnauthorized'))
+        : msg === 'Server error' || msg === 'Request failed'
+          ? String(t('signed.settingsToast.serverError'))
+          : msg === 'Not logged in'
+            ? String(t('signed.settingsToast.notLoggedIn'))
+            : msg === 'vault too large'
+              ? String(t('signed.settingsToast.vaultTooLarge'))
+              : String(t('signed.genericError'))
+    toast.error(String(t('signed.settingsToast.failedTitle')), body)
   }
 }
 
 async function onToggleIntrovertMode(ev: Event) {
   const target = ev.target as HTMLInputElement | null
   if (!target) return
+  const next = Boolean(target.checked)
   try {
-    await signed.updateIntrovertMode(Boolean(target.checked))
-  } catch {
-    // ignore
+    await signed.updateIntrovertMode(next)
+    toast.push({
+      title: String(t('signed.settingsToast.savedTitle')),
+      message: String(t(next ? 'signed.settingsToast.introvertModeOn' : 'signed.settingsToast.introvertModeOff')),
+      variant: 'info',
+      timeoutMs: 3000,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const body =
+      msg === 'Unauthorized'
+        ? String(t('signed.errUnauthorized'))
+        : msg === 'Server error' || msg === 'Request failed'
+          ? String(t('signed.settingsToast.serverError'))
+          : msg === 'Not logged in'
+            ? String(t('signed.settingsToast.notLoggedIn'))
+            : msg === 'vault too large'
+              ? String(t('signed.settingsToast.vaultTooLarge'))
+              : String(t('signed.genericError'))
+    toast.error(String(t('signed.settingsToast.failedTitle')), body)
   }
 }
 
@@ -146,11 +184,40 @@ async function onSaveExpirationDays() {
     const n = Number(expirationDaysDraft.value)
     if (!Number.isFinite(n) || n < 7 || n > 365) {
       expirationErr.value = String(t('signed.expirationDaysRangeError'))
+      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.expirationDaysRangeError')))
       return
     }
     await signed.updateExpirationDays(n)
-  } catch {
-    expirationErr.value = String(t('signed.genericError'))
+
+    toast.push({
+      title: String(t('signed.settingsToast.savedTitle')),
+      message: String(t('signed.settingsToast.expirationDaysSaved', { days: n })),
+      variant: 'info',
+      timeoutMs: 3000,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+
+    if (msg === 'Expiration days must be between 7 and 365') {
+      expirationErr.value = String(t('signed.expirationDaysRangeError'))
+      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.expirationDaysRangeError')))
+      return
+    }
+
+    const body =
+      msg === 'Unauthorized'
+        ? String(t('signed.errUnauthorized'))
+        : msg === 'Server error' || msg === 'Request failed'
+          ? String(t('signed.settingsToast.serverError'))
+          : msg === 'Not logged in'
+            ? String(t('signed.settingsToast.notLoggedIn'))
+            : msg === 'Missing public key'
+              ? String(t('signed.expirationDaysUnlockHint'))
+              : msg === 'vault too large'
+                ? String(t('signed.settingsToast.vaultTooLarge'))
+                : String(t('signed.genericError'))
+    expirationErr.value = body
+    toast.error(String(t('signed.settingsToast.failedTitle')), body)
   } finally {
     expirationBusy.value = false
   }
