@@ -6,24 +6,7 @@ import { useSignedStore } from '../stores/signed'
 const signed = useSignedStore()
 const { t } = useI18n()
 
-type ModalMode = 'connectionLost' | 'authorizationLost'
-
-const mode = computed<ModalMode | null>(() => {
-  if (!signed.signedIn) return null
-  if (signed.authorizationLost) return 'authorizationLost'
-  if (signed.wsPermanentlyFailed) return 'connectionLost'
-  return null
-})
-
-const open = computed(() => Boolean(mode.value))
-
-const titleKey = computed(() => {
-  return mode.value === 'authorizationLost' ? 'signed.authorizationLost.title' : 'signed.connectionLost.title'
-})
-
-const bodyKey = computed(() => {
-  return mode.value === 'authorizationLost' ? 'signed.authorizationLost.body' : 'signed.connectionLost.body'
-})
+const open = computed(() => Boolean(signed.wsPermanentlyFailed && signed.signedIn))
 
 function onReload() {
   try {
@@ -43,13 +26,13 @@ function onLogout() {
 </script>
 
 <template>
-  <div v-if="open" class="modal" role="dialog" aria-modal="true" :aria-label="t(titleKey)">
+  <div v-if="open" class="modal" role="dialog" aria-modal="true" :aria-label="t('signed.connectionLost.title')">
     <div class="modal-backdrop" />
 
     <div class="modal-card">
-      <div class="modal-title">{{ t(titleKey) }}</div>
+      <div class="modal-title">{{ t('signed.connectionLost.title') }}</div>
       <div class="modal-body">
-        {{ t(bodyKey) }}
+        {{ t('signed.connectionLost.body') }}
       </div>
 
       <div class="modal-actions">
