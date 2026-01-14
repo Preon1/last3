@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
 import { useToastStore } from '../stores/toast'
-import { decryptStringWithPassword } from '../utils/signedCrypto'
+import { decryptPrivateKeyJwk, decryptStringWithPassword, encryptPrivateKeyJwk, encryptStringWithPassword } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 
 type StoredKeyV2 = {
@@ -29,6 +29,8 @@ type Page =
   | 'download'
   | 'downloadSpecific'
   | 'importConfirm'
+  | 'changePasswordFind'
+  | 'changePasswordNew'
   | 'remove'
   | 'removeAllConfirm'
   | 'removeSpecific'
@@ -49,6 +51,16 @@ const rmBusy = ref(false)
 const rmErr = ref('')
 const rmFoundEntry = ref<StoredKeyV2 | null>(null)
 const rmFoundUsername = ref<string | null>(null)
+
+const chUsername = ref('')
+const chOldPassword = ref('')
+const chNewPassword = ref('')
+const chNewPassword2 = ref('')
+const chBusy = ref(false)
+const chErr = ref('')
+const chFoundEntry = ref<StoredKeyV2 | null>(null)
+const chFoundUsername = ref<string | null>(null)
+const chFoundPrivateJwk = ref<string | null>(null)
 
 type ImportPlan = {
   merged: StoredKeyV2[]
@@ -144,12 +156,23 @@ function resetStateOnOpen() {
   rmFoundEntry.value = null
   rmFoundUsername.value = null
 
+  chUsername.value = ''
+  chOldPassword.value = ''
+  chNewPassword.value = ''
+  chNewPassword2.value = ''
+  chBusy.value = false
+  chErr.value = ''
+  chFoundEntry.value = null
+  chFoundUsername.value = null
+  chFoundPrivateJwk.value = null
+
   importPlan.value = null
 }
 
 function goBack() {
   dlErr.value = ''
   rmErr.value = ''
+  chErr.value = ''
 
   if (page.value === 'downloadSpecific') {
     page.value = 'download'
@@ -162,6 +185,19 @@ function goBack() {
   if (page.value === 'importConfirm') {
     importPlan.value = null
     page.value = 'main'
+    return
+  }
+  if (page.value === 'changePasswordFind') {
+    page.value = 'main'
+    return
+  }
+  if (page.value === 'changePasswordNew') {
+    chNewPassword.value = ''
+    chNewPassword2.value = ''
+    chFoundPrivateJwk.value = null
+    chFoundEntry.value = null
+    chFoundUsername.value = null
+    page.value = 'changePasswordFind'
     return
   }
   if (page.value === 'removeAllConfirm') {
@@ -189,6 +225,8 @@ const headerTitle = computed(() => {
   if (page.value === 'download') return String(t('signed.keys.download'))
   if (page.value === 'downloadSpecific') return String(t('signed.keys.downloadSpecific'))
   if (page.value === 'importConfirm') return String(t('signed.keys.addFromFile'))
+  if (page.value === 'changePasswordFind') return String(t('signed.keys.changePassword'))
+  if (page.value === 'changePasswordNew') return String(t('signed.keys.changePassword'))
   if (page.value === 'remove') return String(t('signed.keys.remove'))
   if (page.value === 'removeAllConfirm') return String(t('signed.keys.removeAll'))
   return String(t('signed.keys.removeSpecific'))
@@ -214,6 +252,134 @@ function onDownloadAll() {
   if (!list.length) return
   downloadJson(list)
   toastInfo(String(t('signed.keys.downloadAll')), String(t('signed.keys.downloadAllOk', { count: list.length })))
+}
+
+function openChangePasswordPage() {
+  chErr.value = ''
+  chOldPassword.value = ''
+  chNewPassword.value = ''
+  chNewPassword2.value = ''
+  chFoundEntry.value = null
+  chFoundUsername.value = null
+  chFoundPrivateJwk.value = null
+  page.value = 'changePasswordFind'
+}
+
+async function findKeyForPasswordChange() {
+  chErr.value = ''
+  chFoundEntry.value = null
+  chFoundUsername.value = null
+  chFoundPrivateJwk.value = null
+
+  const u = chUsername.value.trim()
+  const pw = chOldPassword.value
+  if (!u || !pw) {
+    chErr.value = String(t('signed.keys.specificMissing'))
+    return
+  }
+  if (pw.length > MAX_PASSWORD_LEN) {
+    chErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    return
+  }
+
+  chBusy.value = true
+  try {
+    const list = keyEntries.value
+    for (const entry of list) {
+      try {
+        const decU = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
+        if (decU !== u) continue
+
+        const privateJwk = await decryptPrivateKeyJwk({ encrypted: entry.encryptedPrivateKey, password: pw })
+
+        chFoundEntry.value = entry
+        chFoundUsername.value = u
+        chFoundPrivateJwk.value = privateJwk
+        chOldPassword.value = ''
+        chNewPassword.value = ''
+        chNewPassword2.value = ''
+        page.value = 'changePasswordNew'
+        return
+      } catch {
+        // ignore
+      }
+    }
+    chErr.value = String(t('signed.keys.specificNotFound'))
+  } finally {
+    chBusy.value = false
+  }
+}
+
+async function applyPasswordChange() {
+  chErr.value = ''
+  const entry = chFoundEntry.value
+  const u = chFoundUsername.value
+  const privateJwk = chFoundPrivateJwk.value
+  if (!entry || !u || !privateJwk) {
+    chErr.value = String(t('signed.keys.specificNotFound'))
+    return
+  }
+
+  const pw1 = chNewPassword.value
+  const pw2 = chNewPassword2.value
+  if (!pw1 || !pw2) {
+    chErr.value = String(t('signed.keys.changePasswordNewMissing'))
+    return
+  }
+  if (pw1 !== pw2) {
+    chErr.value = String(t('signed.keys.changePasswordMismatch'))
+    return
+  }
+  if (pw1.length < 8) {
+    chErr.value = String(t('signed.passwordPlaceholder'))
+    return
+  }
+  if (pw1.length > MAX_PASSWORD_LEN) {
+    chErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    return
+  }
+
+  chBusy.value = true
+  try {
+    const encryptedUsername = await encryptStringWithPassword({ plaintext: u, password: pw1 })
+    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: pw1 })
+    const updated: StoredKeyV2 = { v: 2, encryptedUsername, encryptedPrivateKey }
+
+    const existing = keyEntries.value
+    const removeSig = `${entry.encryptedUsername}\n${entry.encryptedPrivateKey}`
+    const next: StoredKeyV2[] = []
+    const seen = new Set<string>()
+
+    for (const k of existing) {
+      const sig = `${k.encryptedUsername}\n${k.encryptedPrivateKey}`
+      if (sig === removeSig) continue
+      if (seen.has(sig)) continue
+      seen.add(sig)
+      next.push(k)
+    }
+
+    const updatedSig = `${updated.encryptedUsername}\n${updated.encryptedPrivateKey}`
+    if (!seen.has(updatedSig)) next.push(updated)
+
+    if (next.length > 0) saveKeyEntries(next)
+    else localData.remove(LocalEntity.SignedKeys)
+
+    refresh()
+    toastInfo(String(t('signed.keys.changePassword')), String(t('signed.keys.changePasswordOk')))
+
+    chOldPassword.value = ''
+    chNewPassword.value = ''
+    chNewPassword2.value = ''
+    chFoundEntry.value = null
+    chFoundUsername.value = null
+    chFoundPrivateJwk.value = null
+    page.value = 'main'
+  } catch (e: any) {
+    chErr.value = typeof e?.message === 'string' ? e.message : String(e)
+    toastErr(String(t('signed.keys.changePassword')), chErr.value)
+  } finally {
+    chBusy.value = false
+  }
 }
 
 async function onDownloadSpecific() {
@@ -470,13 +636,14 @@ function confirmImport() {
 
       <div v-if="page === 'main'" class="muted keys-description">{{ t('signed.keys.description') }}</div>
 
-      <div class="status keys-count">
+      <div v-if="page === 'main'" class="status keys-count">
         {{ t('signed.keys.countOnDevice', { count: totalKeyCount }) }}
       </div>
 
       <div v-if="page === 'main'" class="modal-actions keys-actions">
         <button class="secondary" type="button" @click="onPickFile">{{ t('signed.keys.addFromFile') }}</button>
         <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="page = 'download'">{{ t('signed.keys.download') }}</button>
+        <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="openChangePasswordPage">{{ t('signed.keys.changePassword') }}</button>
         <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="page = 'remove'">{{ t('signed.keys.remove') }}</button>
         <button class="secondary" type="button" @click="ui.closeManageKeys">{{ t('common.close') }}</button>
       </div>
@@ -529,6 +696,46 @@ function confirmImport() {
 
         <div class="modal-actions keys-actions-single">
           <button class="secondary" type="button" @click="confirmImport">{{ t('signed.keys.importConfirmProceed') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'changePasswordFind'">
+        <div class="muted keys-subhint">{{ t('signed.keys.changePasswordHint') }}</div>
+
+        <label class="field" for="keys-ch-username">
+          <span class="field-label">{{ t('signed.username') }}</span>
+          <input id="keys-ch-username" v-model="chUsername" maxlength="64" inputmode="text" />
+        </label>
+
+        <label class="field" for="keys-ch-old-password">
+          <span class="field-label">{{ t('signed.password') }}</span>
+          <input id="keys-ch-old-password" v-model="chOldPassword" type="password" minlength="8" maxlength="512" />
+        </label>
+
+        <div v-if="chErr" class="status keys-error" aria-live="polite">{{ chErr }}</div>
+
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary" type="button" :disabled="chBusy" @click="findKeyForPasswordChange">{{ t('common.proceed') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'changePasswordNew'">
+        <div class="status keys-warning">{{ t('signed.keys.changePasswordWarning') }}</div>
+
+        <label class="field" for="keys-ch-new-password">
+          <span class="field-label">{{ t('signed.keys.newPassword') }}</span>
+          <input id="keys-ch-new-password" v-model="chNewPassword" type="password" minlength="8" maxlength="512" />
+        </label>
+
+        <label class="field" for="keys-ch-new-password2">
+          <span class="field-label">{{ t('signed.keys.repeatNewPassword') }}</span>
+          <input id="keys-ch-new-password2" v-model="chNewPassword2" type="password" minlength="8" maxlength="512" />
+        </label>
+
+        <div v-if="chErr" class="status keys-error" aria-live="polite">{{ chErr }}</div>
+
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary" type="button" :disabled="chBusy" @click="applyPasswordChange">{{ t('signed.keys.changePasswordConfirm') }}</button>
         </div>
       </div>
 
@@ -617,6 +824,10 @@ function confirmImport() {
 
 .keys-error {
   color: var(--danger);
+}
+
+.keys-warning {
+  white-space: pre-line;
 }
 
 .keys-file-input {
