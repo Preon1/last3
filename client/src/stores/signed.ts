@@ -22,6 +22,7 @@ import {
   importRsaPrivateKeyJwk,
   publicJwkFromPrivateJwk,
 } from '../utils/signedCrypto'
+import { decryptStayString, encryptStayString, stayDbGet, stayDbSet, wipeStayUnlockDb } from '../utils/stayUnlock'
 
 export type SignedChat = {
   id: string
@@ -93,6 +94,13 @@ const SS_ADD_USERNAME = 'lrcom-add-username'
 const SS_VAULT = 'lrcom-signed-vault'
 const SS_REMOVE_DATE = 'lrcom-signed-remove-date'
 
+const LS_STAY = 'lrcom-signed-stay'
+
+const IDB_STAY_SESSION = 'stay-session'
+const IDB_STAY_VAULT = 'stay-vault'
+const IDB_STAY_REMOVE_DATE = 'stay-remove-date'
+const IDB_STAY_UNLOCK_BLOB = 'stay-unlock-blob'
+
 const MAX_PASSWORD_LEN = 512
 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
@@ -150,6 +158,67 @@ export const useSignedStore = defineStore('signed', () => {
 
   const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
 
+  const restoring = ref<boolean>(false)
+
+  const stayLoggedIn = ref<boolean>(false)
+  try {
+    stayLoggedIn.value = String(localStorage.getItem(LS_STAY) ?? '') === '1'
+  } catch {
+    stayLoggedIn.value = false
+  }
+
+  // Only show a restore/loading state when stay mode is enabled.
+  restoring.value = stayLoggedIn.value
+
+  function setStayLoggedIn(next: boolean) {
+    stayLoggedIn.value = Boolean(next)
+    try {
+      if (stayLoggedIn.value) localStorage.setItem(LS_STAY, '1')
+      else localStorage.removeItem(LS_STAY)
+    } catch {
+      // ignore
+    }
+
+    if (stayLoggedIn.value) {
+      try {
+        if (token.value && userId.value && username.value) {
+          storeSession(
+            { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+            token.value,
+            expiresAtMs.value,
+          )
+        }
+        if (vaultPlain.value) {
+          storeVaultPlain(JSON.stringify({ expirationDays: vaultPlain.value.expirationDays }))
+        }
+        if (removeDateIso.value) {
+          storeRemoveDateIso(removeDateIso.value)
+        }
+      } catch {
+        // ignore
+      }
+
+      // Variant B: auto-unlock is required for stay mode.
+      void persistStayUnlockBlobFromCurrentKey()
+    }
+
+    if (!stayLoggedIn.value) {
+      try {
+        // Keep only encrypted key material (LS_KEYS) in localStorage.
+        localStorage.removeItem(SS_TOKEN)
+        localStorage.removeItem(SS_USER)
+        localStorage.removeItem(SS_EXPIRES_AT)
+        localStorage.removeItem(SS_VAULT)
+        localStorage.removeItem(SS_REMOVE_DATE)
+      } catch {
+        // ignore
+      }
+
+      // Also wipe local DB state (session + device-bound auto-unlock blob).
+      void wipeStayUnlockDb()
+    }
+  }
+
   const lastUsername = ref<string>('')
 
   const pendingAddUsername = ref<string>('')
@@ -186,6 +255,8 @@ export const useSignedStore = defineStore('signed', () => {
   let presenceTimer: number | null = null
 
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
+  const locked = computed(() => Boolean(signedIn.value && !privateKey.value))
+  const unlocking = ref(false)
   const signedReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value))
   async function syncAppStateToServiceWorker() {
     try {
@@ -304,6 +375,8 @@ export const useSignedStore = defineStore('signed', () => {
     } catch {
       // ignore
     }
+
+    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_VAULT, rawJson)
   }
 
   function loadVaultPlain(): VaultPlain | null {
@@ -321,6 +394,8 @@ export const useSignedStore = defineStore('signed', () => {
     } catch {
       // ignore
     }
+
+    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_VAULT, '')
   }
 
   function storeRemoveDateIso(iso: string) {
@@ -329,6 +404,8 @@ export const useSignedStore = defineStore('signed', () => {
     } catch {
       // ignore
     }
+
+    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_REMOVE_DATE, iso)
   }
 
   function loadRemoveDateIso(): string | null {
@@ -346,6 +423,8 @@ export const useSignedStore = defineStore('signed', () => {
     } catch {
       // ignore
     }
+
+    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_REMOVE_DATE, '')
   }
 
   async function updateAccount(fields: {
@@ -714,6 +793,11 @@ export const useSignedStore = defineStore('signed', () => {
     } catch {
       // ignore
     }
+
+    if (stayLoggedIn.value) {
+      const e = typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null
+      void stayDbSet(IDB_STAY_SESSION, { u, t, e })
+    }
   }
 
   function loadSession(): { u: StoredUser; t: string; e: number | null } | null {
@@ -738,6 +822,37 @@ export const useSignedStore = defineStore('signed', () => {
       sessionStorage.removeItem(SS_EXPIRES_AT)
     } catch {
       // ignore
+    }
+
+    if (stayLoggedIn.value) void stayDbSet(IDB_STAY_SESSION, null)
+  }
+
+  async function persistStayUnlockBlobFromCurrentKey() {
+    try {
+      if (!stayLoggedIn.value) return
+      if (!privateKey.value) return
+      const jwk = await crypto.subtle.exportKey('jwk', privateKey.value)
+      const blob = await encryptStayString(JSON.stringify(jwk))
+      await stayDbSet(IDB_STAY_UNLOCK_BLOB, blob)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function tryRestoreStayUnlockBlob(): Promise<boolean> {
+    try {
+      if (!stayLoggedIn.value) return false
+      if (!token.value || !userId.value || !username.value) return false
+      if (privateKey.value) return true
+
+      const blob = await stayDbGet<string>(IDB_STAY_UNLOCK_BLOB)
+      if (!blob) return false
+      const jwkJson = await decryptStayString(blob)
+      privateKey.value = await importRsaPrivateKeyJwk(jwkJson)
+      publicKeyJwk.value = publicJwkFromPrivateJwk(jwkJson)
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -835,6 +950,9 @@ export const useSignedStore = defineStore('signed', () => {
     const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
     publicKeyJwk.value = publicJwkFromPrivateJwk(privateJwk)
+
+    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
+    void persistStayUnlockBlobFromCurrentKey()
 
     // Now that the password is known, ensure we persist only the low-profile entry.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
@@ -1768,6 +1886,9 @@ export const useSignedStore = defineStore('signed', () => {
       )
     }
 
+    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
+    void persistStayUnlockBlobFromCurrentKey()
+
     await refreshChats()
     await connectWs()
     void maybeAddChatFromUrl()
@@ -1844,6 +1965,9 @@ export const useSignedStore = defineStore('signed', () => {
       )
     }
 
+    // Variant B: if stay mode is enabled, persist a device-bound auto-unlock blob.
+    void persistStayUnlockBlobFromCurrentKey()
+
     // Migrate/ensure low-profile local storage now that we have the password.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
 
@@ -1905,6 +2029,24 @@ export const useSignedStore = defineStore('signed', () => {
       }
       lastUsername.value = ''
       pendingAddUsername.value = ''
+
+      // Settings logout should wipe everything except encrypted key material.
+      // Keep: LS_KEYS (encrypted key entries)
+      // Remove: all session/vault/prefs and stay-login artifacts.
+      try {
+        localStorage.removeItem(LS_STAY)
+        // Legacy keys from earlier iterations (best-effort cleanup).
+        localStorage.removeItem(SS_TOKEN)
+        localStorage.removeItem(SS_USER)
+        localStorage.removeItem(SS_EXPIRES_AT)
+        localStorage.removeItem(SS_VAULT)
+        localStorage.removeItem(SS_REMOVE_DATE)
+      } catch {
+        // ignore
+      }
+      void wipeStayUnlockDb()
+
+      stayLoggedIn.value = false
     } else {
       clearSession()
     }
@@ -1929,7 +2071,8 @@ export const useSignedStore = defineStore('signed', () => {
     logout(true)
   }
 
-  // Attempt to restore token+user on refresh. Private key still requires password.
+  // Attempt to restore token+user on refresh. In stay mode we will also restore
+  // the private key via a device-bound auto-unlock blob in IndexedDB.
   const restored = loadSession()
   if (restored) {
     token.value = restored.t
@@ -1944,9 +2087,89 @@ export const useSignedStore = defineStore('signed', () => {
     startRemoveDateSyncTimer()
   }
 
+  // If not in stay mode, do not keep a "locked" session after refresh.
+  if (restored && !stayLoggedIn.value) {
+    try {
+      logout(false)
+    } catch {
+      // ignore
+    }
+  }
+
   // Capture invite links on initial load, before login/register.
   pendingAddUsername.value = loadPendingAddUsername()
   if (!pendingAddUsername.value) capturePendingAddFromUrl()
+
+  // Variant B: async restore from IndexedDB when stay mode is enabled.
+  void (async () => {
+    try {
+      if (!stayLoggedIn.value) return
+
+      if (!token.value) {
+        const sess = await stayDbGet<{ u: StoredUser; t: string; e: number | null }>(IDB_STAY_SESSION)
+        if (sess && sess.u?.userId && sess.u?.username && sess.t) {
+          token.value = sess.t
+          userId.value = sess.u.userId
+          username.value = sess.u.username
+          hiddenMode.value = Boolean(sess.u.hiddenMode)
+          introvertMode.value = Boolean(sess.u.introvertMode)
+          expiresAtMs.value = typeof sess.e === 'number' && Number.isFinite(sess.e) ? sess.e : null
+        }
+      }
+
+      if (!vaultPlain.value) {
+        const vaultRaw = await stayDbGet<string>(IDB_STAY_VAULT)
+        if (vaultRaw) {
+          const parsed = parseVaultPlain(vaultRaw)
+          if (parsed) vaultPlain.value = parsed
+        }
+      }
+
+      if (!removeDateIso.value) {
+        const removeRaw = await stayDbGet<string>(IDB_STAY_REMOVE_DATE)
+        if (removeRaw) {
+          const v = String(removeRaw).trim()
+          removeDateIso.value = v ? v : null
+        }
+      }
+
+      await tryRestoreStayUnlockBlob()
+
+      // Variant B requirement: stay mode must never leave us in a signed-but-locked state.
+      if (token.value && userId.value && username.value && !privateKey.value) {
+        try {
+          logout(true)
+        } catch {
+          // ignore
+        }
+        return
+      }
+
+      if (token.value && userId.value && username.value && privateKey.value) {
+        try {
+          await refreshChats()
+          await connectWs()
+          void maybeAddChatFromUrl()
+          void maybeOpenChatFromUrl()
+          scheduleTokenRefresh()
+          startRemoveDateSyncTimer()
+          void trySyncPushSubscription()
+          view.value = 'contacts'
+        } catch {
+          // Token may be invalid (server restart). Fall back to logged-out state.
+          try {
+            logout(true)
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } finally {
+      restoring.value = false
+    }
+  })()
+
+  if (!stayLoggedIn.value) restoring.value = false
 
   async function updateHiddenMode(next: boolean) {
     if (!token.value) throw new Error('Not logged in')
@@ -2024,8 +2247,13 @@ export const useSignedStore = defineStore('signed', () => {
     vaultPlain,
     removeDateIso,
     notificationsEnabled,
+    restoring,
+    stayLoggedIn,
+    setStayLoggedIn,
     publicKeyJwk,
     privateKey,
+    locked,
+    unlocking,
     ws,
     turnConfig,
     signedIn,

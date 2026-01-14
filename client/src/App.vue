@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watchEffect } from 'vue'
+import { computed } from 'vue'
 import { useSignedStore } from './stores/signed'
 import SignedSetupScreen from './components/SignedSetupScreen.vue'
 import SignedAppShell from './components/SignedAppShell.vue'
@@ -16,21 +16,8 @@ const signed = useSignedStore()
 const toast = useToastStore()
 
 const signedIn = computed(() => signed.signedIn)
-const signedUnlocked = computed(() => Boolean(signed.privateKey))
-const signedReady = computed(() => Boolean(signedIn.value && signedUnlocked.value))
-
-// If the page refreshes, we may restore token+user from sessionStorage but the
-// private key is intentionally not persisted. Without an unlock screen, clear
-// the session token and return to the setup/login screen (keeping lastUsername).
-watchEffect(() => {
-  if (signedIn.value && !signedUnlocked.value) {
-    try {
-      signed.logout(false)
-    } catch {
-      // ignore
-    }
-  }
-})
+const signedReady = computed(() => Boolean(signedIn.value && signed.privateKey))
+const restoring = computed(() => Boolean(signed.restoring))
 
 const inAnyApp = computed(() => Boolean(signedReady.value))
 useWakeLock(inAnyApp)
@@ -102,7 +89,10 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
 
 <template>
   <main>
-    <SignedSetupScreen v-if="!signedReady" />
+    <div v-if="restoring" class="restoring">
+      <div class="restoring-card">Restoring session…</div>
+    </div>
+    <SignedSetupScreen v-else-if="!signedIn" />
     <SignedAppShell v-else />
 
     <ToastHost />
@@ -113,3 +103,20 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
     <ScanQrModal />
   </main>
 </template>
+
+<style scoped>
+.restoring {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.restoring-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  font-size: 14px;
+}
+</style>

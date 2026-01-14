@@ -11,7 +11,12 @@ const { themeLabel } = storeToRefs(ui)
 const { t, locale } = useI18n()
 
 const signed = useSignedStore()
-const { lastUsername, username: restoredUsername } = storeToRefs(signed)
+const { lastUsername, username: restoredUsername, stayLoggedIn } = storeToRefs(signed)
+
+const stayLoggedInModel = computed({
+  get: () => Boolean(stayLoggedIn.value),
+  set: (v: boolean) => signed.setStayLoggedIn(v),
+})
 
 const username = ref(lastUsername.value || restoredUsername.value || '')
 const password = ref('')
@@ -327,6 +332,15 @@ function toggleMode() {
           <input tabindex="4" id="signed-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
         </label>
 
+        <div class="stay-row">
+          <label class="stay-check">
+            <input tabindex="10" type="checkbox" v-model="stayLoggedInModel" />
+            <span>{{ t('signed.stayLoggedIn') }}</span>
+          </label>
+          <div class="muted stay-help">{{ t('signed.stayLoggedInHelp') }}</div>
+          <div v-if="stayLoggedInModel" class="muted stay-help">{{ t('signed.autoUnlockOnDevice') }}</div>
+        </div>
+
         <div class="setup-actions">
           <button v-if="!isRegister" class="join" tabindex="5" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
           <button v-else class="join" tabindex="6" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
@@ -419,5 +433,23 @@ function toggleMode() {
 .help:hover {
   color: var(--text);
   border-color: var(--text-muted);
+}
+
+.stay-row {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.stay-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.stay-help {
+  font-size: 12px;
+  line-height: 1.35;
 }
 </style>
