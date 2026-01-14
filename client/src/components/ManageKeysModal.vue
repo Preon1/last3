@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
+import { useToastStore } from '../stores/toast'
 import { decryptStringWithPassword } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 
@@ -19,29 +20,45 @@ const MAX_PASSWORD_LEN = 512
 
 const ui = useUiStore()
 const signed = useSignedStore()
+const toast = useToastStore()
 const { manageKeysOpen } = storeToRefs(ui)
 const { t } = useI18n()
 
+type Page =
+  | 'main'
+  | 'download'
+  | 'downloadSpecific'
+  | 'importConfirm'
+  | 'remove'
+  | 'removeAllConfirm'
+  | 'removeSpecific'
+  | 'removeSpecificConfirm'
+
+const page = ref<Page>('main')
+
 const refreshTick = ref(0)
-const status = ref('')
-const statusKind = ref<'ok' | 'error' | ''>('')
 
-const specificOpen = ref(false)
-const specificUsername = ref('')
-const specificPassword = ref('')
-const specificBusy = ref(false)
-const specificErr = ref('')
-const specificUsernameLocked = ref(false)
+const dlUsername = ref('')
+const dlPassword = ref('')
+const dlBusy = ref(false)
+const dlErr = ref('')
 
-const removeOpen = ref(false)
-const removeBusy = ref(false)
-const removeDone = ref(false)
-const removeErr = ref('')
+const rmUsername = ref('')
+const rmPassword = ref('')
+const rmBusy = ref(false)
+const rmErr = ref('')
+const rmFoundEntry = ref<StoredKeyV2 | null>(null)
+const rmFoundUsername = ref<string | null>(null)
 
-function clearStatus() {
-  status.value = ''
-  statusKind.value = ''
+type ImportPlan = {
+  merged: StoredKeyV2[]
+  read: number
+  added: number
+  ignored: number
+  invalid: number
 }
+
+const importPlan = ref<ImportPlan | null>(null)
 
 function refresh() {
   refreshTick.value++
@@ -65,14 +82,22 @@ function saveKeyEntries(next: StoredKeyV2[]) {
 }
 
 const keyEntries = computed(() => loadKeyEntries())
-const v2KeyCount = computed(() => keyEntries.value.length)
-const totalKeyCount = computed(() => v2KeyCount.value)
+const totalKeyCount = computed(() => keyEntries.value.length)
 const hasAnyKeys = computed(() => totalKeyCount.value > 0)
 
-const loggedInUsername = computed(() => {
-  const u = (signed.username ?? '').trim()
-  return u || null
-})
+function openDownloadSpecificPage() {
+  dlErr.value = ''
+  dlPassword.value = ''
+  page.value = 'downloadSpecific'
+}
+
+function openRemoveSpecificPage() {
+  rmErr.value = ''
+  rmPassword.value = ''
+  rmFoundEntry.value = null
+  rmFoundUsername.value = null
+  page.value = 'removeSpecific'
+}
 
 function downloadJson(obj: unknown) {
   const content = JSON.stringify(obj, null, 2)
@@ -95,19 +120,88 @@ function onBackdropClick(e: MouseEvent) {
   if (e.target && e.target === e.currentTarget) ui.closeManageKeys()
 }
 
+function toastInfo(title: string, message?: string) {
+  toast.push({ title, message, variant: 'info', timeoutMs: 6000 })
+}
+
+function toastErr(title: string, message?: string) {
+  toast.error(title, message)
+}
+
+function resetStateOnOpen() {
+  refresh()
+  page.value = 'main'
+
+  dlUsername.value = ''
+  dlPassword.value = ''
+  dlBusy.value = false
+  dlErr.value = ''
+
+  rmUsername.value = ''
+  rmPassword.value = ''
+  rmBusy.value = false
+  rmErr.value = ''
+  rmFoundEntry.value = null
+  rmFoundUsername.value = null
+
+  importPlan.value = null
+}
+
+function goBack() {
+  dlErr.value = ''
+  rmErr.value = ''
+
+  if (page.value === 'downloadSpecific') {
+    page.value = 'download'
+    return
+  }
+  if (page.value === 'download') {
+    page.value = 'main'
+    return
+  }
+  if (page.value === 'importConfirm') {
+    importPlan.value = null
+    page.value = 'main'
+    return
+  }
+  if (page.value === 'removeAllConfirm') {
+    page.value = 'remove'
+    return
+  }
+  if (page.value === 'removeSpecific') {
+    page.value = 'remove'
+    return
+  }
+  if (page.value === 'removeSpecificConfirm') {
+    page.value = 'removeSpecific'
+    return
+  }
+  if (page.value === 'remove') {
+    page.value = 'main'
+    return
+  }
+
+  ui.closeManageKeys()
+}
+
+const headerTitle = computed(() => {
+  if (page.value === 'main') return String(t('signed.keys.title'))
+  if (page.value === 'download') return String(t('signed.keys.download'))
+  if (page.value === 'downloadSpecific') return String(t('signed.keys.downloadSpecific'))
+  if (page.value === 'importConfirm') return String(t('signed.keys.addFromFile'))
+  if (page.value === 'remove') return String(t('signed.keys.remove'))
+  if (page.value === 'removeAllConfirm') return String(t('signed.keys.removeAll'))
+  return String(t('signed.keys.removeSpecific'))
+})
+
 watchEffect((onCleanup) => {
   if (!manageKeysOpen.value) return
 
-  refresh()
-  clearStatus()
-  specificOpen.value = false
-  removeOpen.value = false
-  removeDone.value = false
+  resetStateOnOpen()
 
   const onKeyDown = (ev: KeyboardEvent) => {
     if (ev.key === 'Escape') {
-      if (specificOpen.value) specificOpen.value = false
-      else if (removeOpen.value) removeOpen.value = false
+      if (page.value !== 'main') goBack()
       else ui.closeManageKeys()
     }
   }
@@ -116,38 +210,27 @@ watchEffect((onCleanup) => {
 })
 
 function onDownloadAll() {
-  clearStatus()
   const list = keyEntries.value
   if (!list.length) return
   downloadJson(list)
-  statusKind.value = 'ok'
-  status.value = String(t('signed.keys.downloadAllOk', { count: list.length }))
-}
-
-function openDownloadSpecific(prefillUsername?: string, lockUsername?: boolean) {
-  clearStatus()
-  specificErr.value = ''
-  specificPassword.value = ''
-  specificUsername.value = (prefillUsername ?? '').trim()
-  specificUsernameLocked.value = Boolean(lockUsername)
-  specificOpen.value = true
+  toastInfo(String(t('signed.keys.downloadAll')), String(t('signed.keys.downloadAllOk', { count: list.length })))
 }
 
 async function onDownloadSpecific() {
-  specificErr.value = ''
-  const u = specificUsername.value.trim()
-  const pw = specificPassword.value
+  dlErr.value = ''
+  const u = dlUsername.value.trim()
+  const pw = dlPassword.value
   if (!u || !pw) {
-    specificErr.value = String(t('signed.keys.specificMissing'))
+    dlErr.value = String(t('signed.keys.specificMissing'))
     return
   }
 
   if (pw.length > MAX_PASSWORD_LEN) {
-    specificErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    dlErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
 
-  specificBusy.value = true
+  dlBusy.value = true
   try {
     const list = keyEntries.value
     for (const entry of list) {
@@ -155,32 +238,23 @@ async function onDownloadSpecific() {
         const dec = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
         if (dec === u) {
           downloadJson([entry])
-          specificOpen.value = false
-          statusKind.value = 'ok'
-          status.value = String(t('signed.keys.downloadOneOk'))
+          page.value = 'download'
+          toastInfo(String(t('signed.keys.downloadSpecific')), String(t('signed.keys.downloadOneOk')))
           return
         }
       } catch {
         // ignore
       }
     }
-    specificErr.value = String(t('signed.keys.specificNotFound'))
+    dlErr.value = String(t('signed.keys.specificNotFound'))
   } finally {
-    specificBusy.value = false
+    dlBusy.value = false
   }
 }
 
-function openRemoveAllConfirm() {
-  clearStatus()
-  removeErr.value = ''
-  removeBusy.value = false
-  removeDone.value = false
-  removeOpen.value = true
-}
-
 function removeAllLocalKeys() {
-  removeErr.value = ''
-  removeBusy.value = true
+  rmErr.value = ''
+  rmBusy.value = true
   try {
     localData.remove(LocalEntity.SignedKeys)
 
@@ -192,20 +266,88 @@ function removeAllLocalKeys() {
     }
 
     refresh()
-    removeDone.value = true
-    statusKind.value = 'ok'
-    status.value = String(t('signed.keys.removeAllOk'))
+    page.value = 'remove'
+    toastInfo(String(t('signed.keys.removeAll')), String(t('signed.keys.removeAllOk')))
   } catch (e: any) {
-    removeErr.value = typeof e?.message === 'string' ? e.message : String(e)
+    rmErr.value = typeof e?.message === 'string' ? e.message : String(e)
+    toastErr(String(t('signed.keys.removeAll')), rmErr.value)
   } finally {
-    removeBusy.value = false
+    rmBusy.value = false
+  }
+}
+
+async function findKeyForRemoval() {
+  rmErr.value = ''
+  rmFoundEntry.value = null
+  rmFoundUsername.value = null
+
+  const u = rmUsername.value.trim()
+  const pw = rmPassword.value
+  if (!u || !pw) {
+    rmErr.value = String(t('signed.keys.specificMissing'))
+    return
+  }
+  if (pw.length > MAX_PASSWORD_LEN) {
+    rmErr.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    return
+  }
+
+  rmBusy.value = true
+  try {
+    const list = keyEntries.value
+    for (const entry of list) {
+      try {
+        const dec = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
+        if (dec === u) {
+          rmFoundEntry.value = entry
+          rmFoundUsername.value = u
+          page.value = 'removeSpecificConfirm'
+          return
+        }
+      } catch {
+        // ignore
+      }
+    }
+    rmErr.value = String(t('signed.keys.specificNotFound'))
+  } finally {
+    rmBusy.value = false
+  }
+}
+
+function removeSpecificKeyNow() {
+  rmErr.value = ''
+  const entry = rmFoundEntry.value
+  const u = rmFoundUsername.value
+  if (!entry || !u) {
+    rmErr.value = String(t('signed.keys.specificNotFound'))
+    return
+  }
+
+  rmBusy.value = true
+  try {
+    const existing = keyEntries.value
+    const sigToRemove = `${entry.encryptedUsername}\n${entry.encryptedPrivateKey}`
+    const next = existing.filter((k) => `${k.encryptedUsername}\n${k.encryptedPrivateKey}` !== sigToRemove)
+    if (next.length > 0) saveKeyEntries(next)
+    else localData.remove(LocalEntity.SignedKeys)
+
+    refresh()
+    page.value = 'remove'
+    rmFoundEntry.value = null
+    rmFoundUsername.value = null
+    rmPassword.value = ''
+    toastInfo(String(t('signed.keys.removeSpecific')), String(t('signed.keys.removeOneOk')))
+  } catch (e: any) {
+    rmErr.value = typeof e?.message === 'string' ? e.message : String(e)
+    toastErr(String(t('signed.keys.removeSpecific')), rmErr.value)
+  } finally {
+    rmBusy.value = false
   }
 }
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
 function onPickFile() {
-  clearStatus()
   fileInput.value?.click()
 }
 
@@ -221,7 +363,6 @@ async function onFileSelected(ev: Event) {
     // ignore
   }
 
-  clearStatus()
   try {
     const text = await file.text()
     const parsed = JSON.parse(text)
@@ -262,132 +403,223 @@ async function onFileSelected(ev: Event) {
       added++
     }
 
-    if (added > 0) saveKeyEntries(merged)
-    refresh()
-
-    statusKind.value = 'ok'
-    status.value = String(
-      t('signed.keys.importResult', {
-        read: incoming.length,
-        added,
-        ignored,
-        invalid: invalid.length,
-      }),
-    )
+    importPlan.value = {
+      merged,
+      read: incoming.length,
+      added,
+      ignored,
+      invalid: invalid.length,
+    }
+    page.value = 'importConfirm'
   } catch (e: any) {
-    statusKind.value = 'error'
-    status.value = typeof e?.message === 'string' ? e.message : String(e)
+    const msg = typeof e?.message === 'string' ? e.message : String(e)
+    toastErr(String(t('signed.keys.addFromFile')), msg)
   }
 }
+
+function confirmImport() {
+  const plan = importPlan.value
+  if (!plan) {
+    page.value = 'main'
+    return
+  }
+
+  try {
+    if (plan.merged.length > 0) saveKeyEntries(plan.merged)
+    else localData.remove(LocalEntity.SignedKeys)
+
+    refresh()
+
+    toastInfo(
+      String(t('signed.keys.addFromFile')),
+      String(
+        t('signed.keys.importResult', {
+          read: plan.read,
+          added: plan.added,
+          ignored: plan.ignored,
+          invalid: plan.invalid,
+        }),
+      ),
+    )
+  } catch (e: any) {
+    const msg = typeof e?.message === 'string' ? e.message : String(e)
+    toastErr(String(t('signed.keys.addFromFile')), msg)
+  } finally {
+    importPlan.value = null
+    page.value = 'main'
+  }
+}
+
 </script>
 
 <template>
   <div v-if="manageKeysOpen" class="modal" role="dialog" aria-modal="true" aria-labelledby="keysTitle" @click="onBackdropClick">
     <div class="modal-card" @click.stop>
-      <div class="modal-title" id="keysTitle">{{ t('signed.keys.title') }}</div>
-      <div class="muted" style="white-space: pre-line;">{{ t('signed.keys.description') }}</div>
+      <div class="modal-title keys-title-bar" id="keysTitle">
+        <button
+          v-if="page !== 'main'"
+          class="secondary icon-only"
+          type="button"
+          :aria-label="String(t('common.back'))"
+          @click="goBack"
+        >
+          <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#bracket-left"></use></svg>
+        </button>
+        <span>{{ headerTitle }}</span>
+      </div>
 
-      <div class="status" style="margin-top: 12px;">
+      <div v-if="page === 'main'" class="muted keys-description">{{ t('signed.keys.description') }}</div>
+
+      <div class="status keys-count">
         {{ t('signed.keys.countOnDevice', { count: totalKeyCount }) }}
       </div>
 
-      <div v-if="status" class="status" :style="{ color: statusKind === 'error' ? 'var(--danger)' : undefined }" aria-live="polite">
-        {{ status }}
-      </div>
-
-      <div class="modal-actions" style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap;">
-        <button v-if="loggedInUsername" class="secondary" type="button" @click="openDownloadSpecific(loggedInUsername ?? '', true)">
-          {{ t('signed.keys.downloadUser', { username: loggedInUsername }) }}
-        </button>
-
-        <button v-if="v2KeyCount > 0" class="secondary" type="button" @click="onDownloadAll">
-          {{ t('signed.keys.downloadAll') }}
-        </button>
-
-        <button v-if="v2KeyCount > 0" class="secondary" type="button" @click="openDownloadSpecific('', false)">
-          {{ t('signed.keys.downloadSpecific') }}
-        </button>
-
-        <button class="secondary" type="button" @click="onPickFile">
-          {{ t('signed.keys.addFromFile') }}
-        </button>
-
-        <button v-if="hasAnyKeys" class="secondary" type="button" @click="openRemoveAllConfirm">
-          {{ t('signed.keys.removeAll') }}
-        </button>
-
+      <div v-if="page === 'main'" class="modal-actions keys-actions">
+        <button class="secondary" type="button" @click="onPickFile">{{ t('signed.keys.addFromFile') }}</button>
+        <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="page = 'download'">{{ t('signed.keys.download') }}</button>
+        <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="page = 'remove'">{{ t('signed.keys.remove') }}</button>
         <button class="secondary" type="button" @click="ui.closeManageKeys">{{ t('common.close') }}</button>
       </div>
 
-      <input ref="fileInput" type="file" accept="application/json" style="display:none;" @change="onFileSelected" />
-    </div>
-  </div>
-
-  <div
-    v-if="manageKeysOpen && specificOpen"
-    class="modal"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="keysSpecificTitle"
-    @click="() => { specificOpen = false }"
-  >
-    <div class="modal-card" @click.stop>
-      <div class="modal-title" id="keysSpecificTitle">{{ t('signed.keys.downloadSpecific') }}</div>
-      <div class="muted" style="margin-bottom: 12px;">{{ t('signed.keys.specificHint') }}</div>
-
-      <label class="field" for="keys-username">
-        <span class="field-label">{{ t('signed.username') }}</span>
-        <input id="keys-username" v-model="specificUsername" :disabled="specificUsernameLocked" maxlength="64" inputmode="text" />
-      </label>
-
-      <label class="field" for="keys-password">
-        <span class="field-label">{{ t('signed.password') }}</span>
-        <input id="keys-password" v-model="specificPassword" type="password" minlength="8" maxlength="512" />
-      </label>
-
-      <div v-if="specificErr" class="status" aria-live="polite" style="color: var(--danger);">{{ specificErr }}</div>
-
-      <div class="modal-actions" style="margin-top: 14px;">
-        <button class="secondary" type="button" :disabled="specificBusy" @click="specificOpen = false">{{ t('common.cancel') }}</button>
-        <button class="secondary" type="button" :disabled="specificBusy" @click="onDownloadSpecific">{{ t('signed.keys.download') }}</button>
-      </div>
-    </div>
-  </div>
-
-  <div
-    v-if="manageKeysOpen && removeOpen"
-    class="modal"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="keysRemoveTitle"
-    @click="() => { if (!removeBusy) removeOpen = false }"
-  >
-    <div class="modal-card" @click.stop>
-      <div class="modal-title" id="keysRemoveTitle">{{ t('signed.keys.removeAll') }}</div>
-
-      <div v-if="!removeDone" class="muted" style="white-space: pre-line;">
-        {{ t('signed.keys.removeConfirm', { count: totalKeyCount }) }}
-      </div>
-
-      <div v-else class="status">{{ t('signed.keys.removeAllOk') }}</div>
-
-      <div v-if="removeErr" class="status" aria-live="polite" style="color: var(--danger);">{{ removeErr }}</div>
-
-      <div class="modal-actions" style="margin-top: 14px;">
-        <button v-if="!removeDone" class="secondary" type="button" :disabled="removeBusy" @click="removeOpen = false">
-          {{ t('common.cancel') }}
-        </button>
+      <div v-else-if="page === 'download'" class="modal-actions keys-actions">
+        <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="onDownloadAll">{{ t('signed.keys.downloadAll') }}</button>
         <button
-          v-if="!removeDone"
-          class="secondary danger"
+          class="secondary"
           type="button"
-          :disabled="removeBusy"
-          @click="removeAllLocalKeys"
+          :disabled="!hasAnyKeys"
+          @click="openDownloadSpecificPage"
         >
-          {{ t('signed.keys.removeAllConfirm') }}
+          {{ t('signed.keys.downloadSpecific') }}
         </button>
-        <button v-else class="secondary" type="button" @click="removeOpen = false">{{ t('common.close') }}</button>
       </div>
+
+      <div v-else-if="page === 'downloadSpecific'">
+        <div class="muted keys-subhint">{{ t('signed.keys.specificHint') }}</div>
+
+        <label class="field" for="keys-dl-username">
+          <span class="field-label">{{ t('signed.username') }}</span>
+          <input id="keys-dl-username" v-model="dlUsername" maxlength="64" inputmode="text" />
+        </label>
+
+        <label class="field" for="keys-dl-password">
+          <span class="field-label">{{ t('signed.password') }}</span>
+          <input id="keys-dl-password" v-model="dlPassword" type="password" minlength="8" maxlength="512" />
+        </label>
+
+        <div v-if="dlErr" class="status keys-error" aria-live="polite">{{ dlErr }}</div>
+
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary" type="button" :disabled="dlBusy" @click="onDownloadSpecific">{{ t('signed.keys.download') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'importConfirm'">
+        <div class="muted keys-subhint">{{ t('signed.keys.importConfirmHint') }}</div>
+
+        <div class="status keys-description">
+          {{
+            t('signed.keys.importResult', {
+              read: importPlan?.read ?? 0,
+              added: importPlan?.added ?? 0,
+              ignored: importPlan?.ignored ?? 0,
+              invalid: importPlan?.invalid ?? 0,
+            })
+          }}
+        </div>
+
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary" type="button" @click="confirmImport">{{ t('signed.keys.importConfirmProceed') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'remove'" class="modal-actions keys-actions">
+        <button class="secondary" type="button" :disabled="!hasAnyKeys" @click="page = 'removeAllConfirm'">{{ t('signed.keys.removeAll') }}</button>
+        <button
+          class="secondary"
+          type="button"
+          :disabled="!hasAnyKeys"
+          @click="openRemoveSpecificPage"
+        >
+          {{ t('signed.keys.removeSpecific') }}
+        </button>
+      </div>
+
+      <div v-else-if="page === 'removeAllConfirm'">
+        <div class="muted keys-description">{{ t('signed.keys.removeConfirm', { count: totalKeyCount }) }}</div>
+        <div v-if="rmErr" class="status keys-error" aria-live="polite">{{ rmErr }}</div>
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary danger" type="button" :disabled="rmBusy" @click="removeAllLocalKeys">{{ t('signed.keys.removeAllConfirm') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'removeSpecific'">
+        <div class="muted keys-subhint">{{ t('signed.keys.removeSpecificHint') }}</div>
+
+        <label class="field" for="keys-rm-username">
+          <span class="field-label">{{ t('signed.username') }}</span>
+          <input id="keys-rm-username" v-model="rmUsername" maxlength="64" inputmode="text" />
+        </label>
+
+        <label class="field" for="keys-rm-password">
+          <span class="field-label">{{ t('signed.password') }}</span>
+          <input id="keys-rm-password" v-model="rmPassword" type="password" minlength="8" maxlength="512" />
+        </label>
+
+        <div v-if="rmErr" class="status keys-error" aria-live="polite">{{ rmErr }}</div>
+
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary" type="button" :disabled="rmBusy" @click="findKeyForRemoval">{{ t('common.proceed') }}</button>
+        </div>
+      </div>
+
+      <div v-else-if="page === 'removeSpecificConfirm'">
+        <div class="muted keys-description">{{ t('signed.keys.removeSpecificConfirmHint', { username: rmFoundUsername ?? '' }) }}</div>
+        <div v-if="rmErr" class="status keys-error" aria-live="polite">{{ rmErr }}</div>
+        <div class="modal-actions keys-actions-single">
+          <button class="secondary danger" type="button" :disabled="rmBusy" @click="removeSpecificKeyNow">{{ t('signed.keys.removeSpecificConfirm') }}</button>
+        </div>
+      </div>
+
+      <input ref="fileInput" class="keys-file-input" type="file" accept="application/json" @change="onFileSelected" />
     </div>
   </div>
 </template>
+
+<style scoped>
+.keys-title-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.keys-description {
+  white-space: pre-line;
+}
+
+.keys-subhint {
+  margin-bottom: 12px;
+}
+
+.keys-count {
+  margin-top: 12px;
+}
+
+.keys-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.keys-actions-single {
+  margin-top: 14px;
+}
+
+.keys-error {
+  color: var(--danger);
+}
+
+.keys-file-input {
+  display: none;
+}
+</style>
