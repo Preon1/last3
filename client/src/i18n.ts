@@ -94,8 +94,8 @@ const baseMessages = {
       keys: {
         title: 'Manage keys',
         description:
-          'Back up your encrypted keys to move your account to another device or to keep a safe copy.\n\nThis file contains encrypted key material stored in your browser. Do not share it.',
-        countOnDevice: 'Keys on this device: {count}',
+          "What you need to know:\n1. To sign in, you need a key in your browser and the password.\n2. Knowing the username and password without the key will not let you sign in.\n3. Having the key without the password will not let you sign in.\n4. Deleting the key permanently and irreversibly loses access.\n5. Each account has its own key, created locally on the device during registration.\n6. Clearing browser data or uninstalling the browser may remove keys from the device.",
+        countOnDevice: 'Keys found: {count}',
         download: 'Download',
         downloadUser: 'Download {username} key',
         downloadAll: 'Download all keys',
@@ -127,7 +127,8 @@ const baseMessages = {
       register: 'Register',
       login: 'Login',
       stayLoggedIn: 'Stay logged in',
-      stayLoggedInHelp: 'Stores your session on this device so you stay signed in after closing the app. Not recommended on shared devices.',
+      stayLoggedInHelp:
+        "Unsafe option!\nDo not enable on someone else's or shared devices.\n\nA copy of browser data from a device where you're signed in gives full control over your account with no way to limit it.\n\nKeeps your session without an expiration.\n\nUseful if you added this site to your mobile home screen and use it like an app.",
       autoUnlockOnDevice: 'Auto-unlock on this device',
       add: 'Add',
       switchAnonymous: 'Anonymous mode',
@@ -387,8 +388,8 @@ const baseMessages = {
       keys: {
         title: 'Sleutels beheren',
         description:
-          'Maak een back-up van je versleutelde sleutels om je account naar een ander apparaat te verplaatsen of om een veilige kopie te bewaren.\n\nDit bestand bevat versleuteld sleutelmateriaal dat in je browser is opgeslagen. Deel het niet.',
-        countOnDevice: 'Sleutels op dit apparaat: {count}',
+          'Wat je moet weten:\n1. Om in te loggen heb je een sleutel in de browser en het wachtwoord nodig.\n2. Alleen gebruikersnaam en wachtwoord zonder sleutel is niet genoeg om in te loggen.\n3. Een sleutel zonder wachtwoord is niet genoeg om in te loggen.\n4. Het verwijderen van de sleutel betekent permanent en onomkeerbaar verlies van toegang.\n5. Elk account heeft zijn eigen sleutel, die lokaal op het apparaat wordt gemaakt bij registratie.\n6. Het volledig wissen van browsergegevens of het verwijderen van de browser kan sleutels van het apparaat verwijderen.',
+        countOnDevice: 'Sleutels gevonden: {count}',
         download: 'Downloaden',
         downloadUser: 'Sleutel van {username} downloaden',
         downloadAll: 'Alle sleutels downloaden',
@@ -421,7 +422,8 @@ const baseMessages = {
       register: 'Registreren',
       login: 'Inloggen',
       stayLoggedIn: 'Ingelogd blijven',
-      stayLoggedInHelp: 'Slaat je sessie op dit apparaat op zodat je aangemeld blijft na het sluiten van de app. Niet aanbevolen op gedeelde apparaten.',
+      stayLoggedInHelp:
+        'Onveilige optie!\nSchakel dit niet in op gedeelde of niet-eigen apparaten.\n\nEen kopie van de browsergegevens van een apparaat waarop je bent ingelogd geeft volledige controle over je account, zonder mogelijkheid om dit te beperken.\n\nBewaart de sessie zonder vervaldatum.\n\nHandig als je deze site aan het startscherm van je mobiele apparaat hebt toegevoegd en hem als app gebruikt.',
       autoUnlockOnDevice: 'Automatisch ontgrendelen op dit apparaat',
       youSignedInAs: 'Aangemeld als',
       hiddenMode: 'Verborgen modus',
@@ -677,8 +679,8 @@ const baseMessages = {
       keys: {
         title: 'Gérer les clés',
         description:
-          'Sauvegardez vos clés chiffrées pour déplacer votre compte vers un autre appareil ou pour conserver une copie en lieu sûr.\n\nCe fichier contient du matériel de clés chiffré stocké dans votre navigateur. Ne le partagez pas.',
-        countOnDevice: 'Clés sur cet appareil : {count}',
+          'À savoir :\n1. Pour vous connecter, il faut une clé dans le navigateur et le mot de passe.\n2. Connaître le nom d’utilisateur et le mot de passe sans la clé ne permet pas de se connecter.\n3. Avoir la clé sans le mot de passe ne permet pas de se connecter.\n4. Supprimer la clé entraîne une perte d’accès définitive et irréversible.\n5. Chaque compte a sa propre clé, créée localement sur l’appareil lors de l’inscription.\n6. Effacer complètement les données du navigateur ou supprimer le navigateur peut supprimer les clés de l’appareil.',
+        countOnDevice: 'Clés trouvées : {count}',
         download: 'Télécharger',
         downloadUser: 'Télécharger la clé de {username}',
         downloadAll: 'Télécharger toutes les clés',
@@ -712,7 +714,8 @@ const baseMessages = {
       register: "S'inscrire",
       login: 'Se connecter',
       stayLoggedIn: 'Rester connecté',
-      stayLoggedInHelp: 'Stocke votre session sur cet appareil afin de rester connecté après fermeture de l’application. Déconseillé sur un appareil partagé.',
+      stayLoggedInHelp:
+        'Option dangereuse !\nNe l’activez pas sur un appareil partagé ou qui n’est pas le vôtre.\n\nUne copie des données du navigateur d’un appareil où vous êtes connecté donne un contrôle total sur le compte, sans possibilité de limitation.\n\nConserve la session sans date d’expiration.\n\nPratique si vous avez ajouté ce site à l’écran d’accueil de votre appareil mobile et l’utilisez comme une application.',
       autoUnlockOnDevice: 'Déverrouillage automatique sur cet appareil',
       youSignedInAs: 'Connecté en tant que',
       hiddenMode: 'Mode invisible',
@@ -968,8 +971,8 @@ const baseMessages = {
       keys: {
         title: 'Schlüssel verwalten',
         description:
-          'Sichere deine verschlüsselten Schlüssel, um dein Konto auf ein anderes Gerät zu übertragen oder eine sichere Kopie aufzubewahren.\n\nDiese Datei enthält verschlüsseltes Schlüsselmaterial, das in deinem Browser gespeichert ist. Teile sie nicht.',
-        countOnDevice: 'Schlüssel auf diesem Gerät: {count}',
+          'Was du wissen musst:\n1. Zum Anmelden brauchst du einen Schlüssel im Browser und das Passwort.\n2. Benutzername und Passwort ohne Schlüssel reichen nicht zum Anmelden.\n3. Ein Schlüssel ohne Passwort reicht nicht zum Anmelden.\n4. Das Löschen des Schlüssels führt zum permanenten und unwiederbringlichen Verlust des Zugriffs.\n5. Jedes Konto hat seinen eigenen Schlüssel, der bei der Registrierung lokal auf dem Gerät erstellt wird.\n6. Das vollständige Löschen der Browserdaten oder das Entfernen des Browsers kann die Schlüssel vom Gerät löschen.',
+        countOnDevice: 'Gefundene Schlüssel: {count}',
         download: 'Herunterladen',
         downloadUser: 'Schlüssel von {username} herunterladen',
         downloadAll: 'Alle Schlüssel herunterladen',
@@ -1004,7 +1007,8 @@ const baseMessages = {
       register: 'Registrieren',
       login: 'Anmelden',
       stayLoggedIn: 'Angemeldet bleiben',
-      stayLoggedInHelp: 'Speichert deine Sitzung auf diesem Gerät, damit du nach dem Schließen der App angemeldet bleibst. Nicht empfohlen auf gemeinsam genutzten Geräten.',
+      stayLoggedInHelp:
+        'Unsichere Option!\nNicht auf fremden oder gemeinsam genutzten Geräten aktivieren.\n\nEine Kopie der Browserdaten von einem Gerät, auf dem du angemeldet bist, ermöglicht volle Kontrolle über das Konto – ohne Möglichkeit, das einzuschränken.\n\nSpeichert die Sitzung ohne Ablauf.\n\nPraktisch, wenn du diese Seite zum Startbildschirm deines Mobilgeräts hinzugefügt hast und sie wie eine App nutzt.',
       autoUnlockOnDevice: 'Automatisch auf diesem Gerät entsperren',
       youSignedInAs: 'Angemeldet als',
       hiddenMode: 'Versteckter Modus',
@@ -1258,8 +1262,8 @@ const baseMessages = {
       keys: {
         title: 'Управление ключами',
         description:
-          'Сделайте резервную копию ваших зашифрованных ключей, чтобы перенести аккаунт на другое устройство или сохранить безопасную копию.\n\nЭтот файл содержит зашифрованный ключевой материал, сохранённый в вашем браузере. Не делитесь им.',
-        countOnDevice: 'Ключи на этом устройстве: {count}',
+          'Что нужно знать:\n1. Для входа в систему необходимо наличие ключа в браузере и знание пароля.\n2. Знание логина и пароля при отсутвии ключа не позволит войти.\n3. Наличие ключа без знания пароля не позволит войти в систему.\n4. Удаление ключа ведет к безвозвратной потере доступа.\n5. У каждого аккаунта свой ключ, который создается локально на устройстве в момент регистрации.\n6. Полная очистка истории браузера или удаление браузера может повлечь удаление ключей с усройства.',
+        countOnDevice: 'Найдено ключей: {count}',
         download: 'Скачать',
         downloadUser: 'Скачать ключ {username}',
         downloadAll: 'Скачать все ключи',
@@ -1294,7 +1298,7 @@ const baseMessages = {
       register: 'Регистрация',
       login: 'Вход',
       stayLoggedIn: 'Оставаться в системе',
-      stayLoggedInHelp: 'Сохраняет вашу сессию на этом устройстве, чтобы вы оставались вошли после закрытия приложения. Не рекомендуется на общих устройствах.',
+      stayLoggedInHelp: 'Небезопасное действие!\nНе выбирайте на чужих или общих устройствах.\n\nКопия данных браузера с устройства, где выполнен вход дает полный контроль над логином без возможности его ограничения.\n\nСохраняет сессию без ограничения срока.\n\nУдобно для использования, если вы добавили этот сайт на рабочий стол мобильного устройтва и пользуетесь им как приложением.',
       autoUnlockOnDevice: 'Авто-разблокировка на этом устройстве',
       youSignedInAs: 'Вы вошли как',
       hiddenMode: 'Скрытый режим',
@@ -1314,11 +1318,11 @@ const baseMessages = {
         expirationDaysAria: 'Справка: срок действия аккаунта',
         stayLoggedInAria: 'Справка: оставаться в системе',
         username:
-          'Ограничения: 3–64 символа.\nПримечание по безопасности: (заполнить позже)\nПодсказка: регистр в имени пользователя важен при входе.',
+          '3–64 символа, регистр букв важен.\n\nИмя храниться в составе локального ключа в зашифрованном виде. На сервере имя доступно в открытом виде.',
         password:
-          'Ограничения: минимум 8 символов.\nПримечание по безопасности: (заполнить позже)\nПодсказка: пароль используется локально для расшифровки вашего приватного ключа.',
+          'Минимум 8 символов, невозможно восстановить.\n\nПароль необходим исключительно для расшифровки локального ключа. Если локального ключа нет, то знание пароля не позволит войти в систему.\n\nОн не передается на сервер ни явно, ни в виде хеша и не используется для авторизации.',
         expirationDays:
-          'Ограничения: 7–365 дней.\nПримечание по безопасности: (заполнить позже)\nПодсказка: активность продлевает срок действия (с приватным jitter).',
+          '7–365 дней.\n\nВсе аккаунты временные, но каждый раз при заходе вы обновляете срок действия аккаунта.\n\nПосле истечения срока аккант будет удален с сервера вместе со всеми его сообщениями, приватными чатами и следами.',
       },
       entropy: {
         title: 'Энтропия',
