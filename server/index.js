@@ -215,8 +215,7 @@ app.use(express.static(PUBLIC_DIR, {
   etag: false,
   lastModified: false,
   setHeaders(res) {
-    // Avoid caching to reduce "traces"; browsers may still keep memory caches transiently.
-    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
   },
 }));
 

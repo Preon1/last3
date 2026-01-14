@@ -48,7 +48,7 @@ https://{$LRCOM_DOMAIN:localhost} {
         /web-app-manifest-192x192.png \
         /web-app-manifest-512x512.png
     }
-    header @public_static Cache-Control "public, max-age=3600"
+    header @public_static Cache-Control "private, max-age=3600"
 
     # Per-endpoint rate limiting (requires Caddy built with github.com/mholt/caddy-ratelimit)
     # Keyed by client IP.
