@@ -215,7 +215,7 @@ app.use(express.static(PUBLIC_DIR, {
   etag: false,
   lastModified: false,
   setHeaders(res) {
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Cache-Control', 'private, max-age=604800');
   },
 }));
 
