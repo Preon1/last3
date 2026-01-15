@@ -694,8 +694,9 @@ function fmtMessageTime(iso: string) {
   }
 }
 
-// 53px - basic padding bottom of messages container
-const messagesContainerPB = ref(53)
+// basic padding bottom of messages container
+const messagesContainerPB = ref(63)
+const lastTarget = ref(0)
 
 watchEffect(() => {
   const messagesContainer = chatMessagesEl.value
@@ -708,7 +709,6 @@ watchEffect(() => {
 function autoGrowChatInput(reset = false) {
   const el = chatInputEl.value
   if (!el) return
-
   const cs = window.getComputedStyle(el)
   const lineHeight = Number.parseFloat(cs.lineHeight) || 20
   const paddingTop = Number.parseFloat(cs.paddingTop) || 0
@@ -718,9 +718,9 @@ function autoGrowChatInput(reset = false) {
   const maxHeight = lineHeight * 8 + paddingTop + paddingBottom + 2
   let target = Math.min(el.scrollHeight + 2, maxHeight)
 
-  if (reset || el.value == '') {
-    target = basicHeight
-  }
+  if (reset || el.value == '') target = basicHeight
+
+  if (lastTarget.value == 0) lastTarget.value = target
 
   el.style.height = `${target}px`
   el.style.overflowY = el.scrollHeight + 2 > maxHeight ? 'auto' : 'hidden'
@@ -729,6 +729,10 @@ function autoGrowChatInput(reset = false) {
   const messagesContainer = chatMessagesEl.value
   if (!messagesContainer) return
   messagesContainer.style.paddingBottom = `${messagesContainerPB.value + target - basicHeight}px`
+
+  // scroll messages block to account for textarea height changes
+  if (target > lastTarget.value) messagesContainer.scrollBy(0, basicHeight)
+  lastTarget.value = target
 }
 
 function resolveReplyPreview(replyToId: string) {
@@ -958,3 +962,9 @@ function onMessagesScroll() {
     </div>
   </section>
 </template>
+
+<style scoped>
+.small{
+  padding: 8px;
+}
+</style>

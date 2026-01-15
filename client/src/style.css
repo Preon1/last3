@@ -326,7 +326,7 @@ button {
 
 .chat-send{
   width: 45px;
-  height: 35px;
+  height: 38px;
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur));
@@ -502,9 +502,9 @@ button.danger:disabled {
   height: auto;
   max-height: 100vh;
   max-height: 100dvh;
-  padding-bottom: 53px;
-  padding-top: 60vh;
-  padding-top: 60dvh;
+  padding-top: 50vh;
+  padding-top: 50dvh;
+  padding-bottom: 63px;
 }
 
 @media(min-width:768px){
@@ -1122,15 +1122,19 @@ button.small{
   height: auto;
   display: flex;
   gap: 12px;
-  align-items: flex-end;
-  padding: 12px;
+  padding: 12px 12px 18px 12px;
   box-sizing: border-box;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  justify-content: space-between;
 }
 
 .chat-input textarea {
   padding: 8px 12px;
-  line-height: 1.25;
-  min-height: 1em;
+  line-height: 1.25em;
+  min-height: 1.25em;
+  font-size: 1em;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
