@@ -203,6 +203,8 @@ const baseMessages = {
       deleteAccount: 'Delete account',
       deleteAccountWarning:
         'This action is unrecoverable. Your account will be deleted and all of your messages in all chats will be permanently removed. This cannot be undone.',
+      logoutOtherDevices: 'Logout other devices',
+      logoutAndRemoveKeyOtherDevices: 'Logout and remove key on other devices',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',
       errInvalidCredentials: 'Invalid username or password.',
@@ -238,6 +240,8 @@ const baseMessages = {
       settingsToast: {
         savedTitle: 'Saved',
         failedTitle: 'Update failed',
+        otherDevicesLoggedOut: 'Other devices logged out.',
+        otherDevicesLoggedOutWiped: 'Other devices logged out and key removed.',
         hiddenModeOn: 'Hidden mode enabled.',
         hiddenModeOff: 'Hidden mode disabled.',
         introvertModeOn: 'Introvert mode enabled.',
@@ -374,6 +378,7 @@ const baseMessages = {
     confirm: {
       leave: 'Logout and leave {appName}?',
       deleteAccount: 'Delete your account and all server-side history for {appName}? This cannot be undone.',
+      logoutAndRemoveKeyOtherDevices: 'Log out on other devices and remove the key there? This will delete local access on those devices and cannot be undone.',
       deleteMessage: 'Delete this message?',
       deleteChat: 'Delete this chat for both users?',
       leaveGroup: 'Leave this group?',
@@ -548,6 +553,8 @@ const baseMessages = {
       settingsToast: {
         savedTitle: 'Opgeslagen',
         failedTitle: 'Bijwerken mislukt',
+        otherDevicesLoggedOut: 'Andere apparaten zijn uitgelogd.',
+        otherDevicesLoggedOutWiped: 'Andere apparaten zijn uitgelogd en hun sleutel is verwijderd.',
         hiddenModeOn: 'Verborgen modus ingeschakeld.',
         hiddenModeOff: 'Verborgen modus uitgeschakeld.',
         introvertModeOn: 'Introverte modus ingeschakeld.',
@@ -576,6 +583,8 @@ const baseMessages = {
       deleteAccount: 'Account verwijderen',
       deleteAccountWarning:
         'Deze actie is onomkeerbaar. Je account wordt verwijderd en al je berichten in alle chats worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.',
+      logoutOtherDevices: 'Andere apparaten uitloggen',
+      logoutAndRemoveKeyOtherDevices: 'Andere apparaten uitloggen en sleutel verwijderen',
       deleteChat: 'Chat verwijderen',
       leaveGroup: 'Groep verlaten',
       addMember: 'Lid toevoegen',
@@ -702,6 +711,7 @@ const baseMessages = {
     },
     confirm: {
       leave: 'Uitloggen en {appName} verlaten?',
+      logoutAndRemoveKeyOtherDevices: 'Uitloggen op andere apparaten en de sleutel daar verwijderen? Dit verwijdert lokale toegang op die apparaten en kan niet ongedaan worden gemaakt.',
       deleteMessage: 'Dit bericht verwijderen?',
       deleteChat: 'Deze chat voor beide gebruikers verwijderen?',
       leaveGroup: 'Deze groep verlaten?',
@@ -870,6 +880,8 @@ const baseMessages = {
       settingsToast: {
         savedTitle: 'Enregistré',
         failedTitle: 'Mise à jour échouée',
+        otherDevicesLoggedOut: 'Autres appareils déconnectés.',
+        otherDevicesLoggedOutWiped: 'Autres appareils déconnectés et clé supprimée.',
         hiddenModeOn: 'Mode invisible activé.',
         hiddenModeOff: 'Mode invisible désactivé.',
         introvertModeOn: 'Mode introverti activé.',
@@ -898,6 +910,8 @@ const baseMessages = {
       deleteAccount: 'Supprimer le compte',
       deleteAccountWarning:
         "Cette action est irréversible. Votre compte sera supprimé et tous vos messages dans toutes les discussions seront définitivement effacés. Cela ne peut pas être annulé.",
+      logoutOtherDevices: 'Déconnecter les autres appareils',
+      logoutAndRemoveKeyOtherDevices: 'Déconnecter et supprimer la clé sur les autres appareils',
       deleteChat: 'Supprimer la discussion',
       leaveGroup: 'Quitter le groupe',
       addMember: 'Ajouter un membre',
@@ -1024,6 +1038,7 @@ const baseMessages = {
     },
     confirm: {
       leave: 'Se déconnecter et quitter {appName} ?',
+      logoutAndRemoveKeyOtherDevices: 'Se déconnecter sur les autres appareils et y supprimer la clé ? Cela supprimera l’accès local sur ces appareils et ne peut pas être annulé.',
       deleteMessage: 'Supprimer ce message ?',
       deleteChat: 'Supprimer cette discussion pour les deux utilisateurs ?',
       leaveGroup: 'Quitter ce groupe ?',
@@ -1192,6 +1207,8 @@ const baseMessages = {
       settingsToast: {
         savedTitle: 'Gespeichert',
         failedTitle: 'Aktualisierung fehlgeschlagen',
+        otherDevicesLoggedOut: 'Andere Geräte wurden abgemeldet.',
+        otherDevicesLoggedOutWiped: 'Andere Geräte wurden abgemeldet und der Schlüssel wurde entfernt.',
         hiddenModeOn: 'Versteckter Modus aktiviert.',
         hiddenModeOff: 'Versteckter Modus deaktiviert.',
         introvertModeOn: 'Introvertierter Modus aktiviert.',
@@ -1220,6 +1237,8 @@ const baseMessages = {
       deleteAccount: 'Konto löschen',
       deleteAccountWarning:
         'Diese Aktion ist unwiderruflich. Dein Konto wird gelöscht und alle deine Nachrichten in allen Chats werden dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.',
+      logoutOtherDevices: 'Andere Geräte abmelden',
+      logoutAndRemoveKeyOtherDevices: 'Andere Geräte abmelden und Schlüssel entfernen',
       addMember: 'Mitglied hinzufügen',
       memberPlaceholder: 'Benutzername',
       memberAddedOk: 'Mitglied hinzugefügt.',
@@ -1346,6 +1365,7 @@ const baseMessages = {
     },
     confirm: {
       leave: '{appName} verlassen und abmelden?',
+      logoutAndRemoveKeyOtherDevices: 'Auf anderen Geräten abmelden und den Schlüssel dort entfernen? Dadurch wird der lokale Zugriff auf diesen Geräten gelöscht und das kann nicht rückgängig gemacht werden.',
       leaveGroup: 'Diese Gruppe verlassen?',
     },
     lang: {
@@ -1510,6 +1530,8 @@ const baseMessages = {
       settingsToast: {
         savedTitle: 'Сохранено',
         failedTitle: 'Не удалось обновить',
+        otherDevicesLoggedOut: 'Другие устройства вышли из аккаунта.',
+        otherDevicesLoggedOutWiped: 'Другие устройства вышли и ключ удалён.',
         hiddenModeOn: 'Скрытый режим включён.',
         hiddenModeOff: 'Скрытый режим выключен.',
         introvertModeOn: 'Режим интроверта включён.',
@@ -1538,6 +1560,8 @@ const baseMessages = {
       deleteAccount: 'Удалить аккаунт',
       deleteAccountWarning:
         'Это действие необратимо. Ваш аккаунт будет удалён, и все ваши сообщения во всех чатах будут удалены навсегда. Это нельзя отменить.',
+      logoutOtherDevices: 'Выйти на других устройствах',
+      logoutAndRemoveKeyOtherDevices: 'Выйти и удалить ключ на других устройствах',
       deleteChat: 'Удалить чат',
       leaveGroup: 'Выйти из группы',
       addMember: 'Добавить участника',
@@ -1664,6 +1688,7 @@ const baseMessages = {
     },
     confirm: {
       leave: 'Выйти и покинуть {appName}?',
+      logoutAndRemoveKeyOtherDevices: 'Выйти на других устройствах и удалить там ключ? Это удалит локальный доступ на этих устройствах и это нельзя отменить.',
       deleteMessage: 'Удалить это сообщение?',
       deleteChat: 'Удалить этот чат для обоих пользователей?',
       leaveGroup: 'Выйти из этой группы?',

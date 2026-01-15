@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
 import { initDatabase, query, runMigrations } from './db.js';
 import { registerUser, findUserByUsernameAndPublicKey, getUserByUsername } from './auth.js';
-import { issueToken, getUserIdForToken, requireSignedAuth, parseAuthTokenFromReq, revokeToken } from './signedSession.js';
+import { issueToken, rotateToken, getSessionForToken, requireSignedAuth, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './signedSession.js';
 import {
   signedListChats,
   signedListChatsWithLastMessage,
@@ -244,9 +244,56 @@ app.get('/api/push/public-key', (req, res) => {
 // Signed session refresh: rotate bearer token without re-login.
 app.post('/api/signed/session/refresh', requireSignedAuth, (req, res) => {
   try {
+    const oldToken = parseAuthTokenFromReq(req);
+    const rotated = rotateToken(oldToken);
+    if (!rotated?.token) return res.status(401).json({ error: 'Unauthorized' });
+    res.json({ success: true, token: rotated.token, expiresAt: rotated.expiresAt });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/signed/session/logout-other-devices', requireSignedAuth, (req, res) => {
+  try {
     const userId = String(req._signedUserId);
-    const { token, expiresAt } = issueToken(userId);
-    res.json({ success: true, token, expiresAt });
+    const keepSessionId = String(req._signedSessionId);
+    const { revoked } = revokeAllTokensForUser(userId, { keepSessionId });
+
+    for (const s of revoked) {
+      if (!s?.sessionId) continue;
+      const ws = getSignedSocketForSession(userId, s.sessionId);
+      if (ws && ws.readyState === 1) {
+        sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_other_devices', wipeLocalKeys: false });
+        setTimeout(() => {
+          try { ws.close(); } catch { /* ignore */ }
+        }, 200);
+      }
+    }
+
+    res.json({ success: true, revokedCount: Array.isArray(revoked) ? revoked.length : 0 });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/signed/session/logout-and-remove-key-other-devices', requireSignedAuth, (req, res) => {
+  try {
+    const userId = String(req._signedUserId);
+    const keepSessionId = String(req._signedSessionId);
+    const { revoked } = revokeAllTokensForUser(userId, { keepSessionId });
+
+    for (const s of revoked) {
+      if (!s?.sessionId) continue;
+      const ws = getSignedSocketForSession(userId, s.sessionId);
+      if (ws && ws.readyState === 1) {
+        sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_remove_key_other_devices', wipeLocalKeys: true });
+        setTimeout(() => {
+          try { ws.close(); } catch { /* ignore */ }
+        }, 200);
+      }
+    }
+
+    res.json({ success: true, revokedCount: Array.isArray(revoked) ? revoked.length : 0 });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -283,7 +330,20 @@ app.post('/api/auth/register', async (req, res) => {
 
     const user = await registerUser({ username, publicKey, removeDate, vault });
 
-    const { token, expiresAt } = issueToken(String(user.id));
+    const { token, expiresAt, evicted } = issueToken(String(user.id));
+
+    if (Array.isArray(evicted) && evicted.length) {
+      for (const s of evicted) {
+        if (!s?.sessionId) continue;
+        const ws = getSignedSocketForSession(String(user.id), s.sessionId);
+        if (ws && ws.readyState === 1) {
+          sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
+          setTimeout(() => {
+            try { ws.close(); } catch { /* ignore */ }
+          }, 200);
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -368,7 +428,20 @@ app.post('/api/auth/login-final', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { token, expiresAt } = issueToken(userId);
+    const { token, expiresAt, evicted } = issueToken(userId);
+
+    if (Array.isArray(evicted) && evicted.length) {
+      for (const s of evicted) {
+        if (!s?.sessionId) continue;
+        const ws = getSignedSocketForSession(userId, s.sessionId);
+        if (ws && ws.readyState === 1) {
+          sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
+          setTimeout(() => {
+            try { ws.close(); } catch { /* ignore */ }
+          }, 200);
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -388,6 +461,7 @@ app.post('/api/auth/login-final', async (req, res) => {
 app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
+    const sessionId = String(req._signedSessionId);
 
     const hiddenMode = req.body?.hiddenMode;
     const introvertMode = req.body?.introvertMode;
@@ -433,6 +507,16 @@ app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
       params,
     );
 
+    // Best-effort: sync settings to other online sessions for this user.
+    const payload = {
+      type: 'signedAccountUpdated',
+      ...(hiddenMode !== undefined && typeof hiddenMode === 'boolean' ? { hiddenMode } : {}),
+      ...(introvertMode !== undefined && typeof introvertMode === 'boolean' ? { introvertMode } : {}),
+    };
+    if (Object.keys(payload).length > 1) {
+      sendToUserAllExceptSession(userId, sessionId, payload);
+    }
+
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -443,9 +527,11 @@ app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
 app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
+    const sessionId = String(req._signedSessionId);
     const hiddenMode = req.body?.hiddenMode;
     if (typeof hiddenMode !== 'boolean') return res.status(400).json({ error: 'hiddenMode boolean required' });
     await query('UPDATE users SET hidden_mode = $2 WHERE id = $1', [userId, hiddenMode]);
+    sendToUserAllExceptSession(userId, sessionId, { type: 'signedAccountUpdated', hiddenMode });
     res.json({ success: true, hiddenMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -455,9 +541,11 @@ app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) 
 app.post('/api/signed/account/introvert-mode', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
+    const sessionId = String(req._signedSessionId);
     const introvertMode = req.body?.introvertMode;
     if (typeof introvertMode !== 'boolean') return res.status(400).json({ error: 'introvertMode boolean required' });
     await query('UPDATE users SET introvert_mode = $2 WHERE id = $1', [userId, introvertMode]);
+    sendToUserAllExceptSession(userId, sessionId, { type: 'signedAccountUpdated', introvertMode });
     res.json({ success: true, introvertMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -566,8 +654,7 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
     const busy = [];
     for (const id of ids) {
       if (hidden.has(id)) continue;
-      const ws = signedSockets.get(id);
-      if (ws && ws.readyState === 1) online.push(id);
+      if (anySignedSocketOpen(id)) online.push(id);
       const su = signedUsers.get(id);
       if (su && su.roomId) busy.push(id);
     }
@@ -603,8 +690,9 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
       if (chatId && otherUserId) {
         const payload = { type: 'signedChatsChanged' };
         for (const uid of [userId, otherUserId]) {
-          const ws = signedSockets.get(String(uid));
-          if (ws && ws.readyState === 1) sendReliable(ws, payload);
+          forEachSignedSocket(String(uid), (ws) => {
+            if (ws && ws.readyState === 1) sendReliable(ws, payload);
+          });
         }
       }
     } catch {
@@ -669,8 +757,9 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
       const targets = [addedUserId, userId].filter(Boolean);
       const payload = { type: 'signedChatsChanged' };
       for (const uid of targets) {
-        const ws = signedSockets.get(String(uid));
-        if (ws && ws.readyState === 1) sendReliable(ws, payload);
+        forEachSignedSocket(String(uid), (ws) => {
+          if (ws && ws.readyState === 1) sendReliable(ws, payload);
+        });
       }
     } catch {
       // ignore
@@ -699,8 +788,9 @@ app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) =
     try {
       const payload = { type: 'signedChatsChanged' };
       for (const uid of result.memberIds || []) {
-        const ws = signedSockets.get(String(uid));
-        if (ws && ws.readyState === 1) sendReliable(ws, payload);
+        forEachSignedSocket(String(uid), (ws) => {
+          if (ws && ws.readyState === 1) sendReliable(ws, payload);
+        });
       }
     } catch {
       // ignore
@@ -774,16 +864,16 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       encryptedData,
     };
     for (const uid of memberIds) {
-      const ws = signedSockets.get(uid);
-      if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      forEachSignedSocket(uid, (ws) => {
+        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      });
     }
 
     // Best-effort Web Push notify for offline recipients (RAM-only subs).
     // Do not include message plaintext.
     for (const uid of memberIds) {
       if (String(uid) === String(senderId)) continue;
-      const ws = signedSockets.get(uid);
-      if (ws && ws.readyState === 1) continue;
+      if (anySignedSocketOpen(uid)) continue;
       void sendPushToUserId(uid, {
         title: 'Last',
         body: senderUsername ? `New message from ${senderUsername}` : 'New message',
@@ -815,8 +905,9 @@ app.post('/api/signed/messages/delete', requireSignedAuth, async (req, res) => {
 
     const payload = { type: 'signedMessageDeleted', chatId, id: messageId };
     for (const uid of r.memberIds) {
-      const ws = signedSockets.get(uid);
-      if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      forEachSignedSocket(uid, (ws) => {
+        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      });
     }
 
     res.json({ success: true });
@@ -852,8 +943,9 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
 
     const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, senderUsername, encryptedData };
     for (const uid of r.memberIds) {
-      const ws = signedSockets.get(uid);
-      if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      forEachSignedSocket(uid, (ws) => {
+        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+      });
     }
 
     res.json({ success: true });
@@ -894,8 +986,9 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
     if (del && del.ok) {
       const payload = { type: 'signedChatDeleted', chatId };
       for (const uid of del.memberIds) {
-        const ws = signedSockets.get(uid);
-        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        forEachSignedSocket(uid, (ws) => {
+          if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        });
       }
     } else {
       const left = await signedLeaveChat(userId, chatId);
@@ -904,8 +997,9 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
         try {
           const payload = { type: 'signedChatsChanged', chatId, reason: left.chatDeleted ? 'group_deleted' : 'member_left' };
           for (const uid of left.remainingMemberIds || []) {
-            const ws = signedSockets.get(String(uid));
-            if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+            forEachSignedSocket(String(uid), (ws) => {
+              if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+            });
           }
         } catch {
           // ignore
@@ -921,8 +1015,9 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
               const part = ids.slice(i, i + CHUNK);
               const payload = { type: 'signedMessagesDeleted', chatId, ids: part };
               for (const uid of left.remainingMemberIds || []) {
-                const ws = signedSockets.get(String(uid));
-                if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+                forEachSignedSocket(String(uid), (ws) => {
+                  if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+                });
               }
             }
           }
@@ -943,16 +1038,11 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
     const userId = String(req._signedUserId);
     const token = parseAuthTokenFromReq(req);
 
-    // Best-effort: close signed websocket for this user.
+    // Best-effort: force logout all sessions (online only).
     try {
-      const sock = signedSockets.get(userId);
-      if (sock) {
-        try {
-          sock.close();
-        } catch {
-          // ignore
-        }
-      }
+      forEachSignedSocket(userId, (ws) => {
+        if (ws && ws.readyState === 1) sendReliable(ws, { type: 'signedForceLogout', reason: 'account_deleted', wipeLocalKeys: false });
+      });
     } catch {
       // ignore
     }
@@ -966,9 +1056,16 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
       // ignore
     }
 
-    // Revoke token after deletion.
+    // Revoke all tokens after deletion.
     try {
-      revokeToken(token);
+      revokeAllTokensForUser(userId);
+    } catch {
+      // ignore
+    }
+
+    // Close all signed sockets after revocation.
+    try {
+      closeAllSignedSockets(userId);
     } catch {
       // ignore
     }
@@ -1040,8 +1137,9 @@ const server = https.createServer(
 
 const wss = new WebSocketServer({ server });
 
-// Signed-mode: in-memory sockets keyed by authenticated userId.
-const signedSockets = new Map(); // userId -> ws
+// Signed-mode: in-memory sockets keyed by authenticated userId + sessionId.
+// Supports multi-device logins.
+const signedSockets = new Map(); // userId -> Map(sessionId -> ws)
 
 // Signed-mode: in-memory user state (presence + call state). Kept RAM-only.
 const signedUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
@@ -1065,6 +1163,123 @@ function sendBestEffort(ws, obj) {
   } catch {
     // ignore
   }
+}
+
+function getUserSocketMap(userId) {
+  const uid = String(userId ?? '');
+  if (!uid) return null;
+  let m = signedSockets.get(uid);
+  if (!m) {
+    m = new Map();
+    signedSockets.set(uid, m);
+  }
+  return m;
+}
+
+function addSignedSocket(userId, sessionId, ws) {
+  const uid = String(userId ?? '');
+  const sid = String(sessionId ?? '');
+  if (!uid || !sid || !ws) return;
+  const m = getUserSocketMap(uid);
+  if (!m) return;
+  m.set(sid, ws);
+}
+
+function removeSignedSocket(userId, sessionId, ws) {
+  const uid = String(userId ?? '');
+  const sid = String(sessionId ?? '');
+  if (!uid || !sid) return;
+  const m = signedSockets.get(uid);
+  if (!m) return;
+  const cur = m.get(sid);
+  // Only remove if it matches this instance.
+  if (cur && ws && cur !== ws) return;
+  m.delete(sid);
+  if (m.size === 0) signedSockets.delete(uid);
+}
+
+function forEachSignedSocket(userId, fn) {
+  const uid = String(userId ?? '');
+  if (!uid) return;
+  const m = signedSockets.get(uid);
+  if (!m) return;
+  for (const ws of m.values()) {
+    try {
+      fn(ws);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function anySignedSocketOpen(userId) {
+  let open = false;
+  forEachSignedSocket(userId, (ws) => {
+    if (ws && ws.readyState === 1) open = true;
+  });
+  return open;
+}
+
+function closeAllSignedSockets(userId) {
+  const uid = String(userId ?? '');
+  if (!uid) return;
+  const m = signedSockets.get(uid);
+  if (!m) return;
+  for (const ws of m.values()) {
+    try {
+      ws.close();
+    } catch {
+      // ignore
+    }
+  }
+  signedSockets.delete(uid);
+}
+
+function getSignedSocketForSession(userId, sessionId) {
+  const uid = String(userId ?? '');
+  const sid = String(sessionId ?? '');
+  if (!uid || !sid) return null;
+  const m = signedSockets.get(uid);
+  return m ? m.get(sid) ?? null : null;
+}
+
+function sendToUserAll(userId, obj) {
+  forEachSignedSocket(userId, (ws) => {
+    if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+  });
+}
+
+function sendToUserAllExceptSession(userId, exceptSessionId, obj) {
+  const uid = String(userId ?? '');
+  const sid = String(exceptSessionId ?? '');
+  if (!uid) return;
+  const m = signedSockets.get(uid);
+  if (!m) return;
+  for (const [s, ws] of m.entries()) {
+    if (sid && s === sid) continue;
+    if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+  }
+}
+
+function sendToUserSession(userId, sessionId, obj) {
+  const ws = getSignedSocketForSession(userId, sessionId);
+  if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+}
+
+function sendToUserCallSession(userId, obj) {
+  const uid = String(userId ?? '');
+  if (!uid) return;
+  const u = signedUsers.get(uid);
+  const preferredSid = typeof u?.controllingSessionId === 'string' ? u.controllingSessionId : null;
+  if (preferredSid) {
+    const ws = getSignedSocketForSession(uid, preferredSid);
+    if (ws && ws.readyState === 1) {
+      sendBestEffort(ws, obj);
+      return;
+    }
+  }
+  // Fallback: deliver to all sessions.
+  sendToUserAll(uid, obj);
 }
 
 function ensureWsPendingNotifies(ws) {
@@ -1187,12 +1402,10 @@ function ensureSignedRoom(roomId) {
 function signedPickRoomOwner(room) {
   const ownerId = room.ownerId;
   if (ownerId && room.members.has(ownerId)) {
-    const u = signedUsers.get(ownerId);
-    if (u?.ws?.readyState === 1) return ownerId;
+    if (anySignedSocketOpen(ownerId)) return ownerId;
   }
   for (const memberId of room.members) {
-    const u = signedUsers.get(memberId);
-    if (u?.ws?.readyState === 1) return memberId;
+    if (anySignedSocketOpen(memberId)) return memberId;
   }
   return null;
 }
@@ -1228,8 +1441,13 @@ function signedPumpJoinQueue(room) {
       // Nobody online to approve. Reject all pending requests.
       for (const rid of room.joinQueue.splice(0)) {
         const u = signedUsers.get(rid);
-        if (u) u.joinPendingRoomId = null;
-        if (u?.ws?.readyState === 1) sendBestEffort(u.ws, { type: 'callJoinResult', ok: false, reason: 'no_approver' });
+        const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+        if (u) {
+          u.joinPendingRoomId = null;
+          u.joinPendingSessionId = null;
+        }
+        if (joinSid) sendToUserSession(rid, joinSid, { type: 'callJoinResult', ok: false, reason: 'no_approver' });
+        else sendToUserAll(rid, { type: 'callJoinResult', ok: false, reason: 'no_approver' });
       }
       return;
     }
@@ -1237,9 +1455,7 @@ function signedPumpJoinQueue(room) {
     room.ownerId = ownerId;
     room.joinActive = nextId;
     const owner = signedUsers.get(ownerId);
-    if (owner?.ws?.readyState === 1) {
-      sendBestEffort(owner.ws, { type: 'joinRequest', from: requester.id, fromName: requester.name, roomId: room.id });
-    }
+    if (owner) sendToUserCallSession(ownerId, { type: 'joinRequest', from: requester.id, fromName: requester.name, roomId: room.id });
     return;
   }
 }
@@ -1258,9 +1474,7 @@ function signedLeaveRoom(user) {
   if (room.ownerId === user.id) room.ownerId = signedPickRoomOwner(room);
 
   for (const memberId of room.members) {
-    const m = signedUsers.get(memberId);
-    if (!m?.ws || m.ws.readyState !== 1) continue;
-    sendBestEffort(m.ws, { type: 'roomPeerLeft', roomId: rid, peerId: user.id });
+    sendToUserCallSession(memberId, { type: 'roomPeerLeft', roomId: rid, peerId: user.id });
   }
 
   if (room.members.size <= 1) {
@@ -1269,7 +1483,8 @@ function signedLeaveRoom(user) {
       const last = signedUsers.get(lastId);
       if (last) {
         last.roomId = null;
-        if (last.ws?.readyState === 1) sendBestEffort(last.ws, { type: 'callEnded', reason: 'alone' });
+        last.controllingSessionId = null;
+        sendToUserAll(lastId, { type: 'callEnded', reason: 'alone' });
       }
     }
 
@@ -1277,14 +1492,24 @@ function signedLeaveRoom(user) {
     if (Array.isArray(room.joinQueue)) {
       for (const jid of room.joinQueue) {
         const u = signedUsers.get(jid);
-        if (u) u.joinPendingRoomId = null;
-        if (u?.ws?.readyState === 1) sendBestEffort(u.ws, { type: 'callJoinResult', ok: false, reason: 'ended' });
+        const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+        if (u) {
+          u.joinPendingRoomId = null;
+          u.joinPendingSessionId = null;
+        }
+        if (joinSid) sendToUserSession(jid, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+        else sendToUserAll(jid, { type: 'callJoinResult', ok: false, reason: 'ended' });
       }
     }
     if (room.joinActive) {
       const u = signedUsers.get(room.joinActive);
-      if (u) u.joinPendingRoomId = null;
-      if (u?.ws?.readyState === 1) sendBestEffort(u.ws, { type: 'callJoinResult', ok: false, reason: 'ended' });
+      const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+      if (u) {
+        u.joinPendingRoomId = null;
+        u.joinPendingSessionId = null;
+      }
+      if (joinSid) sendToUserSession(room.joinActive, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+      else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
     }
 
     signedRooms.delete(rid);
@@ -1312,13 +1537,14 @@ wss.on('connection', async (ws, req) => {
     if (rawUrl.startsWith('/signed')) {
       const u = new URL(rawUrl, 'http://localhost');
       const token = u.searchParams.get('token');
-      const signedUserId = getUserIdForToken(token);
-      if (!signedUserId) {
+      const sess = getSessionForToken(token);
+      if (!sess?.userId || !sess?.sessionId) {
         try { ws.close(); } catch { /* ignore */ }
         return;
       }
 
-      const uid = String(signedUserId);
+      const uid = String(sess.userId);
+      const sid = String(sess.sessionId);
 
       // Mark alive; updated via 'pong'.
       ws.isAlive = true;
@@ -1328,40 +1554,35 @@ wss.on('connection', async (ws, req) => {
 
       let signedName = '';
       try {
-        const r = await query('SELECT username FROM users WHERE id = $1', [String(signedUserId)]);
+        const r = await query('SELECT username FROM users WHERE id = $1', [String(uid)]);
         signedName = String(r?.rows?.[0]?.username ?? '') || '';
       } catch {
         signedName = '';
       }
 
       const prev = signedUsers.get(uid);
-      const prevWs = prev?.ws;
 
       // Reuse the existing per-user state on reconnect (preserves call state,
-      // receipts, etc), but replace the socket reference.
+      // receipts, etc).
       const signedUser = prev ?? {
         id: uid,
         name: signedName,
-        ws,
         lastMsgAt: Date.now(),
         roomId: null,
+        controllingSessionId: null,
         joinPendingRoomId: null,
+        joinPendingSessionId: null,
         _clientReceipts: null,
         _clientReceiptQueue: null,
       };
 
       signedUser.name = signedName || signedUser.name;
-      signedUser.ws = ws;
       signedUser.lastMsgAt = Date.now();
 
       ws._lrcomSignedUserId = uid;
-      signedSockets.set(uid, ws);
+      ws._lrcomSessionId = sid;
+      addSignedSocket(uid, sid, ws);
       signedUsers.set(uid, signedUser);
-
-      // Close any prior socket for this user to avoid stacking.
-      if (prevWs && prevWs !== ws) {
-        try { prevWs.close(); } catch { /* ignore */ }
-      }
 
       sendBestEffort(ws, { type: 'signedHello', userId: uid });
 
@@ -1404,8 +1625,15 @@ wss.on('connection', async (ws, req) => {
             return;
           }
           const callee = signedUsers.get(to);
-          if (!callee || !callee.ws || callee.ws.readyState !== 1) {
+          if (!callee || !anySignedSocketOpen(to)) {
             sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'offline' });
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
+
+          // Prevent starting a parallel call from another session.
+          if (signedUser.roomId) {
+            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'busy' });
             if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
             return;
           }
@@ -1521,15 +1749,22 @@ wss.on('connection', async (ws, req) => {
           room.members.add(callee.id);
           room.ownerId = signedUser.id;
           signedUser.roomId = rid;
+          signedUser.controllingSessionId = String(sid);
           callee.roomId = rid;
+          callee.controllingSessionId = null;
 
           sendBestEffort(ws, { type: 'callStartResult', ok: true, roomId: rid });
-          sendBestEffort(callee.ws, { type: 'incomingCall', from: signedUser.id, fromName: signedUser.name, roomId: rid });
+          sendToUserAll(callee.id, { type: 'incomingCall', from: signedUser.id, fromName: signedUser.name, roomId: rid });
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
         }
 
         if (msg.type === 'callAccept') {
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            sendBestEffort(ws, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'accepted_elsewhere' });
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
           const from = typeof msg.from === 'string' ? msg.from : null;
           const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
           const caller = from ? signedUsers.get(from) : null;
@@ -1552,12 +1787,14 @@ wss.on('connection', async (ws, req) => {
             return;
           }
 
+          // This session becomes the call-controlling session for the callee.
+          signedUser.controllingSessionId = String(sid);
+          sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'accepted_elsewhere' });
+
           const peer = { id: signedUser.id, name: signedUser.name };
           for (const memberId of room.members) {
             if (memberId === signedUser.id) continue;
-            const m = signedUsers.get(memberId);
-            if (!m) continue;
-            sendBestEffort(m.ws, { type: 'roomPeerJoined', roomId: rid, peer });
+            sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
           }
 
           const peers = Array.from(room.members)
@@ -1574,20 +1811,92 @@ wss.on('connection', async (ws, req) => {
         }
 
         if (msg.type === 'callReject') {
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            sendBestEffort(ws, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'rejected_elsewhere' });
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
           const from = typeof msg.from === 'string' ? msg.from : null;
           const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
           const caller = from ? signedUsers.get(from) : null;
-          if (caller) sendBestEffort(caller.ws, { type: 'callRejected', reason: 'rejected' });
-          if (rid && signedUser.roomId === rid) {
-            signedLeaveRoom(signedUser);
-          } else {
-            signedUser.roomId = null;
+          if (caller) sendToUserCallSession(caller.id, { type: 'callRejected', reason: 'rejected' });
+          if (rid) {
+            // Clear incoming call UI on other sessions.
+            sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'rejected' });
+
+            // If the call wasn't accepted yet, end the room without emitting callEnded.
+            const room = getSignedRoom(rid);
+            if (room && room.members.size === 2) {
+              for (const memberId of room.members) {
+                const u = signedUsers.get(memberId);
+                if (u && u.roomId === rid) {
+                  u.roomId = null;
+                  u.controllingSessionId = null;
+                }
+              }
+
+              // Reject any pending joiners.
+              if (Array.isArray(room.joinQueue)) {
+                for (const jid of room.joinQueue) {
+                  const u = signedUsers.get(jid);
+                  const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+                  if (u) {
+                    u.joinPendingRoomId = null;
+                    u.joinPendingSessionId = null;
+                  }
+                  if (joinSid) sendToUserSession(jid, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+                  else sendToUserAll(jid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+                }
+              }
+              if (room.joinActive) {
+                const u = signedUsers.get(room.joinActive);
+                const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+                if (u) {
+                  u.joinPendingRoomId = null;
+                  u.joinPendingSessionId = null;
+                }
+                if (joinSid) sendToUserSession(room.joinActive, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+                else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
+              }
+
+              signedRooms.delete(rid);
+            }
           }
+
+          signedUser.roomId = null;
+          signedUser.controllingSessionId = null;
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
         }
 
         if (msg.type === 'callHangup') {
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
+
+          const rid = signedUser.roomId;
+          const room = rid ? getSignedRoom(rid) : null;
+          if (rid && room && room.members.size === 2) {
+            const otherId = Array.from(room.members).find((id) => id !== signedUser.id) ?? null;
+            const other = otherId ? signedUsers.get(otherId) : null;
+            const otherAccepted = Boolean(other?.controllingSessionId);
+            if (otherId && !otherAccepted) {
+              // Caller cancelled before callee accepted.
+              sendToUserAll(otherId, { type: 'incomingCallCancelled', roomId: rid, reason: 'hangup' });
+              for (const memberId of room.members) {
+                const u = signedUsers.get(memberId);
+                if (u && u.roomId === rid) {
+                  u.roomId = null;
+                  u.controllingSessionId = null;
+                }
+              }
+              signedRooms.delete(rid);
+              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+              return;
+            }
+          }
+
           signedLeaveRoom(signedUser);
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
@@ -1609,6 +1918,7 @@ wss.on('connection', async (ws, req) => {
           }
 
           signedUser.joinPendingRoomId = room.id;
+          signedUser.joinPendingSessionId = String(sid);
           if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
           room.joinQueue.push(signedUser.id);
           sendBestEffort(ws, { type: 'callJoinPending', roomId: room.id, toName: target.name });
@@ -1618,30 +1928,51 @@ wss.on('connection', async (ws, req) => {
         }
 
         if (msg.type === 'callJoinCancel') {
+          if (signedUser.joinPendingSessionId && String(signedUser.joinPendingSessionId) !== String(sid)) {
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
           const rid = signedUser.joinPendingRoomId;
           if (rid) {
             const room = getSignedRoom(rid);
             if (room) signedRemoveJoinRequestFromRoom(room, signedUser.id);
+            signedPumpJoinQueue(room);
           }
           signedUser.joinPendingRoomId = null;
+          signedUser.joinPendingSessionId = null;
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
         }
 
         if (msg.type === 'callJoinReject') {
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
           const from = typeof msg.from === 'string' ? msg.from : null;
           const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
           const requester = from ? signedUsers.get(from) : null;
           const room = rid ? getSignedRoom(rid) : null;
-          if (requester) requester.joinPendingRoomId = null;
+          const joinSid = typeof requester?.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : null;
+          if (requester) {
+            requester.joinPendingRoomId = null;
+            requester.joinPendingSessionId = null;
+          }
           if (room) signedRemoveJoinRequestFromRoom(room, from);
-          if (requester?.ws?.readyState === 1) sendBestEffort(requester.ws, { type: 'callJoinResult', ok: false, reason: 'rejected' });
+          if (from) {
+            if (joinSid) sendToUserSession(from, joinSid, { type: 'callJoinResult', ok: false, reason: 'rejected' });
+            else sendToUserAll(from, { type: 'callJoinResult', ok: false, reason: 'rejected' });
+          }
           signedPumpJoinQueue(room);
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
         }
 
         if (msg.type === 'callJoinAccept') {
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
           const from = typeof msg.from === 'string' ? msg.from : null;
           const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
           const requester = from ? signedUsers.get(from) : null;
@@ -1659,13 +1990,13 @@ wss.on('connection', async (ws, req) => {
           room.members.add(requester.id);
           requester.roomId = rid;
           requester.joinPendingRoomId = null;
+          requester.controllingSessionId = typeof requester.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : requester.controllingSessionId;
+          requester.joinPendingSessionId = null;
 
           const peer = { id: requester.id, name: requester.name };
           for (const memberId of room.members) {
             if (memberId === requester.id) continue;
-            const m = signedUsers.get(memberId);
-            if (!m) continue;
-            sendBestEffort(m.ws, { type: 'roomPeerJoined', roomId: rid, peer });
+            sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
           }
 
           const peers = Array.from(room.members)
@@ -1676,8 +2007,8 @@ wss.on('connection', async (ws, req) => {
             })
             .filter(Boolean);
 
-          sendBestEffort(requester.ws, { type: 'roomPeers', roomId: rid, peers });
-          if (requester.ws?.readyState === 1) sendBestEffort(requester.ws, { type: 'callJoinResult', ok: true });
+          sendToUserCallSession(requester.id, { type: 'roomPeers', roomId: rid, peers });
+          sendToUserCallSession(requester.id, { type: 'callJoinResult', ok: true });
 
           room.joinActive = null;
           signedPumpJoinQueue(room);
@@ -1692,7 +2023,11 @@ wss.on('connection', async (ws, req) => {
           const peer = signedUsers.get(to);
           if (!peer) return;
           if (!signedUser.roomId || signedUser.roomId !== peer.roomId) return;
-          sendBestEffort(peer.ws, { type: 'signal', from: signedUser.id, fromName: signedUser.name, payload });
+          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
+            return;
+          }
+          sendToUserCallSession(peer.id, { type: 'signal', from: signedUser.id, fromName: signedUser.name, payload });
           if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
           return;
         }
@@ -1701,16 +2036,34 @@ wss.on('connection', async (ws, req) => {
       });
 
       ws.on('close', () => {
-        // Guard against an older socket closing after a newer socket has
-        // connected for the same user.
-        const curSock = signedSockets.get(uid);
-        if (curSock === ws) {
-          signedSockets.delete(uid);
-        }
+        removeSignedSocket(uid, sid, ws);
 
         const curUser = signedUsers.get(uid);
-        if (curUser && curUser.ws === ws) {
+
+        // If the controlling call session for this user disappeared, treat as leaving the call.
+        if (curUser?.controllingSessionId && String(curUser.controllingSessionId) === String(sid)) {
           if (curUser.roomId) signedLeaveRoom(curUser);
+          curUser.controllingSessionId = null;
+        }
+
+        // If a pending join request session disappeared, cancel the join request.
+        if (curUser?.joinPendingSessionId && String(curUser.joinPendingSessionId) === String(sid)) {
+          const rid = curUser.joinPendingRoomId;
+          if (rid) {
+            const room = getSignedRoom(rid);
+            if (room) {
+              signedRemoveJoinRequestFromRoom(room, curUser.id);
+              signedPumpJoinQueue(room);
+            }
+          }
+          curUser.joinPendingRoomId = null;
+          curUser.joinPendingSessionId = null;
+        }
+
+        // If this was the last live session for the user, clear RAM-only state.
+        const stillHasSockets = signedSockets.has(String(uid));
+        if (!stillHasSockets) {
+          if (curUser?.roomId) signedLeaveRoom(curUser);
           signedUsers.delete(uid);
         }
       });
@@ -1733,18 +2086,20 @@ wss.on('connection', async (ws, req) => {
 // Terminate dead signed sockets (e.g. laptop sleep / mobile drop) using server
 // ping/pong heartbeat. This avoids disconnecting healthy-but-idle clients.
 setInterval(() => {
-  for (const ws of signedSockets.values()) {
-    try {
-      if (!ws || ws.readyState !== 1) continue;
-      if (ws.isAlive === false) {
-        if (typeof ws.terminate === 'function') ws.terminate();
-        else ws.close();
-        continue;
+  for (const m of signedSockets.values()) {
+    for (const ws of m.values()) {
+      try {
+        if (!ws || ws.readyState !== 1) continue;
+        if (ws.isAlive === false) {
+          if (typeof ws.terminate === 'function') ws.terminate();
+          else ws.close();
+          continue;
+        }
+        ws.isAlive = false;
+        if (typeof ws.ping === 'function') ws.ping();
+      } catch {
+        // ignore
       }
-      ws.isAlive = false;
-      if (typeof ws.ping === 'function') ws.ping();
-    } catch {
-      // ignore
     }
   }
 }, Math.max(5000, WS_HEARTBEAT_MS));

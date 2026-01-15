@@ -24,6 +24,8 @@ const deleteAccountOpen = ref(false)
 const deleteAccountBusy = ref(false)
 const deleteAccountErr = ref<string>('')
 
+const logoutOthersBusy = ref(false)
+
 function onCycleLanguage() {
   cycleLocale()
 }
@@ -39,6 +41,66 @@ function onManageKeys() {
 function onLogout() {
   if (!confirmLeave('Last')) return
   signed.logout(true)
+}
+
+async function onLogoutOtherDevices() {
+  if (logoutOthersBusy.value) return
+  logoutOthersBusy.value = true
+  try {
+    await signed.logoutOtherDevices()
+    toast.push({
+      title: String(t('signed.settingsToast.savedTitle')),
+      message: String(t('signed.settingsToast.otherDevicesLoggedOut')),
+      variant: 'info',
+      timeoutMs: 3000,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const body =
+      msg === 'Unauthorized'
+        ? String(t('signed.errUnauthorized'))
+        : msg === 'Server error' || msg === 'Request failed'
+          ? String(t('signed.settingsToast.serverError'))
+          : msg === 'Not logged in'
+            ? String(t('signed.settingsToast.notLoggedIn'))
+            : String(t('signed.genericError'))
+    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+  } finally {
+    logoutOthersBusy.value = false
+  }
+}
+
+async function onLogoutAndRemoveKeyOtherDevices() {
+  if (logoutOthersBusy.value) return
+  try {
+    const ok = window.confirm(String(t('confirm.logoutAndRemoveKeyOtherDevices')))
+    if (!ok) return
+  } catch {
+    // ignore
+  }
+  logoutOthersBusy.value = true
+  try {
+    await signed.logoutAndRemoveKeyOtherDevices()
+    toast.push({
+      title: String(t('signed.settingsToast.savedTitle')),
+      message: String(t('signed.settingsToast.otherDevicesLoggedOutWiped')),
+      variant: 'info',
+      timeoutMs: 3000,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const body =
+      msg === 'Unauthorized'
+        ? String(t('signed.errUnauthorized'))
+        : msg === 'Server error' || msg === 'Request failed'
+          ? String(t('signed.settingsToast.serverError'))
+          : msg === 'Not logged in'
+            ? String(t('signed.settingsToast.notLoggedIn'))
+            : String(t('signed.genericError'))
+    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+  } finally {
+    logoutOthersBusy.value = false
+  }
 }
 
 async function onDeleteAccount() {
@@ -285,6 +347,16 @@ function notificationStateLabel() {
           </span>
         </label>
 
+        <button
+          class="secondary icon-only"
+          type="button"
+          :aria-label="String(t('common.logout'))"
+          :title="String(t('common.logout'))"
+          @click="onLogout"
+        >
+          <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#logout"></use></svg>
+        </button>
+
         <button class="secondary" type="button" :aria-label="String(t('theme.toggleAria'))" @click="ui.cycleTheme">
           {{ themeLabel }}
         </button>
@@ -323,17 +395,16 @@ function notificationStateLabel() {
           <div v-if="expirationErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ expirationErr }}</div>
         </div>
 
+        <button class="secondary" type="button" :disabled="logoutOthersBusy" @click="onLogoutOtherDevices">
+          {{ t('signed.logoutOtherDevices') }}
+        </button>
+
+        <button class="secondary" type="button" :disabled="logoutOthersBusy" @click="onLogoutAndRemoveKeyOtherDevices">
+          {{ t('signed.logoutAndRemoveKeyOtherDevices') }}
+        </button>
+
         <button class="secondary danger" type="button" @click="onDeleteAccount">{{ t('signed.deleteAccount') }}</button>
 
-        <button
-          class="secondary icon-only"
-          type="button"
-          :aria-label="String(t('common.logout'))"
-          :title="String(t('common.logout'))"
-          @click="onLogout"
-        >
-          <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#logout"></use></svg>
-        </button>
       </div>
 
       <div

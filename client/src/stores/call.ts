@@ -579,6 +579,19 @@ export const useCallStore = defineStore('call', () => {
   }
 
   async function handleInbound(type: string, obj: Record<string, unknown>) {
+    if (type === 'incomingCallCancelled') {
+      const rid = asString(obj.roomId)
+      if (pendingIncomingFrom.value && (!rid || rid === pendingIncomingRoomId.value)) {
+        stopRingtone()
+        pendingIncomingFrom.value = null
+        pendingIncomingFromName.value = ''
+        pendingIncomingRoomId.value = null
+        status.value = ''
+        scheduleStatusAutoClear()
+      }
+      return
+    }
+
     if (type === 'incomingCall') {
       pendingIncomingFrom.value = asString(obj.from)
       pendingIncomingFromName.value = asString(obj.fromName) ?? ''

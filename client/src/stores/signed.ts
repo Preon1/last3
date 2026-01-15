@@ -1180,6 +1180,42 @@ export const useSignedStore = defineStore('signed', () => {
       }
       if (!obj || typeof obj.type !== 'string') return
 
+      if (obj.type === 'signedForceLogout') {
+        const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
+        if (msgId) sendWs({ type: 'ack', msgId })
+
+        const wipeLocalKeys = Boolean((obj as any)?.wipeLocalKeys)
+        try {
+          if (wipeLocalKeys) {
+            clearAllKeyMaterial()
+            storeLastUsername('')
+            logout(true)
+          } else {
+            logout(false)
+          }
+        } catch {
+          // ignore
+        }
+        return
+      }
+
+      if (obj.type === 'signedAccountUpdated') {
+        const nextHidden = typeof (obj as any)?.hiddenMode === 'boolean' ? Boolean((obj as any).hiddenMode) : null
+        const nextIntrovert = typeof (obj as any)?.introvertMode === 'boolean' ? Boolean((obj as any).introvertMode) : null
+
+        if (nextHidden != null) hiddenMode.value = nextHidden
+        if (nextIntrovert != null) introvertMode.value = nextIntrovert
+
+        if (token.value && userId.value && username.value) {
+          storeSession(
+            { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+            token.value,
+            expiresAtMs.value,
+          )
+        }
+        return
+      }
+
       if (obj.type === 'signedMessage') {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null
@@ -2240,6 +2276,22 @@ export const useSignedStore = defineStore('signed', () => {
     logout(true)
   }
 
+  async function logoutOtherDevices() {
+    if (!token.value) throw new Error('Not logged in')
+    await fetchJson('/api/signed/session/logout-other-devices', {
+      method: 'POST',
+      headers: { ...authHeaders() },
+    })
+  }
+
+  async function logoutAndRemoveKeyOtherDevices() {
+    if (!token.value) throw new Error('Not logged in')
+    await fetchJson('/api/signed/session/logout-and-remove-key-other-devices', {
+      method: 'POST',
+      headers: { ...authHeaders() },
+    })
+  }
+
   // Attempt to restore token+user on refresh. In stay mode we will also restore
   // the private key via a device-bound auto-unlock blob in IndexedDB.
   const restored = loadSession()
@@ -2462,6 +2514,8 @@ export const useSignedStore = defineStore('signed', () => {
     login,
     logout,
     deleteAccount,
+    logoutOtherDevices,
+    logoutAndRemoveKeyOtherDevices,
     updateHiddenMode,
     updateIntrovertMode,
     updateExpirationDays,
