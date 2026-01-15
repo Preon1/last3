@@ -667,7 +667,13 @@ export class LocalData {
   }
 
   setSignedStayLoggedIn(next: boolean) {
-    this.setBool(LocalEntity.SignedStay, Boolean(next))
+    const v = Boolean(next)
+    if (!v) {
+      // Removing the key (instead of writing "0") avoids leaving a persistent trace.
+      this.remove(LocalEntity.SignedStay)
+      return
+    }
+    this.setBool(LocalEntity.SignedStay, true)
   }
 
   setSignedSession(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
