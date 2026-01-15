@@ -146,6 +146,7 @@ function toUserError(e: any): string {
   const msg = typeof e?.message === 'string' ? e.message : String(e)
   if (msg === 'No local key found') return String(t('signed.errNoLocalKey'))
   if (msg === 'Invalid credentials') return String(t('signed.errInvalidCredentials'))
+  if (msg === 'Username contains unsafe characters') return String(t('signed.errUsernameUnsafe'))
   if (msg === 'Unauthorized') return String(t('signed.errUnauthorized'))
   if (msg === 'Request failed') return String(t('signed.genericError'))
   return msg

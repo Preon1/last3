@@ -207,6 +207,7 @@ const baseMessages = {
       leaveGroup: 'Leave group',
       errInvalidCredentials: 'Invalid username or password.',
       errUsernameExists: 'Username already exists.',
+      errUsernameUnsafe: 'Username contains unsafe characters.',
       errUnauthorized: 'Session expired. Please log in again.',
       errNoLocalKey: 'No local key found for this user on this device. Use the correct password, or register again to create new keys.',
       errPasswordTooLong: 'Password must be at most {max} characters.',
@@ -517,6 +518,7 @@ const baseMessages = {
         'Wanneer ingeschakeld, kunnen anderen geen nieuwe chats met je maken of je aan groepen toevoegen. Oproepen zijn alleen toegestaan voor gebruikers die al een privéchat met je delen.',
       errInvalidCredentials: 'Ongeldige gebruikersnaam of wachtwoord.',
       errUsernameExists: 'Gebruikersnaam bestaat al.',
+      errUsernameUnsafe: 'Gebruikersnaam bevat onveilige tekens.',
       errUnauthorized: 'Sessie verlopen. Log opnieuw in.',
       errNoLocalKey:
         'Geen lokale sleutel gevonden voor deze gebruiker op dit apparaat. Gebruik het juiste wachtwoord, of registreer opnieuw om nieuwe sleutels te maken.',
@@ -838,6 +840,7 @@ const baseMessages = {
         'Lorsque activé, les autres ne peuvent pas créer de nouvelles discussions avec vous ni vous ajouter à des groupes. Les appels sont autorisés uniquement pour les utilisateurs qui partagent déjà une discussion privée avec vous.',
       errInvalidCredentials: "Nom d'utilisateur ou mot de passe invalide.",
       errUsernameExists: "Ce nom d'utilisateur existe déjà.",
+      errUsernameUnsafe: "Le nom d'utilisateur contient des caractères non sûrs.",
       errUnauthorized: 'Session expirée. Veuillez vous reconnecter.',
       errNoLocalKey:
         "Aucune clé locale trouvée pour cet utilisateur sur cet appareil. Utilisez le bon mot de passe, ou inscrivez-vous à nouveau pour créer de nouvelles clés.",
@@ -1159,6 +1162,7 @@ const baseMessages = {
         'Wenn aktiviert, können andere keine neuen Chats mit dir erstellen oder dich zu Gruppen hinzufügen. Anrufe sind nur für Nutzer erlaubt, die bereits einen privaten Chat mit dir teilen.',
       errInvalidCredentials: 'Ungültiger Benutzername oder Passwort.',
       errUsernameExists: 'Benutzername existiert bereits.',
+      errUsernameUnsafe: 'Benutzername enthält unsichere Zeichen.',
       errUnauthorized: 'Sitzung abgelaufen. Bitte erneut anmelden.',
       errNoLocalKey:
         'Kein lokaler Schlüssel für diesen Benutzer auf diesem Gerät gefunden. Verwende das richtige Passwort oder registriere dich erneut, um neue Schlüssel zu erstellen.',
@@ -1476,6 +1480,7 @@ const baseMessages = {
         'Если включено, другие не смогут создавать с вами новые чаты или добавлять вас в группы. Звонки разрешены только пользователям, которые уже имеют с вами личный чат.',
       errInvalidCredentials: 'Неверное имя пользователя или пароль.',
       errUsernameExists: 'Имя пользователя уже существует.',
+      errUsernameUnsafe: 'Имя пользователя содержит небезопасные символы.',
       errUnauthorized: 'Сессия истекла. Войдите снова.',
       errNoLocalKey:
         'Локальный ключ для этого пользователя на этом устройстве не найден. Используйте правильный пароль или зарегистрируйтесь снова, чтобы создать новые ключи.',
