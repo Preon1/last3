@@ -187,6 +187,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('pointerdown', onGlobalPointerDown)
   document.addEventListener('keydown', onGlobalKeyDown)
+
+  // Extra safety: refresh chats whenever the list page is opened.
+  // WS notifications are best-effort; the list should self-heal.
+  void signed.refreshChats()
 })
 
 onBeforeUnmount(() => {

@@ -1343,6 +1343,8 @@ export const useSignedStore = defineStore('signed', () => {
       if (obj.type === 'signedChatsChanged') {
         // Best-effort: refresh the chat list when membership changes or a new
         // chat is created on the other side.
+        const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
+        if (msgId) sendWs({ type: 'ack', msgId })
         void refreshChats()
       }
 

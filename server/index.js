@@ -601,10 +601,10 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
       const chatId = String(result?.chat?.id ?? '');
       const otherUserId = String(result?.chat?.otherUserId ?? '');
       if (chatId && otherUserId) {
-        const payload = { type: 'signedChatsChanged', chatId, reason: 'personal_created' };
+        const payload = { type: 'signedChatsChanged' };
         for (const uid of [userId, otherUserId]) {
           const ws = signedSockets.get(String(uid));
-          if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+          if (ws && ws.readyState === 1) sendReliable(ws, payload);
         }
       }
     } catch {
@@ -663,6 +663,19 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
       return res.status(code).json({ error: result.reason });
     }
 
+    // Notify the added user (and best-effort the actor) to refresh their chat list.
+    try {
+      const addedUserId = String(result?.member?.userId ?? '');
+      const targets = [addedUserId, userId].filter(Boolean);
+      const payload = { type: 'signedChatsChanged' };
+      for (const uid of targets) {
+        const ws = signedSockets.get(String(uid));
+        if (ws && ws.readyState === 1) sendReliable(ws, payload);
+      }
+    } catch {
+      // ignore
+    }
+
     res.json({ success: true, member: result.member });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -684,10 +697,10 @@ app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) =
     }
 
     try {
-      const payload = { type: 'signedChatsChanged', chatId, reason: 'group_renamed', name: String(result.chat?.name ?? '') };
+      const payload = { type: 'signedChatsChanged' };
       for (const uid of result.memberIds || []) {
         const ws = signedSockets.get(String(uid));
-        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        if (ws && ws.readyState === 1) sendReliable(ws, payload);
       }
     } catch {
       // ignore
@@ -1041,6 +1054,10 @@ const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);
 // requiring the client to actively send WS messages.
 const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 30000);
 
+// Reliable WS notifications (signed mode) for small control-plane events.
+// We retry until the client ACKs, but only while the WS is open.
+const WS_NOTIFY_RETRY_MS = Number(process.env.WS_NOTIFY_RETRY_MS ?? 5000);
+
 function sendBestEffort(ws, obj) {
   if (!ws || ws.readyState !== 1) return;
   try {
@@ -1048,6 +1065,72 @@ function sendBestEffort(ws, obj) {
   } catch {
     // ignore
   }
+}
+
+function ensureWsPendingNotifies(ws) {
+  if (!ws) return null;
+  if (!ws._lrcomPendingNotifies) ws._lrcomPendingNotifies = new Map();
+  return ws._lrcomPendingNotifies;
+}
+
+function stopWsNotifyRetryTimerIfIdle(ws) {
+  try {
+    const pending = ws?._lrcomPendingNotifies;
+    const hasPending = pending && pending.size > 0;
+    if (hasPending) return;
+    if (ws?._lrcomNotifyRetryTimer) {
+      clearInterval(ws._lrcomNotifyRetryTimer);
+      ws._lrcomNotifyRetryTimer = null;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function ensureWsNotifyRetryTimer(ws) {
+  if (!ws) return;
+  if (ws._lrcomNotifyRetryTimer) return;
+
+  ws._lrcomNotifyRetryTimer = setInterval(() => {
+    try {
+      if (!ws || ws.readyState !== 1) {
+        stopWsNotifyRetryTimerIfIdle(ws);
+        return;
+      }
+      const pending = ws._lrcomPendingNotifies;
+      if (!pending || pending.size === 0) {
+        stopWsNotifyRetryTimerIfIdle(ws);
+        return;
+      }
+      for (const obj of pending.values()) {
+        sendBestEffort(ws, obj);
+      }
+    } catch {
+      // ignore
+    }
+  }, Math.max(1000, WS_NOTIFY_RETRY_MS));
+}
+
+function sendReliable(ws, obj) {
+  if (!ws || ws.readyState !== 1) return null;
+  const pending = ensureWsPendingNotifies(ws);
+  if (!pending) return null;
+
+  const msgId = typeof obj?.msgId === 'string' && obj.msgId ? obj.msgId : `n:${makeId()}`;
+  const payload = { ...obj, msgId };
+  pending.set(msgId, payload);
+  sendBestEffort(ws, payload);
+  ensureWsNotifyRetryTimer(ws);
+  return msgId;
+}
+
+function ackReliable(ws, msgId) {
+  if (!ws) return;
+  const id = typeof msgId === 'string' ? msgId : '';
+  if (!id) return;
+  const pending = ws._lrcomPendingNotifies;
+  if (pending) pending.delete(id);
+  stopWsNotifyRetryTimerIfIdle(ws);
 }
 
 function rememberClientReceipt(user, cMsgId, receipt) {
@@ -1291,6 +1374,13 @@ wss.on('connection', async (ws, req) => {
           return;
         }
         if (!msg || typeof msg.type !== 'string') return;
+
+        if (msg.type === 'ack') {
+          const msgId = typeof msg.msgId === 'string' ? msg.msgId : null;
+          if (msgId) ackReliable(ws, msgId);
+          // No receipt for ACK messages: they are idempotent and best-effort.
+          return;
+        }
 
         const cMsgId = typeof msg.cMsgId === 'string' && msg.cMsgId ? msg.cMsgId : null;
         if (cMsgId) {
