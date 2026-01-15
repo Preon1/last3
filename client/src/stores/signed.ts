@@ -387,6 +387,25 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  function bytesToB64(bytes: Uint8Array): string {
+    let bin = ''
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!)
+    return btoa(bin)
+  }
+
+  function makeVaultJson(expirationDays: number): string {
+    const exp = Number(expirationDays)
+    if (!Number.isFinite(exp)) throw new Error('Invalid expirationDays')
+
+    // Add per-encryption random salt so ciphertext changes even when the
+    // user keeps the same settings.
+    const saltLen = randomIntInclusive(4, 16)
+    const saltBytes = crypto.getRandomValues(new Uint8Array(saltLen))
+    const s = bytesToB64(saltBytes)
+
+    return JSON.stringify({ expirationDays: exp, s })
+  }
+
   function randomIntInclusive(min: number, max: number) {
     const lo = Math.min(min, max)
     const hi = Math.max(min, max)
@@ -1975,7 +1994,7 @@ export const useSignedStore = defineStore('signed', () => {
     // the session as "signed in but locked" mid-register and auto-logout.
     const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
 
-    const vaultJson = JSON.stringify({ expirationDays: exp } satisfies VaultPlain)
+    const vaultJson = makeVaultJson(exp)
     const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
     const removeDate = computeRemoveDateIsoForNow(exp)
 
@@ -2144,7 +2163,7 @@ export const useSignedStore = defineStore('signed', () => {
     const priv = await importRsaPrivateKeyJwk(privateJwk)
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
 
-    const vaultJson = JSON.stringify({ expirationDays: exp } satisfies VaultPlain)
+    const vaultJson = makeVaultJson(exp)
     const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
     const removeDate = computeRemoveDateIsoForNow(exp)
 
@@ -2460,7 +2479,7 @@ export const useSignedStore = defineStore('signed', () => {
       throw new Error('Expiration days must be between 7 and 365')
     }
 
-    const vaultJson = JSON.stringify({ expirationDays: exp })
+    const vaultJson = makeVaultJson(exp)
     const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicKeyJwk.value })
     const removeDate = computeRemoveDateIsoForNow(exp)
 
