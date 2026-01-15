@@ -634,6 +634,9 @@ export const useCallStore = defineStore('call', () => {
             reason === 'introvert'
               ? String(i18n.global.t('call.introvertBlocked'))
               : String(i18n.global.t('call.callFailed', { reason }))
+          // Important for mobile: release mic if the call didn't start.
+          // resetCallState() stops localStream tracks.
+          resetCallState()
           scheduleStatusAutoClear()
         }
       } else {
