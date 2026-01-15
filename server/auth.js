@@ -1,5 +1,11 @@
 import { query } from './db.js'
 
+function assertUsernameIsXssSafe(username) {
+  const u = String(username ?? '')
+  if (u.includes('<') || u.includes('>')) throw new Error('Username contains unsafe characters')
+  if (/[\u0000-\u001F\u007F]/.test(u)) throw new Error('Username contains unsafe characters')
+}
+
 function parseRsaPublicJwk(jwkString) {
   if (!jwkString || typeof jwkString !== 'string') return null
   try {
@@ -33,6 +39,8 @@ export async function registerUser({ username, publicKey, removeDate, vault }) {
   if (!username || username.length < 3 || username.length > 64) {
     throw new Error('Username must be between 3 and 64 characters')
   }
+
+  assertUsernameIsXssSafe(username)
 
   if (!publicKey) {
     throw new Error('Public key is required')

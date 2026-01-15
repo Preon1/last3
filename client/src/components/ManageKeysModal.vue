@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useSignedStore } from '../stores/signed'
 import { useToastStore } from '../stores/toast'
-import { decryptPrivateKeyJwk, decryptStringWithPassword, encryptPrivateKeyJwk, encryptStringWithPassword } from '../utils/signedCrypto'
+import { decryptLocalUsername, decryptPrivateKeyJwk, encryptLocalUsername, encryptPrivateKeyJwk } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 
 type StoredKeyV2 = {
@@ -287,7 +287,7 @@ async function findKeyForPasswordChange() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const decU = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
+        const decU = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
         if (decU !== u) continue
 
         const privateJwk = await decryptPrivateKeyJwk({ encrypted: entry.encryptedPrivateKey, password: pw })
@@ -341,7 +341,7 @@ async function applyPasswordChange() {
 
   chBusy.value = true
   try {
-    const encryptedUsername = await encryptStringWithPassword({ plaintext: u, password: pw1 })
+    const encryptedUsername = await encryptLocalUsername({ username: u, password: pw1 })
     const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: pw1 })
     const updated: StoredKeyV2 = { v: 2, encryptedUsername, encryptedPrivateKey }
 
@@ -401,7 +401,7 @@ async function onDownloadSpecific() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const dec = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
+        const dec = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
         if (dec === u) {
           downloadJson([entry])
           page.value = 'download'
@@ -463,7 +463,7 @@ async function findKeyForRemoval() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const dec = await decryptStringWithPassword({ encrypted: entry.encryptedUsername, password: pw })
+        const dec = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
         if (dec === u) {
           rmFoundEntry.value = entry
           rmFoundUsername.value = u

@@ -10,14 +10,14 @@ import {
   setNotificationsEnabled,
 } from '../utils/notificationPrefs'
 import {
+  decryptLocalUsername,
   decryptPrivateKeyJwk,
   decryptSmallStringWithPrivateKey,
   decryptSignedMessage,
-  decryptStringWithPassword,
+  encryptLocalUsername,
   encryptPrivateKeyJwk,
   encryptSmallStringWithPublicKeyJwk,
   encryptSignedMessage,
-  encryptStringWithPassword,
   generateRsaKeyPair,
   importRsaPrivateKeyJwk,
   publicJwkFromPrivateJwk,
@@ -103,6 +103,15 @@ function uuidV7ToUnixMs(id: string): number | null {
 
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length
+}
+
+function assertUsernameIsXssSafe(username: string) {
+  const u = String(username ?? '')
+  // Vue text bindings escape HTML, but usernames can still end up in other contexts
+  // (notifications, attributes, logs). Reject the most dangerous characters early.
+  if (u.includes('<') || u.includes('>')) throw new Error('Username contains unsafe characters')
+  // Disallow ASCII control characters (including newlines/tabs) which can cause UI or parsing issues.
+  if (/[\u0000-\u001F\u007F]/.test(u)) throw new Error('Username contains unsafe characters')
 }
 
 type StoredKeyV2 = {
@@ -725,13 +734,13 @@ export const useSignedStore = defineStore('signed', () => {
 
   async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string }) {
     if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
-    const encryptedUsername = await encryptStringWithPassword({ plaintext: params.username, password: params.password })
+    const encryptedUsername = await encryptLocalUsername({ username: params.username, password: params.password })
 
     const cur = loadKeyEntries()
     const kept: StoredKeyV2[] = []
     for (const e of cur) {
       try {
-        const u = await decryptStringWithPassword({ encrypted: e.encryptedUsername, password: params.password })
+        const u = await decryptLocalUsername({ encrypted: e.encryptedUsername, password: params.password })
         if (u === params.username) continue
       } catch {
         // If it can't be decrypted with this password, keep it.
@@ -749,7 +758,7 @@ export const useSignedStore = defineStore('signed', () => {
     const list = loadKeyEntries()
     for (const e of list) {
       try {
-        const u = await decryptStringWithPassword({ encrypted: e.encryptedUsername, password: params.password })
+        const u = await decryptLocalUsername({ encrypted: e.encryptedUsername, password: params.password })
         if (u === params.username) return e.encryptedPrivateKey
       } catch {
         // ignore
@@ -1895,6 +1904,7 @@ export const useSignedStore = defineStore('signed', () => {
     const u = params.username.trim()
     if (!u) throw new Error('Username required')
     if (u.length < 3 || u.length > 64) throw new Error('Username must be between 3 and 64 characters')
+    assertUsernameIsXssSafe(u)
 
     if (!params.password) throw new Error('Password required')
     if (params.password.length < 8) throw new Error('Password must be at least 8 characters')
@@ -1986,6 +1996,7 @@ export const useSignedStore = defineStore('signed', () => {
   async function login(params: { username: string; password: string }) {
     const u = params.username.trim()
     if (!u) throw new Error('Username required')
+    assertUsernameIsXssSafe(u)
     if (!params.password) throw new Error('Password required')
     if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
 

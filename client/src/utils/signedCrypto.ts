@@ -7,6 +7,27 @@ type StoredEncryptedBlobV1 = {
   ctB64: string
 }
 
+export const LOCAL_KEY_USERNAME_ITERATIONS = 1_212_123
+export const LOCAL_KEY_PRIVATE_KEY_ITERATIONS = 612_345
+
+const LOCAL_USERNAME_PAD_TOTAL_LEN = 75
+const LOCAL_USERNAME_PAD_PREFIX = 'LP'
+const LOCAL_USERNAME_PAD_LEN_HEX_WIDTH = 4
+
+const LOCAL_USERNAME_PAD_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
+
+const LOCAL_USERNAME_PAD_ALPHABET_SET = new Set(LOCAL_USERNAME_PAD_ALPHABET.split(''))
+
+function isStringFromAlphabet(s: string, alphabetSet: Set<string>) {
+  const str = String(s ?? '')
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i]!
+    if (!alphabetSet.has(ch)) return false
+  }
+  return true
+}
+
 function encUtf8(s: string) {
   return new TextEncoder().encode(s)
 }
@@ -27,6 +48,56 @@ function unb64(s: string) {
   const u8 = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i)
   return u8
+}
+
+function randomStringFromAlphabet(len: number, alphabet: string) {
+  if (len <= 0) return ''
+  const a = String(alphabet ?? '')
+  if (!a.length) throw new Error('Alphabet must not be empty')
+
+  const u8 = crypto.getRandomValues(new Uint8Array(len))
+  let out = ''
+  for (let i = 0; i < u8.length; i++) out += a[u8[i]! % a.length]
+  return out
+}
+
+function padUsernameForLocalKey(username: string) {
+  const u = String(username ?? '')
+
+  const lenHex = u.length.toString(16).padStart(LOCAL_USERNAME_PAD_LEN_HEX_WIDTH, '0')
+  if (lenHex.length !== LOCAL_USERNAME_PAD_LEN_HEX_WIDTH || !/^[0-9a-fA-F]{4}$/.test(lenHex)) {
+    throw new Error('Username too long to pad')
+  }
+
+  const base = `${LOCAL_USERNAME_PAD_PREFIX}${lenHex}${u}`
+  const padLen = LOCAL_USERNAME_PAD_TOTAL_LEN - base.length
+  if (padLen < 0) throw new Error('Username too long to pad')
+  return base + randomStringFromAlphabet(padLen, LOCAL_USERNAME_PAD_ALPHABET)
+}
+
+function unpadUsernameFromLocalKey(padded: string) {
+  const s = String(padded ?? '')
+
+  // New format: LP + 4-hex-length + username + random padding.
+  // Only treat it as LP-format if it looks like a padded blob.
+  if (s.length === LOCAL_USERNAME_PAD_TOTAL_LEN && s.startsWith(LOCAL_USERNAME_PAD_PREFIX)) {
+    const start = LOCAL_USERNAME_PAD_PREFIX.length
+    const lenHex = s.slice(start, start + LOCAL_USERNAME_PAD_LEN_HEX_WIDTH)
+    if (/^[0-9a-fA-F]{4}$/.test(lenHex)) {
+      const n = Number.parseInt(lenHex, 16)
+      const uStart = start + LOCAL_USERNAME_PAD_LEN_HEX_WIDTH
+      const uEnd = uStart + n
+      if (Number.isFinite(n) && n >= 0 && uEnd <= s.length) {
+        // Additional guard: ensure the remaining tail looks like our padding.
+        const tail = s.slice(uEnd)
+        if (isStringFromAlphabet(tail, LOCAL_USERNAME_PAD_ALPHABET_SET)) {
+          return s.slice(uStart, uEnd)
+        }
+      }
+    }
+  }
+
+  throw new Error('Unsupported local username format')
 }
 
 export async function generateRsaKeyPair() {
@@ -69,15 +140,17 @@ async function deriveAesKeyFromPassword(password: string, salt: Uint8Array, iter
 }
 
 export async function encryptPrivateKeyJwk(params: { privateJwk: string; password: string }) {
-  return encryptStringWithPassword({ plaintext: params.privateJwk, password: params.password })
+  return encryptStringWithPassword({ plaintext: params.privateJwk, password: params.password, iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS })
 }
 
 export async function decryptPrivateKeyJwk({ encrypted, password }: { encrypted: string; password: string }) {
   return decryptStringWithPassword({ encrypted, password })
 }
 
-export async function encryptStringWithPassword(params: { plaintext: string; password: string }) {
-  const iterations = 250_000
+export async function encryptStringWithPassword(params: { plaintext: string; password: string; iterations?: number }) {
+  const iterations = typeof params.iterations === 'number' && Number.isFinite(params.iterations)
+    ? Math.max(1, Math.floor(params.iterations))
+    : 250_000
 
   let salt = crypto.getRandomValues(new Uint8Array(16))
   let iv = crypto.getRandomValues(new Uint8Array(12))
@@ -108,6 +181,20 @@ export async function decryptStringWithPassword(params: { encrypted: string; pas
   const aesKey = await deriveAesKeyFromPassword(params.password, salt, parsed.iterations)
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct)
   return decUtf8(pt)
+}
+
+export async function encryptLocalUsername(params: { username: string; password: string }) {
+  const padded = padUsernameForLocalKey(params.username)
+  return encryptStringWithPassword({
+    plaintext: padded,
+    password: params.password,
+    iterations: LOCAL_KEY_USERNAME_ITERATIONS,
+  })
+}
+
+export async function decryptLocalUsername(params: { encrypted: string; password: string }) {
+  const padded = await decryptStringWithPassword({ encrypted: params.encrypted, password: params.password })
+  return unpadUsernameFromLocalKey(padded)
 }
 
 export function publicJwkFromPrivateJwk(privateJwkJson: string) {
