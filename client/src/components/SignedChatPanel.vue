@@ -137,6 +137,9 @@ const msgMenuY = ref(0)
 const msgMenuMsg = ref<any | null>(null)
 const msgMenuEl = ref<HTMLElement | null>(null)
 
+const msgMenuAnchorX = ref(0)
+const msgMenuAnchorY = ref(0)
+
 let longPressTimer: number | null = null
 let longPressStartX = 0
 let longPressStartY = 0
@@ -211,6 +214,11 @@ function cancelEdit() {
 function closeMsgMenu() {
   msgMenuOpen.value = false
   msgMenuMsg.value = null
+}
+
+function onViewportChange() {
+  if (!msgMenuOpen.value) return
+  void positionMsgMenuNow()
 }
 
 function focusChatInputSoon() {
@@ -315,22 +323,56 @@ function openMsgMenu(e: MouseEvent, m: any) {
   openMsgMenuAt(e.clientX, e.clientY, m)
 }
 
+function getViewportMetrics() {
+  // On mobile, when the keyboard is open, the visual viewport can be smaller and offset
+  // relative to the layout viewport. Our menu is `position: fixed`, so we need to map
+  // pointer coordinates (visual viewport) into layout-viewport coordinates.
+  const vv = window.visualViewport
+  if (vv) {
+    return {
+      left: vv.offsetLeft || 0,
+      top: vv.offsetTop || 0,
+      width: vv.width || window.innerWidth,
+      height: vv.height || window.innerHeight,
+    }
+  }
+  return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+}
+
+async function positionMsgMenuNow() {
+  await nextTick()
+  const el = msgMenuEl.value
+  if (!el) return
+
+  const r = el.getBoundingClientRect()
+  const pad = 8
+  const vp = getViewportMetrics()
+
+  // Anchor coordinates are in visual-viewport space (clientX/clientY).
+  const baseX = vp.left + msgMenuAnchorX.value
+  const baseY = vp.top + msgMenuAnchorY.value
+
+  const minX = vp.left + pad
+  const minY = vp.top + pad
+  const maxX = Math.max(minX, vp.left + vp.width - r.width - pad)
+  const maxY = Math.max(minY, vp.top + vp.height - r.height - pad)
+
+  msgMenuX.value = Math.min(Math.max(baseX, minX), maxX)
+  msgMenuY.value = Math.min(Math.max(baseY, minY), maxY)
+}
+
 function openMsgMenuAt(x: number, y: number, m: any) {
   msgMenuMsg.value = m
   msgMenuOpen.value = true
-  msgMenuX.value = x
-  msgMenuY.value = y
 
-  void nextTick(() => {
-    const el = msgMenuEl.value
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    const pad = 8
-    const maxX = Math.max(pad, window.innerWidth - r.width - pad)
-    const maxY = Math.max(pad, window.innerHeight - r.height - pad)
-    msgMenuX.value = Math.min(Math.max(msgMenuX.value, pad), maxX)
-    msgMenuY.value = Math.min(Math.max(msgMenuY.value, pad), maxY)
-  })
+  msgMenuAnchorX.value = x
+  msgMenuAnchorY.value = y
+
+  // Set an initial position immediately; then clamp precisely after DOM paints.
+  const vp = getViewportMetrics()
+  msgMenuX.value = vp.left + x
+  msgMenuY.value = vp.top + y
+  void positionMsgMenuNow()
 }
 
 function onMsgPointerDown(e: PointerEvent, m: any) {
@@ -465,6 +507,12 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('pointerdown', onGlobalPointerDown)
   document.addEventListener('keydown', onGlobalKeyDown)
+  try {
+    window.visualViewport?.addEventListener('resize', onViewportChange)
+    window.visualViewport?.addEventListener('scroll', onViewportChange)
+  } catch {
+    // ignore
+  }
   focusChatInputSoon()
 })
 
@@ -596,6 +644,12 @@ onBeforeUnmount(() => {
   disconnectObserver()
   document.removeEventListener('pointerdown', onGlobalPointerDown)
   document.removeEventListener('keydown', onGlobalKeyDown)
+  try {
+    window.visualViewport?.removeEventListener('resize', onViewportChange)
+    window.visualViewport?.removeEventListener('scroll', onViewportChange)
+  } catch {
+    // ignore
+  }
 })
 
 async function onSend() {
@@ -733,7 +787,8 @@ function onChatKeydown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // UX: Enter inserts a newline; Shift+Enter sends.
+  if (e.key === 'Enter' && e.shiftKey) {
     e.preventDefault()
     void onSend()
   }
