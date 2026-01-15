@@ -137,6 +137,23 @@ const msgMenuY = ref(0)
 const msgMenuMsg = ref<any | null>(null)
 const msgMenuEl = ref<HTMLElement | null>(null)
 
+let longPressTimer: number | null = null
+let longPressStartX = 0
+let longPressStartY = 0
+let longPressMoved = false
+let longPressFired = false
+let longPressPointerId: number | null = null
+
+let lastTapAtMs = 0
+let lastTapMsgId: string | null = null
+
+function clearLongPressTimer() {
+  if (longPressTimer != null) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
 type LinkPart = { text: string; href?: string }
 
 function isMineMessage(senderId: string) {
@@ -295,10 +312,14 @@ async function copyText(text: string) {
 function openMsgMenu(e: MouseEvent, m: any) {
   e.preventDefault()
   e.stopPropagation()
+  openMsgMenuAt(e.clientX, e.clientY, m)
+}
+
+function openMsgMenuAt(x: number, y: number, m: any) {
   msgMenuMsg.value = m
   msgMenuOpen.value = true
-  msgMenuX.value = e.clientX
-  msgMenuY.value = e.clientY
+  msgMenuX.value = x
+  msgMenuY.value = y
 
   void nextTick(() => {
     const el = msgMenuEl.value
@@ -310,6 +331,78 @@ function openMsgMenu(e: MouseEvent, m: any) {
     msgMenuX.value = Math.min(Math.max(msgMenuX.value, pad), maxX)
     msgMenuY.value = Math.min(Math.max(msgMenuY.value, pad), maxY)
   })
+}
+
+function onMsgPointerDown(e: PointerEvent, m: any) {
+  if (e.pointerType !== 'touch') return
+  // Prevent the global pointerdown handler from immediately closing the menu.
+  e.preventDefault()
+  e.stopPropagation()
+
+  clearLongPressTimer()
+  longPressFired = false
+  longPressMoved = false
+  longPressPointerId = e.pointerId
+  longPressStartX = e.clientX
+  longPressStartY = e.clientY
+
+  // Long-press opens context menu.
+  longPressTimer = window.setTimeout(() => {
+    if (longPressMoved) return
+    longPressFired = true
+    openMsgMenuAt(longPressStartX, longPressStartY, m)
+    clearLongPressTimer()
+  }, 500)
+}
+
+function onMsgPointerMove(e: PointerEvent) {
+  if (e.pointerType !== 'touch') return
+  if (longPressPointerId == null || e.pointerId !== longPressPointerId) return
+  const dx = e.clientX - longPressStartX
+  const dy = e.clientY - longPressStartY
+  if (dx * dx + dy * dy > 10 * 10) {
+    longPressMoved = true
+    clearLongPressTimer()
+  }
+}
+
+function onMsgPointerUp(e: PointerEvent, m: any) {
+  if (e.pointerType !== 'touch') return
+  if (longPressPointerId == null || e.pointerId !== longPressPointerId) return
+
+  clearLongPressTimer()
+  longPressPointerId = null
+
+  // If a long-press already opened the menu, don't treat this as a tap.
+  if (longPressFired) {
+    longPressFired = false
+    return
+  }
+
+  // Double-tap opens context menu.
+  const now = Date.now()
+  const id = String(m?.id ?? '')
+  if (!id) return
+
+  const isDoubleTap = lastTapMsgId === id && now - lastTapAtMs <= 300
+  lastTapAtMs = now
+  lastTapMsgId = id
+
+  if (isDoubleTap) {
+    // Prevent the second tap from doing any default behaviors.
+    e.preventDefault()
+    e.stopPropagation()
+    lastTapAtMs = 0
+    lastTapMsgId = null
+    openMsgMenuAt(e.clientX, e.clientY, m)
+  }
+}
+
+function onMsgPointerCancel(e: PointerEvent) {
+  if (e.pointerType !== 'touch') return
+  if (longPressPointerId == null || e.pointerId !== longPressPointerId) return
+  clearLongPressTimer()
+  longPressPointerId = null
 }
 
 function onMsgMenuReply() {
@@ -690,10 +783,18 @@ function onMessagesScroll() {
         v-for="m in rendered"
         :key="m.id"
         class="chat-line"
-        :class="{ 'chat-line--reply-target': replyingToId === m.id, 'chat-line--edit-target': editingId === m.id }"
+        :class="{
+          'chat-line--reply-target': replyingToId === m.id,
+          'chat-line--edit-target': editingId === m.id,
+          'chat-line--menu-target': msgMenuOpen && msgMenuMsg && String(msgMenuMsg.id) === String(m.id),
+        }"
         :ref="(el) => setMessageEl(m.id, el as any)"
         :data-msg-id="m.id"
         @contextmenu.prevent="openMsgMenu($event, m)"
+        @pointerdown="onMsgPointerDown($event, m)"
+        @pointermove="onMsgPointerMove"
+        @pointerup="onMsgPointerUp($event, m)"
+        @pointercancel="onMsgPointerCancel"
       >
         <div class="chat-meta">
           <span>{{ m.fromUsername }}</span>
