@@ -12,7 +12,6 @@ const { t } = useI18n()
 const { activeChatId, messagesByChatId, userId, membersByChatId } = storeToRefs(signed)
 
 const chatInput = ref('')
-const chatRootEl = ref<HTMLElement | null>(null)
 const chatMessagesEl = ref<HTMLDivElement | null>(null)
 const chatInputEl = ref<HTMLTextAreaElement | null>(null)
 
@@ -118,8 +117,6 @@ const rendered = computed(() => {
 })
 
 const canSend = computed(() => Boolean(activeChatId.value && chatInput.value.trim() && !editBusy.value))
-
-const didInitialScroll = ref(false)
 
 const loadMoreBusy = ref(false)
 const loadMoreHasMore = ref(true)
@@ -514,6 +511,14 @@ onMounted(() => {
     // ignore
   }
   focusChatInputSoon()
+
+  // When returning from contacts/settings back to chat, this component re-mounts
+  // but `activeChatId` and message count may already be stable, so watchers
+  // won't fire. Force an instant jump to bottom after layout.
+  void nextTick().then(() => {
+    scrollToBottom()
+    requestAnimationFrame(() => scrollToBottom())
+  })
 })
 
 function showSendError(e: any) {
@@ -553,7 +558,6 @@ async function deleteMsg(chatId: string, messageId: string, senderId: string) {
 }
 
 function scrollToBottom() {
-  const root = chatRootEl.value
   const msgs = chatMessagesEl.value
 
   const scrollToBottomInstant = (el: HTMLElement) => {
@@ -568,19 +572,10 @@ function scrollToBottom() {
     }
   }
 
-  // Primary: the whole chat section (user-requested scroll container)
-  if (root) {
-    scrollToBottomInstant(root)
-  }
-
   // Also keep messages scroller aligned if present
   if (msgs) {
     scrollToBottomInstant(msgs)
   }
-}
-
-function scrollInitialPosition() {
-  scrollToBottom()
 }
 
 watch(
@@ -590,14 +585,6 @@ watch(
     ensureObserver()
 
     if (isPrepending.value) return
-
-    const cid = activeChatId.value
-    if (cid && !didInitialScroll.value) {
-      didInitialScroll.value = true
-      scrollInitialPosition()
-      return
-    }
-
     scrollToBottom()
   },
 )
@@ -609,13 +596,17 @@ watch(
     closeMsgMenu()
     cancelReply()
     if (editingId.value) cancelEdit()
-    didInitialScroll.value = false
     loadMoreHasMore.value = true
     loadMoreBusy.value = false
     isPrepending.value = false
     await nextTick()
     ensureObserver()
     focusChatInputSoon()
+
+    // When re-opening an existing chat (e.g., go to chats list and back),
+    // message count might not change, so force an instant jump to bottom.
+    scrollToBottom()
+    requestAnimationFrame(() => scrollToBottom())
   },
 )
 
@@ -814,7 +805,7 @@ function onMessagesScroll() {
 </script>
 
 <template>
-  <section ref="chatRootEl" class="chat">
+  <section class="chat">
 
     <div ref="chatMessagesEl" class="chat-messages" aria-live="polite" @scroll="onMessagesScroll">
       <div
