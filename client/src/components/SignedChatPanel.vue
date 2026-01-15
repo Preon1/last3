@@ -556,51 +556,30 @@ function scrollToBottom() {
   const root = chatRootEl.value
   const msgs = chatMessagesEl.value
 
+  const scrollToBottomInstant = (el: HTMLElement) => {
+    try {
+      const prev = el.style.scrollBehavior
+      el.style.scrollBehavior = 'auto'
+      el.scrollTop = el.scrollHeight
+      // Restore after the sync scroll has applied.
+      el.style.scrollBehavior = prev
+    } catch {
+      // ignore
+    }
+  }
+
   // Primary: the whole chat section (user-requested scroll container)
   if (root) {
-    root.scrollTop = root.scrollHeight
+    scrollToBottomInstant(root)
   }
 
   // Also keep messages scroller aligned if present
   if (msgs) {
-    msgs.scrollTop = msgs.scrollHeight
+    scrollToBottomInstant(msgs)
   }
 }
 
-function cssEscape(s: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const css = (window as any).CSS
-  return css && typeof css.escape === 'function' ? css.escape(s) : s.replace(/"/g, '\\"')
-}
-
-function scrollToMessage(id: string) {
-  const root = chatMessagesEl.value
-  if (!root) return
-  const sel = `[data-msg-id="${cssEscape(id)}"]`
-  const el = root.querySelector(sel) as HTMLElement | null
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  el.classList.add('flash')
-  window.setTimeout(() => el.classList.remove('flash'), 900)
-}
-
-async function scrollInitialPosition(chatId: string) {
-  try {
-    const unread = await signed.listUnreadMessageIds(chatId, 500)
-    if (!unread.length) {
-      scrollToBottom()
-      return
-    }
-
-    const set = new Set<string>(unread.map(String))
-    const first = rendered.value.find((m) => set.has(m.id))
-    if (first?.id) {
-      scrollToMessage(first.id)
-      return
-    }
-  } catch {
-    // ignore
-  }
+function scrollInitialPosition() {
   scrollToBottom()
 }
 
@@ -615,7 +594,7 @@ watch(
     const cid = activeChatId.value
     if (cid && !didInitialScroll.value) {
       didInitialScroll.value = true
-      await scrollInitialPosition(cid)
+      scrollInitialPosition()
       return
     }
 
