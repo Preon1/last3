@@ -66,6 +66,12 @@ const baseMessages = {
       introvertTitle: 'Cannot add user',
       introvertBody:
         'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
+      notificationsEnabledTitle: 'Notifications enabled',
+      notificationsEnabledBody: 'Push notifications are now active for this device.',
+      notificationsFailedTitle: 'Notifications not active',
+      notificationsFailedBody: 'Permission was granted, but push setup failed. Try reloading the app.',
+      notificationsBlockedTitle: 'Notifications blocked',
+      notificationsBlockedBody: 'Enable notifications in your browser/app settings to receive push notifications.',
       copiedTitle: 'Copied',
       copiedBody: 'Message copied to clipboard.',
       copyFailedTitle: 'Copy failed',
@@ -99,6 +105,12 @@ const baseMessages = {
         download: 'Download',
         downloadUser: 'Download {username} key',
         downloadAll: 'Download all keys',
+        notificationsEnabledTitle: 'Meldingen ingeschakeld',
+        notificationsEnabledBody: 'Pushmeldingen zijn nu actief voor dit apparaat.',
+        notificationsFailedTitle: 'Meldingen niet actief',
+        notificationsFailedBody: 'Toestemming is gegeven, maar push-instelling is mislukt. Probeer de app te herladen.',
+        notificationsBlockedTitle: 'Meldingen geblokkeerd',
+        notificationsBlockedBody: 'Schakel meldingen in via je browser-/app-instellingen om pushmeldingen te ontvangen.',
         downloadSpecific: 'Download a specific key',
         changePassword: 'Change password',
         addFromFile: 'Add key(s) from file',
@@ -266,6 +278,12 @@ const baseMessages = {
     },
     theme: {
       label: 'Theme: {mode}',
+      notificationsEnabledTitle: 'Notifications activées',
+      notificationsEnabledBody: 'Les notifications push sont maintenant actives sur cet appareil.',
+      notificationsFailedTitle: 'Notifications inactives',
+      notificationsFailedBody: "L’autorisation a été accordée, mais la configuration push a échoué. Essayez de recharger l’application.",
+      notificationsBlockedTitle: 'Notifications bloquées',
+      notificationsBlockedBody: "Activez les notifications dans les réglages de votre navigateur/app pour recevoir des notifications push.",
       system: 'System',
         remove: 'Supprimer',
       dark: 'Dark',
@@ -427,6 +445,12 @@ const baseMessages = {
     toast: {
       chatSendFailedTitle: 'Bericht niet verzonden',
       chatSendFailedBody: 'Kon de server niet bereiken. Controleer je verbinding en probeer het opnieuw.',
+      notificationsEnabledTitle: 'Meldingen ingeschakeld',
+      notificationsEnabledBody: 'Pushmeldingen zijn nu actief voor dit apparaat.',
+      notificationsFailedTitle: 'Meldingen niet actief',
+      notificationsFailedBody: 'Toestemming is gegeven, maar push-instelling is mislukt. Probeer de app opnieuw te laden.',
+      notificationsBlockedTitle: 'Meldingen geblokkeerd',
+      notificationsBlockedBody: 'Schakel meldingen in in je browser-/app-instellingen om pushmeldingen te ontvangen.',
     },
     setup: {
       subtitle: 'Anonieme, versleutelde spraak-webmessenger zonder registratie en zonder chatgeschiedenis.',
@@ -752,6 +776,18 @@ const baseMessages = {
       save: 'Enregistrer',
       modified: 'modifié',
       reload: 'Recharger',
+    },
+    toast: {
+      chatSendFailedTitle: 'Message non envoyé',
+      chatSendFailedBody: "Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.",
+      notificationsEnabledTitle: 'Notifications activées',
+      notificationsEnabledBody: 'Les notifications push sont maintenant actives pour cet appareil.',
+      notificationsFailedTitle: 'Notifications inactives',
+      notificationsFailedBody:
+        "L’autorisation a été accordée, mais la configuration push a échoué. Essayez de recharger l’application.",
+      notificationsBlockedTitle: 'Notifications bloquées',
+      notificationsBlockedBody:
+        'Activez les notifications dans les paramètres de votre navigateur/app pour recevoir des notifications push.',
     },
     setup: {
       subtitle: 'Messagerie vocale web anonyme et chiffrée, sans inscription ni historique de conversation.',
@@ -1081,6 +1117,14 @@ const baseMessages = {
     toast: {
       chatSendFailedTitle: 'Nachricht nicht gesendet',
       chatSendFailedBody: 'Server nicht erreichbar. Bitte Verbindung prüfen und erneut versuchen.',
+      notificationsEnabledTitle: 'Benachrichtigungen aktiviert',
+      notificationsEnabledBody: 'Push-Benachrichtigungen sind jetzt für dieses Gerät aktiv.',
+      notificationsFailedTitle: 'Benachrichtigungen nicht aktiv',
+      notificationsFailedBody:
+        'Berechtigung wurde erteilt, aber die Push-Einrichtung ist fehlgeschlagen. Versuche die App neu zu laden.',
+      notificationsBlockedTitle: 'Benachrichtigungen blockiert',
+      notificationsBlockedBody:
+        'Aktiviere Benachrichtigungen in den Browser-/App-Einstellungen, um Push-Benachrichtigungen zu erhalten.',
     },
     setup: {
       subtitle: 'Anonymer, verschlüsselter Voice-Web-Messenger ohne Registrierung und ohne Chatverlauf.',
@@ -1406,6 +1450,17 @@ const baseMessages = {
       save: 'Сохранить',
       modified: 'изменено',
       reload: 'Перезагрузить',
+    },
+    toast: {
+      chatSendFailedTitle: 'Сообщение не отправлено',
+      chatSendFailedBody: 'Не удалось связаться с сервером. Проверьте подключение и попробуйте снова.',
+      notificationsEnabledTitle: 'Уведомления включены',
+      notificationsEnabledBody: 'Push-уведомления теперь активны на этом устройстве.',
+      notificationsFailedTitle: 'Уведомления не активны',
+      notificationsFailedBody: 'Разрешение получено, но настройка push не удалась. Попробуйте перезагрузить приложение.',
+      notificationsBlockedTitle: 'Уведомления заблокированы',
+      notificationsBlockedBody:
+        'Включите уведомления в настройках браузера/приложения, чтобы получать push-уведомления.',
     },
     setup: {
       subtitle: 'Анонимный зашифрованный голосовой веб мессенджер без регистрации и хранения истории переписки',

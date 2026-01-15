@@ -5,13 +5,15 @@ import { useUiStore } from '../stores/ui'
 import { storeToRefs } from 'pinia'
 import { cycleLocale } from '../i18n'
 import { useSignedStore } from '../stores/signed'
+import { useToastStore } from '../stores/toast'
 
 const ui = useUiStore()
+const toast = useToastStore()
 const { themeLabel } = storeToRefs(ui)
 const { t, locale } = useI18n()
 
 const signed = useSignedStore()
-const { lastUsername, username: restoredUsername, stayLoggedIn } = storeToRefs(signed)
+const { lastUsername, username: restoredUsername, stayLoggedIn, notificationsEnabled } = storeToRefs(signed)
 
 const stayLoggedInModel = computed({
   get: () => Boolean(stayLoggedIn.value),
@@ -130,9 +132,11 @@ async function confirmRecreate() {
   const u = username.value.trim()
   if (!u) return
 
+  const permPromise = startNotificationPermissionRequest()
   recreateBusy.value = true
   try {
     await signed.recreateAccount({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    void finishNotificationSetup(permPromise)
     password.value = ''
     closeRecreate()
   } catch (e: any) {
@@ -165,6 +169,51 @@ function onCycleLanguage() {
   cycleLocale()
 }
 
+function startNotificationPermissionRequest(): Promise<NotificationPermission | null> {
+  // Mobile browsers typically require this to be triggered by a user gesture.
+  // We start the request at click-time (before awaiting network), then finish
+  // push setup after auth succeeds.
+  try {
+    if (!notificationsEnabled.value) return Promise.resolve(null)
+    if (typeof Notification === 'undefined') return Promise.resolve(null)
+
+    if (Notification.permission === 'default') {
+      return Notification.requestPermission().catch(() => null)
+    }
+    return Promise.resolve(Notification.permission)
+  } catch {
+    return Promise.resolve(null)
+  }
+}
+
+async function finishNotificationSetup(permPromise: Promise<NotificationPermission | null>) {
+  try {
+    const perm = await permPromise
+    if (perm === 'granted') {
+      signed.setNotificationsEnabledLocal(true)
+      const ok = await signed.trySyncPushSubscription()
+      if (ok) {
+        toast.push({
+          title: String(t('toast.notificationsEnabledTitle')),
+          message: String(t('toast.notificationsEnabledBody')),
+          variant: 'info',
+          timeoutMs: 3000,
+        })
+      } else {
+        toast.error(String(t('toast.notificationsFailedTitle')), String(t('toast.notificationsFailedBody')))
+      }
+      return
+    }
+    if (perm === 'denied') {
+      // Avoid "enabled" UI state when browser permission is blocked.
+      signed.setNotificationsEnabledLocal(false)
+      toast.error(String(t('toast.notificationsBlockedTitle')), String(t('toast.notificationsBlockedBody')))
+    }
+  } catch {
+    // ignore
+  }
+}
+
 async function onLogin() {
   err.value = ''
   if (!canLogin.value) return
@@ -172,9 +221,12 @@ async function onLogin() {
     err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
+
+  const permPromise = startNotificationPermissionRequest()
   busy.value = true
   try {
     await signed.login({ username: username.value.trim(), password: password.value })
+    void finishNotificationSetup(permPromise)
     password.value = ''
   } catch (e: any) {
     const msg = typeof e?.message === 'string' ? e.message : String(e)
@@ -196,6 +248,8 @@ async function onRegister() {
     err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
+
+  const permPromise = startNotificationPermissionRequest()
 
   const u = username.value.trim()
   if (!u) return
@@ -226,6 +280,7 @@ async function onRegister() {
   busy.value = true
   try {
     await signed.register({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    void finishNotificationSetup(permPromise)
     password.value = ''
   } catch (e: any) {
     err.value = toUserError(e)
