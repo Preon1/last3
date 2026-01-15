@@ -23,6 +23,7 @@ import {
   publicJwkFromPrivateJwk,
 } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
+import { APP_VERSION as CLIENT_APP_VERSION } from '../appVersion'
 import { useToastStore } from './toast'
 
 export type SignedChat = {
@@ -266,6 +267,14 @@ export const useSignedStore = defineStore('signed', () => {
   let wsReconnectTimer: number | null = null
   let wsGeneration = 0
 
+  // App version mismatch detection (server updates while client is open)
+  const clientVersion = ref<string>(String(CLIENT_APP_VERSION))
+  const serverVersion = ref<string>('')
+  const lastKnownServerVersion = ref<string>('')
+  const serverUpdatedFrom = ref<string | null>(null)
+  const serverUpdatedTo = ref<string | null>(null)
+  const serverUpdateModalOpen = ref(false)
+
   const turnConfig = ref<any | null>(null)
 
   const inboundHandlers: Array<(type: string, obj: Record<string, unknown>) => void> = []
@@ -332,6 +341,66 @@ export const useSignedStore = defineStore('signed', () => {
 
   let removeDateSyncTimer: number | null = null
 
+  function readServerVersionFromMeta(): string {
+    try {
+      const el = document.querySelector('meta[name="lrcom-server-version"]') as HTMLMetaElement | null
+      const v = typeof el?.content === 'string' ? el.content.trim() : ''
+      return v
+    } catch {
+      return ''
+    }
+  }
+
+  function applyServerVersion(nextRaw: unknown) {
+    const next = typeof nextRaw === 'string' ? nextRaw.trim() : ''
+    if (!next) return
+
+    const prev = String(serverVersion.value || '')
+
+    // First time we learn server version.
+    if (!prev) {
+      serverVersion.value = next
+      lastKnownServerVersion.value = next
+
+      // If the client is cached old (SW), mismatch can exist on first load.
+      if (clientVersion.value && clientVersion.value !== next) {
+        serverUpdatedFrom.value = clientVersion.value
+        serverUpdatedTo.value = next
+        serverUpdateModalOpen.value = true
+      }
+      return
+    }
+
+    // Version changed while app is open.
+    if (prev !== next) {
+      serverUpdatedFrom.value = prev
+      serverUpdatedTo.value = next
+      serverVersion.value = next
+      lastKnownServerVersion.value = next
+      serverUpdateModalOpen.value = true
+      return
+    }
+
+    // Same server version; still may be a client/server mismatch.
+    lastKnownServerVersion.value = next
+
+    const mismatch = Boolean(clientVersion.value && clientVersion.value !== next)
+    if (mismatch && serverUpdatedTo.value !== next && !serverUpdateModalOpen.value) {
+      serverUpdatedFrom.value = clientVersion.value
+      serverUpdatedTo.value = next
+      serverUpdateModalOpen.value = true
+    }
+  }
+
+  // On boot/page load, capture server version from injected meta.
+  try {
+    if (typeof document !== 'undefined') {
+      applyServerVersion(readServerVersionFromMeta())
+    }
+  } catch {
+    // ignore
+  }
+
   function clearPresenceTimer() {
     if (presenceTimer != null) {
       try {
@@ -341,6 +410,10 @@ export const useSignedStore = defineStore('signed', () => {
       }
       presenceTimer = null
     }
+  }
+
+  function dismissServerUpdateModal() {
+    serverUpdateModalOpen.value = false
   }
 
   // Presence polling should not depend on WS open: if WS is delayed/blocked
@@ -606,6 +679,9 @@ export const useSignedStore = defineStore('signed', () => {
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ userIds: list }),
       })
+
+      // Server version should be present on every response.
+      applyServerVersion((j as any)?.serverVersion)
 
       const online = new Set<string>(Array.isArray(j?.onlineUserIds) ? j.onlineUserIds.map(String) : [])
       const busy = new Set<string>(Array.isArray(j?.busyUserIds) ? j.busyUserIds.map(String) : [])
@@ -2515,6 +2591,13 @@ export const useSignedStore = defineStore('signed', () => {
     unlocking,
     ws,
     wsPermanentlyFailed,
+      clientVersion,
+      serverVersion,
+      serverUpdateModalOpen,
+      serverUpdatedFrom,
+      serverUpdatedTo,
+      applyServerVersion,
+      dismissServerUpdateModal,
     turnConfig,
     signedIn,
     lastUsername,

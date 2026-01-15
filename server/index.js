@@ -7,6 +7,7 @@ import webpush from 'web-push';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
+import { APP_VERSION as SERVER_APP_VERSION } from './appVersion.js';
 import { initDatabase, query, runMigrations } from './db.js';
 import { registerUser, findUserByUsernameAndPublicKey, getUserByUsername } from './auth.js';
 import { issueToken, rotateToken, getSessionForToken, requireSignedAuth, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './signedSession.js';
@@ -175,6 +176,32 @@ async function sendPushToUserId(userId, payload) {
 // Visual branding
 const APP_NAME = (process.env.APP_NAME ?? 'Last').trim() || 'Last';
 
+function withInjectedServerVersionMeta(html) {
+  try {
+    const meta = `<meta name="lrcom-server-version" content="${String(SERVER_APP_VERSION)}">`;
+    // Insert into <head> to keep CSP simple (no inline script).
+    if (typeof html === 'string' && html.includes('<head>')) return html.replace('<head>', `<head>${meta}`);
+    // Fallback: prepend if head tag missing (shouldn't happen for Vite builds).
+    return `${meta}${String(html ?? '')}`;
+  } catch {
+    return html;
+  }
+}
+
+function sendIndexHtmlWithVersion(res) {
+  const indexPath = path.join(PUBLIC_DIR, 'index.html');
+  if (!fs.existsSync(indexPath)) return false;
+  try {
+    const raw = fs.readFileSync(indexPath, 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(withInjectedServerVersionMeta(raw));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 // Note: Push subscriptions are not persisted (RAM-only by design).
 
@@ -208,6 +235,13 @@ app.use((req, res, next) => {
     ].join('; '),
   );
 
+  next();
+});
+
+// Ensure the client can read server version on page load.
+app.get(['/', '/index.html'], (req, res, next) => {
+  const ok = sendIndexHtmlWithVersion(res);
+  if (ok) return;
   next();
 });
 
@@ -658,7 +692,12 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
       const su = signedUsers.get(id);
       if (su && su.roomId) busy.push(id);
     }
-    res.json({ success: true, onlineUserIds: online, busyUserIds: busy });
+    res.json({
+      success: true,
+      onlineUserIds: online,
+      busyUserIds: busy,
+      serverVersion: String(SERVER_APP_VERSION),
+    });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -1087,6 +1126,10 @@ app.get('*', (req, res, next) => {
 
   const indexPath = path.join(PUBLIC_DIR, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
+
+  // Inject server version so client can detect updates on page load.
+  const ok = sendIndexHtmlWithVersion(res);
+  if (ok) return;
   return res.sendFile(indexPath);
 });
 
