@@ -723,9 +723,9 @@ export const useSignedStore = defineStore('signed', () => {
     localData.remove(LocalEntity.SignedKeys)
   }
 
-  async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string; extraEntropy?: Uint8Array }) {
+  async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string }) {
     if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
-    const encryptedUsername = await encryptStringWithPassword({ plaintext: params.username, password: params.password, extraEntropy: params.extraEntropy })
+    const encryptedUsername = await encryptStringWithPassword({ plaintext: params.username, password: params.password })
 
     const cur = loadKeyEntries()
     const kept: StoredKeyV2[] = []
@@ -1891,7 +1891,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
-  async function register(params: { username: string; password: string; expirationDays: number; extraEntropy?: Uint8Array }) {
+  async function register(params: { username: string; password: string; expirationDays: number }) {
     const u = params.username.trim()
     if (!u) throw new Error('Username required')
     if (u.length < 3 || u.length > 64) throw new Error('Username must be between 3 and 64 characters')
@@ -1918,7 +1918,7 @@ export const useSignedStore = defineStore('signed', () => {
     storeLastUsername(u)
 
     const { publicJwk, privateJwk } = await generateRsaKeyPair()
-    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password, extraEntropy: params.extraEntropy })
+    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password })
 
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
@@ -1960,7 +1960,7 @@ export const useSignedStore = defineStore('signed', () => {
     privateKey.value = importedPrivateKey
 
     // Persist key material only after server registration succeeds.
-    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey, extraEntropy: params.extraEntropy })
+    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
 
     if (token.value && userId.value && username.value) {
       storeSession(

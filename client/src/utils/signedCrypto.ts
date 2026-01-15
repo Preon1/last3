@@ -29,23 +29,6 @@ function unb64(s: string) {
   return u8
 }
 
-function concatU8(parts: Uint8Array[]) {
-  let total = 0
-  for (const p of parts) total += p.length
-  const out = new Uint8Array(total)
-  let off = 0
-  for (const p of parts) {
-    out.set(p, off)
-    off += p.length
-  }
-  return out
-}
-
-async function sha256U8(data: Uint8Array) {
-  const dig = await crypto.subtle.digest('SHA-256', data as unknown as BufferSource)
-  return new Uint8Array(dig)
-}
-
 export async function generateRsaKeyPair() {
   const kp = await crypto.subtle.generateKey(
     {
@@ -85,29 +68,19 @@ async function deriveAesKeyFromPassword(password: string, salt: Uint8Array, iter
   )
 }
 
-export async function encryptPrivateKeyJwk(params: { privateJwk: string; password: string; extraEntropy?: Uint8Array }) {
-  return encryptStringWithPassword({ plaintext: params.privateJwk, password: params.password, extraEntropy: params.extraEntropy })
+export async function encryptPrivateKeyJwk(params: { privateJwk: string; password: string }) {
+  return encryptStringWithPassword({ plaintext: params.privateJwk, password: params.password })
 }
 
 export async function decryptPrivateKeyJwk({ encrypted, password }: { encrypted: string; password: string }) {
   return decryptStringWithPassword({ encrypted, password })
 }
 
-export async function encryptStringWithPassword(params: { plaintext: string; password: string; extraEntropy?: Uint8Array }) {
+export async function encryptStringWithPassword(params: { plaintext: string; password: string }) {
   const iterations = 250_000
 
   let salt = crypto.getRandomValues(new Uint8Array(16))
   let iv = crypto.getRandomValues(new Uint8Array(12))
-
-  // Mix in optional user entropy (does not replace WebCrypto RNG; it only influences
-  // how we encrypt stored secrets at rest).
-  if (params.extraEntropy && params.extraEntropy.length) {
-    const rnd = crypto.getRandomValues(new Uint8Array(32))
-    const label = encUtf8('lrcom:extra-entropy:v1')
-    const mixed = await sha256U8(concatU8([label, rnd, params.extraEntropy]))
-    salt = mixed.slice(0, 16)
-    iv = mixed.slice(16, 28)
-  }
 
   const aesKey = await deriveAesKeyFromPassword(params.password, salt, iterations)
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encUtf8(params.plaintext))

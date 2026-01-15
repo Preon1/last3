@@ -111,82 +111,7 @@ watch(
   },
 )
 
-const entropyOpen = ref(false)
-const entropyHits = ref<Array<{ x: number; y: number; ms: number }>>([])
-const pendingRegister = ref<{ username: string; password: string; expirationDays: number } | null>(null)
-const entropyBusy = ref(false)
-
-function resetEntropy() {
-  entropyHits.value = []
-  entropyBusy.value = false
-  pendingRegister.value = null
-}
-
-function cancelEntropy() {
-  entropyOpen.value = false
-  resetEntropy()
-}
-
-async function finalizeEntropyAndRegister() {
-  const p = pendingRegister.value
-  if (!p) return
-  entropyBusy.value = true
-  try {
-    // Pack 10 clicks * (x,y,ms) into bytes, then hash to 32 bytes.
-    // x,y are normalized 0..65535 (field-relative), ms is 0..999.
-    const buf = new Uint8Array(10 * 6)
-    for (let i = 0; i < 10; i++) {
-      const h = entropyHits.value[i]
-      const x = Math.max(0, Math.min(65535, Math.floor((h?.x ?? 0) * 65535)))
-      const y = Math.max(0, Math.min(65535, Math.floor((h?.y ?? 0) * 65535)))
-      const ms = Math.max(0, Math.min(999, Math.floor(h?.ms ?? 0)))
-      const o = i * 6
-      buf[o + 0] = (x >>> 8) & 0xff
-      buf[o + 1] = x & 0xff
-      buf[o + 2] = (y >>> 8) & 0xff
-      buf[o + 3] = y & 0xff
-      buf[o + 4] = (ms >>> 8) & 0xff
-      buf[o + 5] = ms & 0xff
-    }
-
-    const dig = await crypto.subtle.digest('SHA-256', buf as unknown as BufferSource)
-    const extraEntropy = new Uint8Array(dig)
-
-    entropyOpen.value = false
-    resetEntropy()
-
-    err.value = ''
-    busy.value = true
-    try {
-      await signed.register({ ...p, extraEntropy })
-      password.value = ''
-    } catch (e: any) {
-      err.value = toUserError(e)
-    } finally {
-      busy.value = false
-    }
-  } finally {
-    entropyBusy.value = false
-  }
-}
-
-function onEntropyClick(ev: MouseEvent) {
-  if (entropyBusy.value) return
-  const target = ev.currentTarget as HTMLElement | null
-  if (!target) return
-  const r = target.getBoundingClientRect()
-  if (!r.width || !r.height) return
-
-  const nx = (ev.clientX - r.left) / r.width
-  const ny = (ev.clientY - r.top) / r.height
-  const ms = Date.now() % 1000
-
-  const next = [...entropyHits.value, { x: Math.max(0, Math.min(1, nx)), y: Math.max(0, Math.min(1, ny)), ms }]
-  entropyHits.value = next
-  if (next.length >= 10) {
-    void finalizeEntropyAndRegister()
-  }
-}
+// Entropy collection removed: WebCrypto RNG is sufficient.
 
 function onCycleLanguage() {
   cycleLocale()
@@ -221,7 +146,7 @@ async function onRegister() {
   const u = username.value.trim()
   if (!u) return
 
-  // Check name availability before asking the user for entropy.
+  // Check name availability before triggering register.
   busy.value = true
   try {
     const r = await fetch('/api/auth/check-username', {
@@ -242,10 +167,17 @@ async function onRegister() {
     busy.value = false
   }
 
-  // Collect user interaction entropy before triggering register.
-  pendingRegister.value = { username: u, password: password.value, expirationDays: Number(expirationDays.value) }
-  entropyHits.value = []
-  entropyOpen.value = true
+  // Register directly (no entropy collection step).
+  err.value = ''
+  busy.value = true
+  try {
+    await signed.register({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    password.value = ''
+  } catch (e: any) {
+    err.value = toUserError(e)
+  } finally {
+    busy.value = false
+  }
 }
 
 function toggleMode() {
@@ -371,34 +303,6 @@ function toggleMode() {
           <button class="secondary small-font" type="button" @click="ui.openAbout">{{ t('common.about') }}</button>
         </div>
       </form>
-    </div>
-
-    <div
-      v-if="entropyOpen"
-      class="modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="entropyTitle"
-      @click="(e) => { if (e.target === e.currentTarget) cancelEntropy() }"
-    >
-      <div class="modal-card">
-        <div class="modal-title" id="entropyTitle">{{ t('signed.entropy.title') }}</div>
-        <div class="muted" style="margin-bottom: 10px;">
-          {{ t('signed.entropy.instructions') }}
-        </div>
-        <div class="muted" style="margin-bottom: 12px;">{{ t('signed.entropy.hits', { hits: entropyHits.length, total: 10 }) }}</div>
-
-        <div
-          role="button"
-          tabindex="0"
-          style="width: 100%; height: 180px; border-radius: 20px; border: 1px solid var(--input-border); background: var(--glass-bg);"
-          @click="onEntropyClick"
-        ></div>
-
-        <div class="modal-actions" style="margin-top: 16px;">
-          <button class="secondary" type="button" :disabled="entropyBusy" @click="cancelEntropy">{{ t('common.close') }}</button>
-        </div>
-      </div>
     </div>
 
     <div
