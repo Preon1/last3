@@ -1,3 +1,10 @@
+# Global options: discard all logs (including startup/admin logs).
+{
+  log {
+    output discard
+  }
+}
+
 # Public site (set LRCOM_DOMAIN in your .env). The default keeps the file
 # parseable if the env var is missing.
 #
@@ -48,7 +55,6 @@ https://{$LRCOM_DOMAIN:localhost} {
         /web-app-manifest-192x192.png \
         /web-app-manifest-512x512.png
     }
-    header @public_static Cache-Control "private, max-age=3600"
 
     # Per-endpoint rate limiting (requires Caddy built with github.com/mholt/caddy-ratelimit)
     # Keyed by client IP.

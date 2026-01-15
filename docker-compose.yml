@@ -2,7 +2,7 @@ services:
   lrcom:
     build: .
     logging:
-      driver: json-file
+      driver: none
     ports:
       - "8443:8443"
     environment:
@@ -58,7 +58,25 @@ services:
     image: postgres:18.1-alpine
     restart: unless-stopped
     logging:
-      driver: json-file
+      driver: none
+    command:
+      - postgres
+      - -c
+      - logging_collector=off
+      - -c
+      - log_destination=stderr
+      - -c
+      - log_statement=none
+      - -c
+      - log_duration=off
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - log_min_error_statement=fatal
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-lrcom}
       - POSTGRES_USER=${POSTGRES_USER:-lrcom}

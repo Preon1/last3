@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  // Reduce noise in dev/CI; override with VITE_LOG_LEVEL=info|warn|error|silent
+  logLevel: (process.env.VITE_LOG_LEVEL as any) || 'silent',
   server: {
     proxy: {
       // Default backend when running via docker compose.
