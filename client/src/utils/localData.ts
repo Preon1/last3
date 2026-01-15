@@ -171,7 +171,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     backend: 'localStorage',
     key: 'lrcom-signed-stay',
     codec: 'bool01',
-    removeOnLogout: false,
+    removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },

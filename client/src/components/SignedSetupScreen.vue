@@ -49,6 +49,11 @@ const canRegister = computed(() => Boolean(username.value.trim().length >= 1 && 
 const busy = ref(false)
 const err = ref('')
 
+const recreateOpen = ref(false)
+const recreateStep = ref<'confirm' | 'expiration'>('confirm')
+const recreateBusy = ref(false)
+const recreateErr = ref('')
+
 type HelpKey = 'username' | 'password' | 'expirationDays' | 'stayLoggedIn'
 const openHelp = ref<HelpKey | null>(null)
 
@@ -95,6 +100,48 @@ function onHelpBackdropClick(e: MouseEvent) {
   if (e.target && e.target === e.currentTarget) closeHelp()
 }
 
+function onRecreateBackdropClick(e: MouseEvent) {
+  if (e.target && e.target === e.currentTarget) closeRecreate()
+}
+
+function openRecreate() {
+  recreateErr.value = ''
+  recreateBusy.value = false
+  recreateStep.value = 'confirm'
+  recreateOpen.value = true
+}
+
+function closeRecreate() {
+  recreateErr.value = ''
+  recreateBusy.value = false
+  recreateStep.value = 'confirm'
+  recreateOpen.value = false
+}
+
+function proceedRecreate() {
+  recreateErr.value = ''
+  // Prefill like registration.
+  expirationDays.value = randomIntInclusive(180, 365)
+  recreateStep.value = 'expiration'
+}
+
+async function confirmRecreate() {
+  recreateErr.value = ''
+  const u = username.value.trim()
+  if (!u) return
+
+  recreateBusy.value = true
+  try {
+    await signed.recreateAccount({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    password.value = ''
+    closeRecreate()
+  } catch (e: any) {
+    recreateErr.value = toUserError(e)
+  } finally {
+    recreateBusy.value = false
+  }
+}
+
 function toUserError(e: any): string {
   const msg = typeof e?.message === 'string' ? e.message : String(e)
   if (msg === 'No local key found') return String(t('signed.errNoLocalKey'))
@@ -129,6 +176,12 @@ async function onLogin() {
     await signed.login({ username: username.value.trim(), password: password.value })
     password.value = ''
   } catch (e: any) {
+    const msg = typeof e?.message === 'string' ? e.message : String(e)
+    if (msg === 'User not found') {
+      err.value = ''
+      openRecreate()
+      return
+    }
     err.value = toUserError(e)
   } finally {
     busy.value = false
@@ -318,6 +371,58 @@ function toggleMode() {
         <div class="muted" style="white-space: pre-line;">{{ helpBody }}</div>
         <div class="modal-actions" style="margin-top: 16px;">
           <button class="secondary" type="button" @click="closeHelp">{{ t('common.close') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="recreateOpen"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="recreateTitle"
+      @click="onRecreateBackdropClick"
+    >
+      <div class="modal-card" @click.stop>
+        <div class="modal-title" id="recreateTitle">{{ t('signed.recreate.title') }}</div>
+
+        <div v-if="recreateStep === 'confirm'" class="muted" style="white-space: pre-line;">
+          {{ t('signed.recreate.body', { username: username.trim() }) }}
+        </div>
+
+        <div v-else class="muted" style="white-space: pre-line;">
+          {{ t('signed.recreate.expirationHint') }}
+        </div>
+
+        <label v-if="recreateStep === 'expiration'" class="field" for="recreate-exp">
+          <div class="field-label-row">
+            <span class="field-label">{{ t('signed.expirationDays') }}</span>
+          </div>
+          <input id="recreate-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
+        </label>
+
+        <div v-if="recreateErr" class="status" aria-live="polite">{{ recreateErr }}</div>
+
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button class="secondary" type="button" :disabled="recreateBusy" @click="closeRecreate">{{ t('signed.recreate.cancel') }}</button>
+          <button
+            v-if="recreateStep === 'confirm'"
+            class="secondary"
+            type="button"
+            :disabled="recreateBusy"
+            @click="proceedRecreate"
+          >
+            {{ t('signed.recreate.proceed') }}
+          </button>
+          <button
+            v-else
+            class="join"
+            type="button"
+            :disabled="recreateBusy"
+            @click="confirmRecreate"
+          >
+            {{ t('signed.recreate.create') }}
+          </button>
         </div>
       </div>
     </div>

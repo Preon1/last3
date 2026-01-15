@@ -310,6 +310,12 @@ app.post('/api/auth/login-init', async (req, res) => {
 
     const user = await findUserByUsernameAndPublicKey({ username, publicKey });
     if (!user) {
+      // Special case for account recreation: if the username does not exist at all,
+      // allow the client to offer re-registering with an existing local key.
+      const byUsername = await getUserByUsername(username);
+      if (!byUsername) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       return res.status(401).json({ error: 'Unauthorized' });
     }
 

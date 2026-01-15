@@ -2080,6 +2080,90 @@ export const useSignedStore = defineStore('signed', () => {
     view.value = 'contacts'
   }
 
+  async function recreateAccount(params: { username: string; password: string; expirationDays: number }) {
+    const u = params.username.trim()
+    if (!u) throw new Error('Username required')
+    if (u.length < 3 || u.length > 64) throw new Error('Username must be between 3 and 64 characters')
+    assertUsernameIsXssSafe(u)
+
+    if (!params.password) throw new Error('Password required')
+    if (params.password.length < 8) throw new Error('Password must be at least 8 characters')
+    if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
+
+    const exp = Number(params.expirationDays)
+    if (!Number.isFinite(exp) || exp < 7 || exp > 365) {
+      throw new Error('Expiration days must be between 7 and 365')
+    }
+
+    storeLastUsername(u)
+
+    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
+    if (!encryptedPrivateKey) throw new Error('No local key found')
+
+    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    // Cache JWK for optional stay-login auto-unlock.
+    lastPrivateJwkJsonForStay = privateJwk
+    const priv = await importRsaPrivateKeyJwk(privateJwk)
+    const publicJwk = publicJwkFromPrivateJwk(privateJwk)
+
+    const vaultJson = JSON.stringify({ expirationDays: exp } satisfies VaultPlain)
+    const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
+    const removeDate = computeRemoveDateIsoForNow(exp)
+
+    const j = await fetchJson('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: u,
+        publicKey: publicJwk,
+        removeDate,
+        vault: vaultEnc,
+      }),
+    })
+
+    token.value = typeof j.token === 'string' ? j.token : null
+    expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
+    userId.value = typeof j.userId === 'string' ? j.userId : null
+    username.value = typeof j.username === 'string' ? j.username : u
+    hiddenMode.value = Boolean(j?.hiddenMode)
+    introvertMode.value = Boolean(j?.introvertMode)
+    publicKeyJwk.value = publicJwk
+
+    vaultEncrypted.value = vaultEnc
+    vaultPlain.value = parseVaultPlain(vaultJson)
+    storeVaultPlain(vaultJson)
+
+    removeDateIso.value = removeDate
+    storeRemoveDateIso(removeDate)
+
+    privateKey.value = priv
+
+    if (token.value && userId.value && username.value) {
+      storeSession(
+        { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+        token.value,
+        expiresAtMs.value,
+      )
+    }
+
+    // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
+    void persistStayUnlockBlobFromPrivateJwk(privateJwk)
+
+    // Ensure low-profile local storage now that we have the password.
+    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+
+    await refreshChats()
+    await connectWs()
+    void maybeAddChatFromUrl()
+    void maybeOpenChatFromUrl()
+    scheduleTokenRefresh()
+    // Separate call after login.
+    void bestEffortSyncRemoveDateNow()
+    startRemoveDateSyncTimer()
+    void trySyncPushSubscription()
+    view.value = 'contacts'
+  }
+
   function logout(wipeSessionStorage = false) {
     // Best-effort: update remove_date on logout.
     try {
@@ -2379,6 +2463,7 @@ export const useSignedStore = defineStore('signed', () => {
     updateHiddenMode,
     updateIntrovertMode,
     updateExpirationDays,
+    recreateAccount,
     refreshChats,
     fetchChatMembers,
     openChat,
