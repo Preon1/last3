@@ -7,7 +7,9 @@ import {
   closeAllNotifications,
   closeNotificationsByTag,
   getNotificationsEnabled,
+  getPushNotificationsEnabled,
   setNotificationsEnabled,
+  setPushNotificationsEnabled,
 } from '../utils/notificationPrefs'
 import {
   decryptLocalUsername,
@@ -148,6 +150,7 @@ export const useSignedStore = defineStore('signed', () => {
   const removeDateIso = ref<string | null>(null)
 
   const notificationsEnabled = ref<boolean>(getNotificationsEnabled())
+  const pushNotificationsEnabled = ref<boolean>(getPushNotificationsEnabled())
 
   const restoring = ref<boolean>(false)
 
@@ -253,6 +256,9 @@ export const useSignedStore = defineStore('signed', () => {
       void localData.idbSet(LocalEntity.IdbStayRemoveDate, null)
       void localData.idbSet(LocalEntity.IdbStayUnlockBlob, null)
       localData.remove(LocalEntity.StayDeviceKey)
+
+      // Push notifications are only allowed in stay mode.
+      void disablePushNotifications()
     }
   }
 
@@ -619,9 +625,37 @@ export const useSignedStore = defineStore('signed', () => {
     setNotificationsEnabled(Boolean(next))
   }
 
+  function setPushNotificationsEnabledLocal(next: boolean) {
+    pushNotificationsEnabled.value = Boolean(next)
+    setPushNotificationsEnabled(Boolean(next))
+  }
+
+  async function disablePushNotifications() {
+    // Wipe preference, server state, and local browser subscription.
+    setPushNotificationsEnabledLocal(false)
+
+    try {
+      if (token.value) {
+        await fetchJson('/api/signed/push/disable', {
+          method: 'POST',
+          headers: { ...authHeaders() },
+        })
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      await disablePushSubscription()
+    } catch {
+      // ignore
+    }
+  }
+
   async function trySyncPushSubscription() {
     if (!token.value) return false
-    if (!notificationsEnabled.value) return false
+    if (!stayLoggedIn.value) return false
+    if (!pushNotificationsEnabled.value) return false
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
 
     const subscription = await tryGetWebPushSubscriptionJson()
@@ -2298,6 +2332,9 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function logout(wipeSessionStorage = false) {
+    // Best-effort: wipe push state on logout.
+    void disablePushNotifications()
+
     // Best-effort: update remove_date on logout.
     try {
       const exp = vaultPlain.value?.expirationDays
@@ -2582,6 +2619,7 @@ export const useSignedStore = defineStore('signed', () => {
     vaultPlain,
     removeDateIso,
     notificationsEnabled,
+    pushNotificationsEnabled,
     restoring,
     stayLoggedIn,
     setStayLoggedIn,
@@ -2628,7 +2666,9 @@ export const useSignedStore = defineStore('signed', () => {
     goHome,
     openSettings,
     setNotificationsEnabledLocal,
+    setPushNotificationsEnabledLocal,
     trySyncPushSubscription,
+    disablePushNotifications,
     disablePushSubscription,
     createPersonalChat,
     createGroupChat,

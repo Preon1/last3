@@ -15,7 +15,7 @@ const toast = useToastStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username, hiddenMode, introvertMode, notificationsEnabled, vaultPlain, publicKeyJwk } = storeToRefs(signed)
+const { username, hiddenMode, introvertMode, notificationsEnabled, pushNotificationsEnabled, stayLoggedIn, vaultPlain, publicKeyJwk } = storeToRefs(signed)
 
 const expirationDaysDraft = ref<string>('')
 const expirationBusy = ref(false)
@@ -224,7 +224,6 @@ async function onToggleNotifications(ev: Event) {
 
   if (!next) {
     signed.setNotificationsEnabledLocal(false)
-    await signed.disablePushSubscription()
     return
   }
 
@@ -242,9 +241,47 @@ async function onToggleNotifications(ev: Event) {
     }
 
     signed.setNotificationsEnabledLocal(true)
-    await signed.trySyncPushSubscription()
   } catch {
     signed.setNotificationsEnabledLocal(false)
+  }
+}
+
+async function onTogglePushNotifications(ev: Event) {
+  const target = ev.target as HTMLInputElement | null
+  if (!target) return
+  const next = Boolean(target.checked)
+
+  // Only allow enabling push when stay-logged-in is enabled.
+  if (!stayLoggedIn.value) {
+    signed.setPushNotificationsEnabledLocal(false)
+    return
+  }
+
+  if (!next) {
+    await signed.disablePushNotifications()
+    return
+  }
+
+  // Must be user-initiated to satisfy browser permission rules.
+  try {
+    if (typeof Notification === 'undefined') {
+      signed.setPushNotificationsEnabledLocal(false)
+      return
+    }
+
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') {
+      signed.setPushNotificationsEnabledLocal(false)
+      return
+    }
+
+    signed.setPushNotificationsEnabledLocal(true)
+    const ok = await signed.trySyncPushSubscription()
+    if (!ok) {
+      signed.setPushNotificationsEnabledLocal(false)
+    }
+  } catch {
+    signed.setPushNotificationsEnabledLocal(false)
   }
 }
 
@@ -327,6 +364,22 @@ function notificationStateLabel() {
           <span>
             <div style="font-weight: 600;">{{ t('notifications.settingsLabel') }} {{ notificationStateLabel() }}</div>
             <div style="opacity: 0.8; font-size: 0.95em;">{{ t('notifications.settingsHint') }}</div>
+          </span>
+        </label>
+
+        <label class="secondary">
+          <input
+            type="checkbox"
+            :checked="Boolean(pushNotificationsEnabled)"
+            :disabled="!stayLoggedIn"
+            @change="onTogglePushNotifications"
+            :aria-label="String(t('notifications.pushLabel'))"
+          />
+          <span>
+            <div style="font-weight: 600;">{{ t('notifications.pushLabel') }}</div>
+            <div style="opacity: 0.8; font-size: 0.95em;">
+              {{ stayLoggedIn ? t('notifications.pushHint') : t('notifications.pushStayRequiredHint') }}
+            </div>
           </span>
         </label>
 

@@ -1,11 +1,19 @@
 import { LocalEntity, localData } from './localData'
 
 export function getNotificationsEnabled(): boolean {
-  return localData.getBool(LocalEntity.NotificationsEnabled, true)
+  return localData.getBool(LocalEntity.NotificationsEnabled, false)
 }
 
 export function setNotificationsEnabled(enabled: boolean) {
   localData.setBool(LocalEntity.NotificationsEnabled, Boolean(enabled))
+}
+
+export function getPushNotificationsEnabled(): boolean {
+  return localData.getBool(LocalEntity.PushNotificationsEnabled, false)
+}
+
+export function setPushNotificationsEnabled(enabled: boolean) {
+  localData.setBool(LocalEntity.PushNotificationsEnabled, Boolean(enabled))
 }
 
 export async function closeNotificationsByTag(tag: string) {

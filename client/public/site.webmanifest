@@ -1,4 +1,5 @@
 {
+  "manifest_version": 3,
   "name": "Last",
   "short_name": "Last",
   "id": "/",
@@ -48,5 +49,6 @@
         "accept": ["application/json"]
       }]
     }
-  }
+  },
+  "permissions": ["notifications"]
 }

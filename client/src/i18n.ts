@@ -67,11 +67,11 @@ const baseMessages = {
       introvertBody:
         'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
       notificationsEnabledTitle: 'Notifications enabled',
-      notificationsEnabledBody: 'Push notifications are now active for this device.',
+      notificationsEnabledBody: 'Notifications are now enabled for this device.',
       notificationsFailedTitle: 'Notifications not active',
-      notificationsFailedBody: 'Permission was granted, but push setup failed. Try reloading the app.',
+      notificationsFailedBody: 'Permission was granted, but notification setup failed. Try reloading the app.',
       notificationsBlockedTitle: 'Notifications blocked',
-      notificationsBlockedBody: 'Enable notifications in your browser/app settings to receive push notifications.',
+      notificationsBlockedBody: 'Enable notifications in your browser/app settings to receive notifications.',
       copiedTitle: 'Copied',
       copiedBody: 'Message copied to clipboard.',
       copyFailedTitle: 'Copy failed',
@@ -298,6 +298,9 @@ const baseMessages = {
     notifications: {
       settingsLabel: 'Notifications:',
       settingsHint: 'Enable notifications to get call/message alerts when the app is in background.',
+      pushLabel: 'Push notifications:',
+      pushHint: 'Enable push to get message alerts while the app is closed.',
+      pushStayRequiredHint: 'Enable “Stay logged in” to use push notifications.',
       promptTitle: 'Enable notifications?',
         removeSpecificHint:
           'Saisissez le nom d’utilisateur et le mot de passe pour trouver la clé à supprimer. Cela ne vous connecte pas.',
@@ -656,6 +659,9 @@ const baseMessages = {
     notifications: {
       settingsLabel: 'Meldingen:',
       settingsHint: 'Schakel meldingen in om oproep-/berichtalerts te krijgen wanneer de app op de achtergrond staat.',
+      pushLabel: 'Pushmeldingen:',
+      pushHint: 'Schakel push in om meldingen te ontvangen wanneer de app gesloten is.',
+      pushStayRequiredHint: 'Schakel “Ingelogd blijven” in om pushmeldingen te gebruiken.',
       promptTitle: 'Meldingen inschakelen?',
       promptBody: 'Schakel meldingen in om oproep- en berichtalerts op je telefoon te ontvangen.',
       deniedBody: 'Meldingen zijn geblokkeerd in de browserinstellingen voor deze site.',
@@ -996,6 +1002,9 @@ const baseMessages = {
     notifications: {
       settingsLabel: 'Notifications :',
       settingsHint: "Activez les notifications pour recevoir des alertes d'appel/message quand l'app est en arrière-plan.",
+      pushLabel: 'Notifications push :',
+      pushHint: "Activez les notifications push pour recevoir des alertes quand l'app est fermée.",
+      pushStayRequiredHint: 'Activez « Rester connecté » pour utiliser les notifications push.',
       promptTitle: 'Activer les notifications ?',
       promptBody: "Activez les notifications pour recevoir des alertes d'appel et de message sur votre téléphone.",
       deniedBody: 'Les notifications sont bloquées dans les paramètres du navigateur pour ce site.',
@@ -1333,6 +1342,9 @@ const baseMessages = {
     notifications: {
       settingsLabel: 'Benachrichtigungen:',
       settingsHint: 'Aktiviere Benachrichtigungen, um Anruf-/Nachrichtenhinweise im Hintergrund zu erhalten.',
+      pushLabel: 'Push-Benachrichtigungen:',
+      pushHint: 'Aktiviere Push, um Hinweise zu erhalten, wenn die App geschlossen ist.',
+      pushStayRequiredHint: 'Aktiviere „Angemeldet bleiben“, um Push zu nutzen.',
       promptTitle: 'Benachrichtigungen aktivieren?',
       promptBody: 'Aktiviere Benachrichtigungen, um Anruf- und Nachrichtenhinweise auf deinem Handy zu erhalten.',
       deniedBody: 'Benachrichtigungen sind in den Browser-Einstellungen für diese Seite blockiert.',
@@ -1667,6 +1679,9 @@ const baseMessages = {
     notifications: {
       settingsLabel: 'Уведомления:',
       settingsHint: 'Включите уведомления, чтобы получать оповещения о звонках/сообщениях, когда приложение в фоне.',
+      pushLabel: 'Push-уведомления:',
+      pushHint: 'Включите push, чтобы получать уведомления, когда приложение закрыто.',
+      pushStayRequiredHint: 'Включите «Оставаться в системе», чтобы использовать push-уведомления.',
       promptTitle: 'Включить уведомления?',
       promptBody: 'Включите уведомления, чтобы получать оповещения о звонках и сообщениях на телефоне.',
       deniedBody: 'Уведомления заблокированы в настройках браузера для этого сайта.',

@@ -191,17 +191,12 @@ async function finishNotificationSetup(permPromise: Promise<NotificationPermissi
     const perm = await permPromise
     if (perm === 'granted') {
       signed.setNotificationsEnabledLocal(true)
-      const ok = await signed.trySyncPushSubscription()
-      if (ok) {
-        toast.push({
-          title: String(t('toast.notificationsEnabledTitle')),
-          message: String(t('toast.notificationsEnabledBody')),
-          variant: 'info',
-          timeoutMs: 3000,
-        })
-      } else {
-        toast.error(String(t('toast.notificationsFailedTitle')), String(t('toast.notificationsFailedBody')))
-      }
+      toast.push({
+        title: String(t('toast.notificationsEnabledTitle')),
+        message: String(t('toast.notificationsEnabledBody')),
+        variant: 'info',
+        timeoutMs: 3000,
+      })
       return
     }
     if (perm === 'denied') {

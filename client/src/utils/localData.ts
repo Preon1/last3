@@ -2,6 +2,7 @@
 
 export const LocalEntity = {
   NotificationsEnabled: 'notifications.enabled',
+  PushNotificationsEnabled: 'notifications.push.enabled',
   UiTheme: 'ui.theme',
   Locale: 'i18n.locale',
 
@@ -129,6 +130,15 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
     id: LocalEntity.NotificationsEnabled,
     backend: 'localStorage',
     key: 'lrcom-notifications-enabled',
+    codec: 'bool01',
+    removeOnLogout: false,
+    removeOnLogoutWipe: true,
+    removeOnAccountDelete: true,
+  },
+  [LocalEntity.PushNotificationsEnabled]: {
+    id: LocalEntity.PushNotificationsEnabled,
+    backend: 'localStorage',
+    key: 'lrcom-push-notifications-enabled',
     codec: 'bool01',
     removeOnLogout: false,
     removeOnLogoutWipe: true,

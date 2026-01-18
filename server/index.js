@@ -8,6 +8,17 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { debugError } from './logger.js';
 import { APP_VERSION as SERVER_APP_VERSION } from './appVersion.js';
+import {
+  upsertPushSubscriptionForUser,
+  deletePushStateForUser,
+  cleanupExpiredPushState,
+  enqueuePushForUnreadMessage,
+  listPushSubscriptionsForUser,
+  pickPushQueueBatch,
+  markPushAttempt,
+  sendWebPushToSubscriptions,
+  deleteSubscriptionsByEndpoint,
+} from './pushDb.js';
 import { initDatabase, query, runMigrations } from './db.js';
 import { registerUser, findUserByUsernameAndPublicKey, getUserByUsername } from './auth.js';
 import { issueToken, rotateToken, getSessionForToken, requireSignedAuth, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './signedSession.js';
@@ -80,6 +91,7 @@ function cleanupLoginChallenges() {
     if (!entry || typeof entry.expiresAtMs !== 'number' || entry.expiresAtMs <= now) {
       loginChallenges.delete(id);
     }
+
   }
 }
 
@@ -129,52 +141,56 @@ if (PUSH_ENABLED) {
   }
 }
 
-// Push subscriptions are RAM-only: no DB traces. Server restart => re-subscribe.
-// userId -> Map(endpoint -> subscriptionJson)
-const pushSubsByUserId = new Map();
-
-function storePushSubscription(userId, sub) {
-  if (!userId) return false;
-  const endpoint = typeof sub?.endpoint === 'string' ? sub.endpoint : '';
-  const p256dh = typeof sub?.keys?.p256dh === 'string' ? sub.keys.p256dh : '';
-  const auth = typeof sub?.keys?.auth === 'string' ? sub.keys.auth : '';
-  if (!endpoint || !p256dh || !auth) return false;
-
-  let m = pushSubsByUserId.get(String(userId));
-  if (!m) {
-    m = new Map();
-    pushSubsByUserId.set(String(userId), m);
-  }
-
-  m.set(endpoint, { endpoint, keys: { p256dh, auth } });
-  return true;
-}
-
-async function sendPushToUserId(userId, payload) {
-  if (!PUSH_ENABLED) return;
-  const m = pushSubsByUserId.get(String(userId));
-  if (!m || !m.size) return;
-
-  const body = JSON.stringify(payload ?? {});
-  const stale = [];
-
-  for (const [endpoint, sub] of m.entries()) {
-    try {
-      await webpush.sendNotification(sub, body, { TTL: 60 * 60 });
-    } catch (e) {
-      const code = e?.statusCode;
-      if (code === 404 || code === 410) stale.push(endpoint);
-    }
-  }
-
-  if (stale.length) {
-    for (const ep of stale) m.delete(ep);
-    if (!m.size) pushSubsByUserId.delete(String(userId));
-  }
-}
-
 // Visual branding
 const APP_NAME = (process.env.APP_NAME ?? 'Last').trim() || 'Last';
+
+async function processPushQueueOnce() {
+  if (!PUSH_ENABLED) return;
+
+  const batch = await pickPushQueueBatch({ limit: 50 });
+  if (!Array.isArray(batch) || batch.length === 0) return;
+
+  for (const row of batch) {
+    const uid = String(row.user_id ?? '');
+    const messageId = String(row.message_id ?? '');
+    const chatId = String(row.chat_id ?? '');
+    const attempts = Number(row.attempts ?? 0) || 0;
+    if (!uid || !messageId || !chatId) continue;
+
+    // If the user is online, skip push.
+    if (anySignedSocketOpen(uid)) continue;
+
+    // Cap retries. The row remains until unread/expired/random cleanup.
+    if (attempts >= 20) continue;
+
+    const subs = await listPushSubscriptionsForUser(uid);
+    if (!subs.length) continue;
+
+    const payload = {
+      title: APP_NAME,
+      body: 'New message',
+      tag: `lrcom-chat-${chatId}`,
+      url: `/?chatId=${encodeURIComponent(chatId)}`,
+      data: { chatId },
+    };
+
+    const r = await sendWebPushToSubscriptions({ subscriptions: subs, payload, ttlSeconds: 60 * 60 });
+
+    if (Array.isArray(r?.staleEndpoints) && r.staleEndpoints.length) {
+      try {
+        await deleteSubscriptionsByEndpoint(r.staleEndpoints);
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      await markPushAttempt({ userId: uid, messageId, setSent: Number(r?.okCount ?? 0) > 0 });
+    } catch {
+      // ignore
+    }
+  }
+}
 
 function withInjectedServerVersionMeta(html) {
   try {
@@ -202,8 +218,6 @@ function sendIndexHtmlWithVersion(res) {
   }
 }
 
-
-// Note: Push subscriptions are not persisted (RAM-only by design).
 
 const app = express();
 
@@ -333,14 +347,29 @@ app.post('/api/signed/session/logout-and-remove-key-other-devices', requireSigne
   }
 });
 
-// Signed push subscription registration (RAM-only).
+// Signed push subscription registration (DB-persisted, privacy-minimal).
 app.post('/api/signed/push/subscribe', requireSignedAuth, (req, res) => {
-  if (!PUSH_ENABLED) return res.status(503).json({ error: 'Push disabled' });
-  const userId = String(req._signedUserId);
-  const sub = req.body?.subscription;
-  const ok = storePushSubscription(userId, sub);
-  if (!ok) return res.status(400).json({ error: 'Invalid subscription' });
-  res.json({ success: true });
+  (async () => {
+    if (!PUSH_ENABLED) return res.status(503).json({ error: 'Push disabled' });
+    const userId = String(req._signedUserId);
+    const sub = req.body?.subscription;
+    const r = await upsertPushSubscriptionForUser({ userId, subscriptionJson: sub });
+    if (!r.ok) return res.status(400).json({ error: r.error || 'Invalid subscription' });
+    res.json({ success: true });
+  })().catch(() => {
+    res.status(500).json({ error: 'Server error' });
+  });
+});
+
+// Signed push disable: wipe subscriptions and queue.
+app.post('/api/signed/push/disable', requireSignedAuth, (req, res) => {
+  (async () => {
+    const userId = String(req._signedUserId);
+    await deletePushStateForUser(userId);
+    res.json({ success: true });
+  })().catch(() => {
+    res.status(500).json({ error: 'Server error' });
+  });
 });
 
 app.get('/api/config', (req, res) => {
@@ -913,13 +942,13 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
     for (const uid of memberIds) {
       if (String(uid) === String(senderId)) continue;
       if (anySignedSocketOpen(uid)) continue;
-      void sendPushToUserId(uid, {
-        title: 'Last',
-        body: senderUsername ? `New message from ${senderUsername}` : 'New message',
-        tag: `lrcom-chat-${String(chatId)}`,
-        url: `/?chatId=${encodeURIComponent(String(chatId))}`,
-        data: { chatId: String(chatId), messageId: String(messageId) },
-      });
+
+      // Enqueue push attempt for this unread message.
+      try {
+        await enqueuePushForUnreadMessage({ userId: uid, messageId });
+      } catch {
+        // ignore
+      }
     }
 
     res.json({ success: true, messageId });
@@ -1086,14 +1115,14 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
       // ignore
     }
 
-    await signedDeleteAccount(userId);
-
-    // Clear RAM-only state.
+    // Best-effort: wipe push state before account removal (privacy requirement).
     try {
-      pushSubsByUserId.delete(String(userId));
+      await deletePushStateForUser(userId);
     } catch {
       // ignore
     }
+
+    await signedDeleteAccount(userId);
 
     // Revoke all tokens after deletion.
     try {
@@ -2157,6 +2186,52 @@ async function start() {
     process.exit(1);
   }
 
+  if (PUSH_ENABLED) {
+    const PUSH_QUEUE_INTERVAL_MS = Math.max(5_000, Number(process.env.PUSH_QUEUE_INTERVAL_MS ?? 15_000));
+    const PUSH_CLEANUP_INTERVAL_MS = Math.max(30_000, Number(process.env.PUSH_CLEANUP_INTERVAL_MS ?? 5 * 60_000));
+
+    let pushQueueRunning = false;
+    const tickQueue = async () => {
+      if (pushQueueRunning) return;
+      pushQueueRunning = true;
+      try {
+        await processPushQueueOnce();
+      } catch {
+        // No logs (privacy policy)
+      } finally {
+        pushQueueRunning = false;
+      }
+    };
+
+    const tickCleanup = async () => {
+      try {
+        await cleanupExpiredPushState();
+      } catch {
+        // No logs (privacy policy)
+      }
+    };
+
+    try {
+      setTimeout(() => {
+        void tickCleanup();
+        void tickQueue();
+      }, 2000).unref?.();
+    } catch {
+      // ignore
+    }
+
+    try {
+      setInterval(() => {
+        void tickQueue();
+      }, PUSH_QUEUE_INTERVAL_MS).unref?.();
+      setInterval(() => {
+        void tickCleanup();
+      }, PUSH_CLEANUP_INTERVAL_MS).unref?.();
+    } catch {
+      // ignore
+    }
+  }
+
   if (SIGNED_CLEANUP_ENABLED) {
     const interval = Number.isFinite(SIGNED_CLEANUP_INTERVAL_MS)
       ? Math.max(60 * 1000, SIGNED_CLEANUP_INTERVAL_MS)
@@ -2168,15 +2243,7 @@ async function start() {
 
     const run = async () => {
       try {
-        const r = await signedCleanupExpiredUsers();
-
-        // Clear RAM-only state for deleted users.
-        try {
-          const ids = Array.isArray(r?.deletedUserIds) ? r.deletedUserIds : [];
-          for (const id of ids) pushSubsByUserId.delete(String(id));
-        } catch {
-          // ignore
-        }
+        await signedCleanupExpiredUsers();
       } catch {
         // No logs (privacy policy)
       }
