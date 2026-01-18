@@ -242,6 +242,48 @@ watchEffect((onCleanup) => {
       if (page.value !== 'main') goBack()
       else ui.closeManageKeys()
     }
+
+    // UX sugar: Enter to confirm primary action in some flows.
+    // (Avoid interfering with textarea newline behavior.)
+    if (ev.key === 'Enter') {
+      if (ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return
+      const target = ev.target
+      if (target instanceof HTMLTextAreaElement) return
+
+      if (page.value === 'downloadSpecific') {
+        if (dlBusy.value) return
+        ev.preventDefault()
+        void onDownloadSpecific()
+        return
+      }
+
+      if (page.value === 'importConfirm') {
+        ev.preventDefault()
+        confirmImport()
+        return
+      }
+
+      if (page.value === 'changePasswordFind') {
+        if (chBusy.value) return
+        ev.preventDefault()
+        void findKeyForPasswordChange()
+        return
+      }
+
+      if (page.value === 'changePasswordNew') {
+        if (chBusy.value) return
+        ev.preventDefault()
+        void applyPasswordChange()
+        return
+      }
+
+      if (page.value === 'removeSpecific') {
+        if (rmBusy.value) return
+        ev.preventDefault()
+        void findKeyForRemoval()
+        return
+      }
+    }
   }
   document.addEventListener('keydown', onKeyDown)
   onCleanup(() => document.removeEventListener('keydown', onKeyDown))

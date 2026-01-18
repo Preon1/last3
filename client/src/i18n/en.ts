@@ -144,6 +144,7 @@ const en = {
       unlockFailed: 'Unlock failed.',
       chats: 'Chats',
       chat: 'Chat',
+      addContact: 'Add contact',
       addFriend: 'Add friend (username)',
       friendPlaceholder: 'Username',
       createChat: 'Create chat',

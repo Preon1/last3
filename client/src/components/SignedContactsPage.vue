@@ -200,6 +200,7 @@ onBeforeUnmount(() => {
 
 async function onAddFriend() {
   err.value = ''
+  if (busy.value) return
   const u = friend.value.trim()
   if (!u) return
   busy.value = true
@@ -226,6 +227,7 @@ async function onAddFriend() {
 
 async function onCreateGroup() {
   err.value = ''
+  if (busy.value) return
   const n = groupName.value.trim()
   if (!n) return
   busy.value = true
@@ -340,7 +342,7 @@ async function onOpen(chatId: string) {
         aria-labelledby="signedAddContactTitle"
         @click="(e) => { if (e.target === e.currentTarget) closeAddContact() }"
       >
-        <div class="modal-card">
+        <form class="modal-card" @submit.prevent="onAddFriend">
           <div class="modal-title" id="signedAddContactTitle">{{ t('signed.addContact') }}</div>
 
           <label class="field" for="friend">
@@ -350,11 +352,11 @@ async function onOpen(chatId: string) {
 
           <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 16px;">
             <button class="secondary" type="button" :disabled="busy" @click="closeAddContact">{{ t('common.close') }}</button>
-            <button class="secondary" type="button" :disabled="busy || !friend.trim()" @click="onAddFriend">
+            <button class="secondary" type="submit" :disabled="busy || !friend.trim()">
               {{ t('signed.createChat') }}
             </button>
           </div>
-        </div>
+        </form>
       </div>
 
       <div
@@ -365,7 +367,7 @@ async function onOpen(chatId: string) {
         aria-labelledby="signedCreateChatTitle"
         @click="(e) => { if (e.target === e.currentTarget) closeCreateChat() }"
       >
-        <div class="modal-card">
+        <form class="modal-card" @submit.prevent="onCreateGroup">
           <div class="modal-title" id="signedCreateChatTitle">{{ t('signed.createChat') }}</div>
 
           <label class="field" for="group-name">
@@ -380,11 +382,11 @@ async function onOpen(chatId: string) {
 
           <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 16px;">
             <button class="secondary" type="button" :disabled="busy" @click="closeCreateChat">{{ t('common.close') }}</button>
-            <button class="secondary" type="button" :disabled="busy || !groupName.trim()" @click="onCreateGroup">
+            <button class="secondary" type="submit" :disabled="busy || !groupName.trim()">
               {{ t('signed.createGroup') }}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   </section>
