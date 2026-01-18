@@ -14,8 +14,8 @@ const isServerUpdate = computed(() => Boolean(signed.serverUpdateModalOpen))
 const updateBody = computed(() => {
   const from = signed.serverUpdatedFrom || ''
   const to = signed.serverUpdatedTo || ''
-  if (!from || !to) return 'Server has been updated. Application should be reloaded now or later in settings.'
-  return `Server has been updated from ${from} to ${to}. Application should be reloaded now or later in settings.`
+  if (!from || !to) return String(t('signed.serverUpdate.bodyGeneric'))
+  return String(t('signed.serverUpdate.bodyFromTo', { from, to }))
 })
 
 function onReload() {
@@ -40,11 +40,17 @@ function onLogout() {
 </script>
 
 <template>
-  <div v-if="open" class="modal" role="dialog" aria-modal="true" :aria-label="isServerUpdate ? 'Update available' : t('signed.connectionLost.title')">
+  <div
+    v-if="open"
+    class="modal"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="isServerUpdate ? t('signed.serverUpdate.title') : t('signed.connectionLost.title')"
+  >
     <div class="modal-backdrop" />
 
     <div class="modal-card">
-      <div class="modal-title">{{ isServerUpdate ? 'Update available' : t('signed.connectionLost.title') }}</div>
+      <div class="modal-title">{{ isServerUpdate ? t('signed.serverUpdate.title') : t('signed.connectionLost.title') }}</div>
       <div class="modal-body">
         {{ isServerUpdate ? updateBody : t('signed.connectionLost.body') }}
       </div>

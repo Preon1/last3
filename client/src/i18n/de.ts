@@ -160,6 +160,11 @@ const de = {
       "body": "Die Echtzeitverbindung ist nach mehreren Versuchen fehlgeschlagen. Du kannst die App neu laden oder dich abmelden.",
       "remove": "Entfernen"
     },
+    "serverUpdate": {
+      "title": "Update verfügbar",
+      "bodyGeneric": "Der Server wurde aktualisiert. Lade die App jetzt neu oder später in den Einstellungen.",
+      "bodyFromTo": "Der Server wurde von {from} auf {to} aktualisiert. Lade die App jetzt neu oder später in den Einstellungen."
+    },
     "settingsToast": {
       "savedTitle": "Gespeichert",
       "failedTitle": "Aktualisierung fehlgeschlagen",

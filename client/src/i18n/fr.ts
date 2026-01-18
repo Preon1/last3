@@ -160,6 +160,11 @@ const fr = {
       "body": "La connexion en temps réel a échoué après plusieurs tentatives. Vous pouvez recharger l’application ou vous déconnecter.",
       "remove": "Supprimer"
     },
+    "serverUpdate": {
+      "title": "Mise à jour disponible",
+      "bodyGeneric": "Le serveur a été mis à jour. Rechargez l’application maintenant ou plus tard dans les paramètres.",
+      "bodyFromTo": "Le serveur a été mis à jour de {from} à {to}. Rechargez l’application maintenant ou plus tard dans les paramètres."
+    },
     "settingsToast": {
       "savedTitle": "Enregistré",
       "failedTitle": "Mise à jour échouée",

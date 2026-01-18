@@ -160,6 +160,11 @@ const nl = {
       "body": "Realtime-verbinding is na meerdere pogingen mislukt. Je kunt de app opnieuw laden of uitloggen.",
       "remove": "Verwijderen"
     },
+    "serverUpdate": {
+      "title": "Update beschikbaar",
+      "bodyGeneric": "De server is bijgewerkt. Herlaad de app nu of later via instellingen.",
+      "bodyFromTo": "De server is bijgewerkt van {from} naar {to}. Herlaad de app nu of later via instellingen."
+    },
     "settingsToast": {
       "savedTitle": "Opgeslagen",
       "failedTitle": "Bijwerken mislukt",

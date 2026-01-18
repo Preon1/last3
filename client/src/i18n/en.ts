@@ -217,6 +217,12 @@ const en = {
         body: 'Realtime connection failed after multiple attempts. You can reload the app or log out.',
         remove: 'Verwijderen',
       },
+      serverUpdate: {
+        title: 'Update available',
+        bodyGeneric: 'Server has been updated. Application should be reloaded now or later in settings.',
+        bodyFromTo:
+          'Server has been updated from {from} to {to}. Application should be reloaded now or later in settings.',
+      },
         removeSpecific: 'Een specifieke sleutel verwijderen',
       settingsToast: {
         savedTitle: 'Saved',
