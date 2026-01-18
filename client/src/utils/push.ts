@@ -16,15 +16,42 @@ export async function tryGetWebPushSubscriptionJson() {
     const data = (await res.json()) as { enabled?: boolean; publicKey?: string }
     if (!data?.enabled || !data?.publicKey) return null
 
+    const expectedKey = urlBase64ToUint8Array(data.publicKey)
+
     // Only register SW if push is enabled (keeps it quiet when VAPID isn't set).
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
 
-    const existing = await reg.pushManager.getSubscription()
+    let existing = await reg.pushManager.getSubscription()
+
+    // If server keys changed since this subscription was created, re-subscribe.
+    try {
+      const curKey = existing?.options?.applicationServerKey
+      if (existing && curKey) {
+        const cur = new Uint8Array(curKey)
+        const exp = expectedKey
+        let same = cur.length === exp.length
+        if (same) {
+          for (let i = 0; i < cur.length; i++) {
+            if (cur[i] !== exp[i]) {
+              same = false
+              break
+            }
+          }
+        }
+        if (!same) {
+          await existing.unsubscribe().catch(() => {})
+          existing = null
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const subscription =
       existing ??
       (await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(data.publicKey),
+        applicationServerKey: expectedKey,
       }))
 
     return subscription.toJSON()

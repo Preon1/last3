@@ -264,6 +264,21 @@ async function onTogglePushNotifications(ev: Event) {
 
   // Must be user-initiated to satisfy browser permission rules.
   try {
+    // Avoid prompting for permission if server push isn't configured.
+    try {
+      const r = await fetch('/api/push/public-key', { cache: 'no-store' })
+      const j = (await r.json().catch(() => ({}))) as { enabled?: boolean; publicKey?: string | null }
+      if (!r.ok || !j?.enabled || !j?.publicKey) {
+        signed.setPushNotificationsEnabledLocal(false)
+        toast.error(String(t('signed.settingsToast.failedTitle')), String(t('notifications.pushServerDisabled')))
+        return
+      }
+    } catch {
+      signed.setPushNotificationsEnabledLocal(false)
+      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.settingsToast.serverError')))
+      return
+    }
+
     if (typeof Notification === 'undefined') {
       signed.setPushNotificationsEnabledLocal(false)
       return
@@ -279,6 +294,7 @@ async function onTogglePushNotifications(ev: Event) {
     const ok = await signed.trySyncPushSubscription()
     if (!ok) {
       signed.setPushNotificationsEnabledLocal(false)
+      toast.error(String(t('toast.notificationsFailedTitle')), String(t('toast.notificationsFailedBody')))
     }
   } catch {
     signed.setPushNotificationsEnabledLocal(false)

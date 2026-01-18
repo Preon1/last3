@@ -36,6 +36,12 @@ services:
       # Optional debug logs (true/false). When false, lrcom stays silent.
       - DEBUG=${DEBUG:-false}
 
+      # Optional Web Push (background notifications). If unset, LRcom still
+      # supports in-tab notifications when the page is open.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@localhost}
+
       # Signed-mode cleanup: delete expired users (and cascading data) periodically.
       - SIGNED_CLEANUP_ENABLED=${SIGNED_CLEANUP_ENABLED:-1}
       - SIGNED_CLEANUP_INTERVAL_MS=${SIGNED_CLEANUP_INTERVAL_MS:-600000}
