@@ -473,7 +473,11 @@ function onMsgMenuCopy() {
 function onGlobalPointerDown(e: PointerEvent) {
   if (!msgMenuOpen.value) return
   const el = msgMenuEl.value
-  if (!el) return
+  if (!el) {
+    // If the menu just opened and ref isn't bound yet, still treat this as an outside tap.
+    closeMsgMenu()
+    return
+  }
   if (!(e.target instanceof Node)) return
   if (el.contains(e.target)) return
   closeMsgMenu()
@@ -502,7 +506,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  document.addEventListener('pointerdown', onGlobalPointerDown)
+  // Use capture so taps on messages (which may stopPropagation) still close the menu.
+  document.addEventListener('pointerdown', onGlobalPointerDown, true)
   document.addEventListener('keydown', onGlobalKeyDown)
   try {
     window.visualViewport?.addEventListener('resize', onViewportChange)
@@ -612,7 +617,7 @@ watch(
 
 onBeforeUnmount(() => {
   disconnectObserver()
-  document.removeEventListener('pointerdown', onGlobalPointerDown)
+  document.removeEventListener('pointerdown', onGlobalPointerDown, true)
   document.removeEventListener('keydown', onGlobalKeyDown)
   try {
     window.visualViewport?.removeEventListener('resize', onViewportChange)
