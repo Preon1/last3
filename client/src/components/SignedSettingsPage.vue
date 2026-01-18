@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { cycleLocale } from '../i18n'
@@ -27,6 +27,43 @@ const deleteAccountErr = ref<string>('')
 
 const logoutOthersBusy = ref(false)
 const hardReloadBusy = ref(false)
+
+type HelpKey = 'notifications' | 'push' | 'hiddenMode' | 'introvertMode' | 'expirationDays'
+const openHelp = ref<HelpKey | null>(null)
+
+function toggleHelp(key: HelpKey) {
+  openHelp.value = openHelp.value === key ? null : key
+}
+
+function closeHelp() {
+  openHelp.value = null
+}
+
+const helpTitle = computed(() => {
+  if (openHelp.value === 'notifications') return String(t('notifications.settingsLabel'))
+  if (openHelp.value === 'push') return String(t('notifications.pushLabel'))
+  if (openHelp.value === 'hiddenMode') return String(t('signed.hiddenMode'))
+  if (openHelp.value === 'introvertMode') return String(t('signed.introvertMode'))
+  if (openHelp.value === 'expirationDays') return String(t('signed.expirationDays'))
+  return ''
+})
+
+const helpBody = computed(() => {
+  if (openHelp.value === 'notifications') return String(t('notifications.settingsHint'))
+  if (openHelp.value === 'push') return String(t('notifications.pushHint'))
+  if (openHelp.value === 'hiddenMode') return String(t('signed.hiddenModeHelp'))
+  if (openHelp.value === 'introvertMode') return String(t('signed.introvertModeHelp'))
+  if (openHelp.value === 'expirationDays') {
+    const parts = [String(t('signed.expirationDaysSettingsHelp')), String(t('signed.expirationDaysRangeInfo'))]
+    if (!publicKeyJwk.value) parts.push(String(t('signed.expirationDaysUnlockHint')))
+    return parts.join('\n\n')
+  }
+  return ''
+})
+
+function onHelpBackdropClick(e: MouseEvent) {
+  if (e.target && e.target === e.currentTarget) closeHelp()
+}
 
 function onCycleLanguage() {
   cycleLocale()
@@ -138,6 +175,13 @@ async function onConfirmDeleteAccount() {
 
 function onGlobalKeyDown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+
+  if (openHelp.value) {
+    e.preventDefault()
+    closeHelp()
+    return
+  }
+
   if (!deleteAccountOpen.value) return
   e.preventDefault()
   closeDeleteAccount()
@@ -378,23 +422,28 @@ function notificationStateLabel() {
             :aria-label="String(t('notifications.settingsLabel'))"
           />
           <span>
-            <div style="font-weight: 600;">{{ t('notifications.settingsLabel') }} {{ notificationStateLabel() }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('notifications.settingsHint') }}</div>
+            <div class="field-label-row">
+              <div style="font-weight: 600;">{{ t('notifications.settingsLabel') }} {{ notificationStateLabel() }}</div>
+              <button class="help" type="button" :aria-label="String(t('notifications.settingsLabel'))" @click.stop.prevent="toggleHelp('notifications')">
+                ?
+              </button>
+            </div>
           </span>
         </label>
 
-        <label class="secondary">
+        <label v-if="stayLoggedIn" class="secondary">
           <input
             type="checkbox"
             :checked="Boolean(pushNotificationsEnabled)"
-            :disabled="!stayLoggedIn"
             @change="onTogglePushNotifications"
             :aria-label="String(t('notifications.pushLabel'))"
           />
           <span>
-            <div style="font-weight: 600;">{{ t('notifications.pushLabel') }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">
-              {{ stayLoggedIn ? t('notifications.pushHint') : t('notifications.pushStayRequiredHint') }}
+            <div class="field-label-row">
+              <div style="font-weight: 600;">{{ t('notifications.pushLabel') }}</div>
+              <button class="help" type="button" :aria-label="String(t('notifications.pushLabel'))" @click.stop.prevent="toggleHelp('push')">
+                ?
+              </button>
             </div>
           </span>
         </label>
@@ -407,8 +456,12 @@ function notificationStateLabel() {
             :aria-label="String(t('signed.hiddenMode'))"
           />
           <span>
-            <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.hiddenModeHelp') }}</div>
+            <div class="field-label-row">
+              <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
+              <button class="help" type="button" :aria-label="String(t('signed.hiddenMode'))" @click.stop.prevent="toggleHelp('hiddenMode')">
+                ?
+              </button>
+            </div>
           </span>
         </label>
 
@@ -420,8 +473,12 @@ function notificationStateLabel() {
             :aria-label="String(t('signed.introvertMode'))"
           />
           <span>
-            <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
-            <div style="opacity: 0.8; font-size: 0.95em;">{{ t('signed.introvertModeHelp') }}</div>
+            <div class="field-label-row">
+              <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
+              <button class="help" type="button" :aria-label="String(t('signed.introvertMode'))" @click.stop.prevent="toggleHelp('introvertMode')">
+                ?
+              </button>
+            </div>
           </span>
         </label>
 
@@ -448,10 +505,17 @@ function notificationStateLabel() {
         <button class="secondary" type="button" @click="onAbout">{{ t('common.about') }}</button>
 
         <div class="card" style="margin-bottom: 0;">
-          <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
-          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysSettingsHelp') }}</div>
-          <div class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysRangeInfo') }}</div>
-          <div v-if="!publicKeyJwk" class="muted" style="margin-top: 6px;">{{ t('signed.expirationDaysUnlockHint') }}</div>
+          <div class="field-label-row">
+            <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
+            <button
+              class="help"
+              type="button"
+              :aria-label="String(t('signed.expirationDays'))"
+              @click.stop.prevent="toggleHelp('expirationDays')"
+            >
+              ?
+            </button>
+          </div>
 
           <div class="row" style="margin-top: 10px;">
             <input
@@ -511,6 +575,48 @@ function notificationStateLabel() {
           </div>
         </div>
       </div>
+
+      <div v-if="openHelp" class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitleSettings" @click="onHelpBackdropClick">
+        <div class="modal-card">
+          <div class="modal-title" id="helpTitleSettings">{{ helpTitle }}</div>
+          <div class="muted" style="white-space: pre-line;">{{ helpBody }}</div>
+          <div class="modal-actions" style="margin-top: 16px;">
+            <button class="secondary" type="button" @click="closeHelp">{{ t('common.close') }}</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.help {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--input-border);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  color: var(--muted);
+  margin-bottom: -1px;
+  flex: 0 0 auto;
+}
+
+.help:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+</style>

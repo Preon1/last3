@@ -198,7 +198,7 @@ const fr = {
     "deleteAccountWarning": "Cette action est irréversible. Votre compte sera supprimé et tous vos messages dans toutes les discussions seront définitivement effacés. Cela ne peut pas être annulé.",
     "logoutOtherDevices": "Déconnecter les autres appareils",
     "logoutAndRemoveKeyOtherDevices": "Déconnecter et supprimer la clé sur les autres appareils",
-    "reloadAppNoCache": "Recharger l’application (sans cache)",
+    "reloadAppNoCache": "Recharger l’application",
     "deleteChat": "Supprimer la discussion",
     "leaveGroup": "Quitter le groupe",
     "addMember": "Ajouter un membre",

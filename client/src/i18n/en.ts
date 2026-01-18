@@ -184,7 +184,7 @@ const en = {
         'This action is unrecoverable. Your account will be deleted and all of your messages in all chats will be permanently removed. This cannot be undone.',
       logoutOtherDevices: 'Logout other devices',
       logoutAndRemoveKeyOtherDevices: 'Logout and remove key on other devices',
-      reloadAppNoCache: 'Reload app (no cache)',
+      reloadAppNoCache: 'Reload app',
       deleteChat: 'Delete chat',
       leaveGroup: 'Leave group',
       errInvalidCredentials: 'Invalid username or password.',

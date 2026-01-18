@@ -198,7 +198,7 @@ const nl = {
     "deleteAccountWarning": "Deze actie is onomkeerbaar. Je account wordt verwijderd en al je berichten in alle chats worden permanent verwijderd. Dit kan niet ongedaan worden gemaakt.",
     "logoutOtherDevices": "Andere apparaten uitloggen",
     "logoutAndRemoveKeyOtherDevices": "Andere apparaten uitloggen en sleutel verwijderen",
-    "reloadAppNoCache": "App herladen (zonder cache)",
+    "reloadAppNoCache": "App herladen",
     "deleteChat": "Chat verwijderen",
     "leaveGroup": "Groep verlaten",
     "addMember": "Lid toevoegen",

@@ -198,7 +198,7 @@ const de = {
     "deleteAccountWarning": "Diese Aktion ist unwiderruflich. Dein Konto wird gelöscht und alle deine Nachrichten in allen Chats werden dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.",
     "logoutOtherDevices": "Andere Geräte abmelden",
     "logoutAndRemoveKeyOtherDevices": "Andere Geräte abmelden und Schlüssel entfernen",
-    "reloadAppNoCache": "App neu laden (ohne Cache)",
+    "reloadAppNoCache": "App neu laden",
     "addMember": "Mitglied hinzufügen",
     "memberPlaceholder": "Benutzername",
     "memberAddedOk": "Mitglied hinzugefügt.",
