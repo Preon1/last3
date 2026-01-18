@@ -1394,6 +1394,13 @@ export const useSignedStore = defineStore('signed', () => {
               }
             }
 
+            // If the user is actively viewing this chat and the message is from someone else,
+            // mark it as read immediately (fallback for environments where the intersection
+            // observer doesn't reliably report visibility).
+            if (view.value === 'chat' && activeChatId.value === chatId && userId.value && String(senderId) !== String(userId.value)) {
+              void markMessagesRead(chatId, [id])
+            }
+
             // Best-effort: keep chat list previews fresh.
             lastMessageByChatId.value = {
               ...lastMessageByChatId.value,
@@ -1664,10 +1671,33 @@ export const useSignedStore = defineStore('signed', () => {
 
     await loadMessages(chatId)
 
+    // Best-effort: mark the chat as read when opened.
+    // This is a fallback for platforms where IntersectionObserver can be unreliable
+    // inside overflow containers.
+    void markChatRead(chatId)
+
     // Best-effort: prefetch group members so we can encrypt to all.
     try {
       const chat = getChat(chatId)
       if (chat?.type === 'group') await ensureChatMembers(chatId)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function markChatRead(chatId: string) {
+    if (!token.value) return
+    try {
+      const j = await fetchJson('/api/signed/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ chatId }),
+      })
+      const next = typeof (j as any)?.unreadCount === 'number' ? Number((j as any).unreadCount) : 0
+      unreadByChatId.value = { ...unreadByChatId.value, [chatId]: Math.max(0, next) }
+
+      // Best-effort: if user read it, close any delivered push notification.
+      void closeNotificationsByTag(`lrcom-chat-${String(chatId)}`)
     } catch {
       // ignore
     }
