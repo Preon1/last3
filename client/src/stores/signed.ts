@@ -1066,20 +1066,83 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  let resumeSyncInFlight: Promise<void> | null = null
+  let lastResumeSyncAtMs = 0
+
+  function bestEffortResumeSync(_reason?: string) {
+    // iOS PWA can restore an in-memory snapshot; ensure we refresh chats/presence
+    // when the app becomes visible again.
+    if (!token.value) return
+
+    const now = Date.now()
+    if (now - lastResumeSyncAtMs < 5000) return
+    lastResumeSyncAtMs = now
+
+    if (resumeSyncInFlight) return
+    resumeSyncInFlight = (async () => {
+      try {
+        await refreshChats()
+      } catch {
+        // ignore
+      }
+
+      try {
+        await connectWs()
+      } catch {
+        // ignore
+      }
+
+      // If app was opened via push/link, these params may exist.
+      try {
+        void maybeAddChatFromUrl()
+      } catch {
+        // ignore
+      }
+
+      try {
+        await maybeOpenChatFromUrl()
+      } catch {
+        // ignore
+      }
+
+      try {
+        void refreshPresence()
+      } catch {
+        // ignore
+      }
+    })().finally(() => {
+      resumeSyncInFlight = null
+    })
+  }
+
   async function maybeOpenChatFromUrl() {
     try {
       const qs = new URLSearchParams(location.search)
       const chatId = (qs.get('chatId') ?? '').trim()
       if (!chatId) return
 
+      const wantsSync = String(qs.get('sync') ?? '').trim() === '1'
+
       // Remove the param immediately to avoid re-open loops on reload.
       try {
         qs.delete('chatId')
+        qs.delete('sync')
         const next = qs.toString()
         const url = `${location.pathname}${next ? `?${next}` : ''}${location.hash || ''}`
         history.replaceState(null, '', url)
       } catch {
         // ignore
+      }
+
+      if (!token.value) return
+
+      const existsBefore = chats.value.some((c) => String(c.id) === String(chatId))
+      if (wantsSync || !existsBefore) {
+        try {
+          await refreshChats()
+        } catch {
+          // ignore
+        }
       }
 
       const exists = chats.value.some((c) => String(c.id) === String(chatId))
@@ -2723,5 +2786,6 @@ export const useSignedStore = defineStore('signed', () => {
     connectWs,
     disconnectWs,
     unlock,
+    bestEffortResumeSync,
   }
 })

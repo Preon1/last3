@@ -170,7 +170,7 @@ async function processPushQueueOnce() {
       title: APP_NAME,
       body: 'New message',
       tag: `lrcom-chat-${chatId}`,
-      url: `/?chatId=${encodeURIComponent(chatId)}`,
+      url: `/?chatId=${encodeURIComponent(chatId)}&sync=1`,
       data: { chatId },
     };
 
