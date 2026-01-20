@@ -130,13 +130,14 @@ async function signedLastMessagesForUserByChatIds(userId, chatIds) {
   const ids = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
   if (!ids.length) return []
 
-  // Only return messages that the caller can decrypt (message_recipients join).
+  // Only return messages visible to the caller (membership + visibility border).
   const r = await query(
     `SELECT DISTINCT ON (m.chat_id) m.chat_id, m.id, m.sender_id, u.username AS sender_username, m.encrypted_data
      FROM messages m
-     INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $1
+     INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
      INNER JOIN users u ON u.id = m.sender_id
      WHERE m.chat_id = ANY($2::uuid[])
+       AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
      ORDER BY m.chat_id, m.id DESC`,
     [String(userId), ids],
   )
@@ -367,11 +368,15 @@ export async function signedAddGroupMember(userId, chatId, username) {
   if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
 
   const ins = await query(
-    `INSERT INTO chat_members (chat_id, user_id)
-     VALUES ($1, $2)
+    `INSERT INTO chat_members (chat_id, user_id, visible_after_message_id)
+     VALUES (
+       $1,
+       $2,
+       $3
+     )
      ON CONFLICT DO NOTHING
      RETURNING user_id`,
-    [chatId, otherUserId],
+    [chatId, otherUserId, uuidv7()],
   )
   if (!ins.rows.length) return { ok: false, reason: 'already_member' }
 
@@ -443,16 +448,19 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
   const sql = beforeId
      ? `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
        FROM messages m
-       INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $2
+       INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
        INNER JOIN users u ON u.id = m.sender_id
-       WHERE m.chat_id = $1 AND m.id < $3
+       WHERE m.chat_id = $1
+         AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
+         AND m.id < $3
        ORDER BY m.id DESC
        LIMIT $4`
      : `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
        FROM messages m
-       INNER JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = $2
+       INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
        INNER JOIN users u ON u.id = m.sender_id
        WHERE m.chat_id = $1
+         AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
        ORDER BY m.id DESC
        LIMIT $3`
 
@@ -487,30 +495,19 @@ export async function signedSendMessage({ senderId, chatId, encryptedData }) {
 
     const memberIds = members.rows.map((m) => String(m.user_id))
 
-    // Recipients mapping: all members can see the message.
-    if (memberIds.length) {
-      const values = memberIds.map((_, i) => `($1, $${i + 2})`).join(',')
+    // Unread: everyone except sender.
+    const others = memberIds.filter((id) => id !== String(senderId))
+    if (others.length) {
+      // NOTE: unread_messages columns are (user_id, message_id, chat_id)
+      // Params are [messageId, ...others, chatId].
+      // So each row is (otherUserId, messageId, chatId).
+      const v2 = others.map((_, i) => `($${i + 2}, $1, $${others.length + 2})`).join(',')
       await client.query(
-        `INSERT INTO message_recipients (message_id, user_id)
-         VALUES ${values}
+        `INSERT INTO unread_messages (user_id, message_id, chat_id)
+         VALUES ${v2}
          ON CONFLICT DO NOTHING`,
-        [messageId, ...memberIds],
+        [messageId, ...others, chatId],
       )
-
-      // Unread: everyone except sender.
-      const others = memberIds.filter((id) => id !== String(senderId))
-      if (others.length) {
-        // NOTE: unread_messages columns are (user_id, message_id, chat_id)
-        // Params are [messageId, ...others, chatId].
-        // So each row is (otherUserId, messageId, chatId).
-        const v2 = others.map((_, i) => `($${i + 2}, $1, $${others.length + 2})`).join(',')
-        await client.query(
-          `INSERT INTO unread_messages (user_id, message_id, chat_id)
-           VALUES ${v2}
-           ON CONFLICT DO NOTHING`,
-          [messageId, ...others, chatId],
-        )
-      }
     }
 
     return { messageId, memberIds }

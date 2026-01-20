@@ -30,6 +30,7 @@ CREATE INDEX idx_chats_type ON chats(chat_type);
 CREATE TABLE IF NOT EXISTS chat_members (
   chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  visible_after_message_id UUID NULL,
   PRIMARY KEY (chat_id, user_id)
 );
 
@@ -46,15 +47,6 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX idx_messages_chat ON messages(chat_id);
 CREATE INDEX idx_messages_sender ON messages(sender_id);
-
--- Message recipients (which users can decrypt this message)
-CREATE TABLE IF NOT EXISTS message_recipients (
-  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  PRIMARY KEY (message_id, user_id)
-);
-
-CREATE INDEX idx_message_recipients_user ON message_recipients(user_id);
 
 -- Unread messages tracking
 CREATE TABLE IF NOT EXISTS unread_messages (
