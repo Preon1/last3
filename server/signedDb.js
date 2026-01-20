@@ -1,10 +1,82 @@
 import { query, transaction } from './db.js'
 import { v7 as uuidv7 } from 'uuid'
 
+function scrubRecipientFromEncryptedData(encryptedData, recipientUserId) {
+  const enc = typeof encryptedData === 'string' ? encryptedData : ''
+  const uid = typeof recipientUserId === 'string' ? recipientUserId : ''
+  if (!enc || !uid) return enc
+
+  // Fast-path: if the user id string isn't present, don't parse.
+  if (!enc.includes(uid)) return enc
+
+  try {
+    const obj = JSON.parse(enc)
+    if (!obj || obj.v !== 1) return enc
+    if (!obj.keys || typeof obj.keys !== 'object') return enc
+    if (!Object.prototype.hasOwnProperty.call(obj.keys, uid)) return enc
+
+    // Remove only the recipient key wrapper; keep ciphertext intact.
+    delete obj.keys[uid]
+    return JSON.stringify(obj)
+  } catch {
+    return enc
+  }
+}
+
+async function scrubRecipientFromChatMessages(client, chatId, recipientUserId) {
+  const cid = String(chatId || '')
+  const uid = String(recipientUserId || '')
+  if (!cid || !uid) return
+
+  // Only touch rows that likely contain the userId in the envelope.
+  const rows = await client.query(
+    `SELECT id, encrypted_data
+     FROM messages
+     WHERE chat_id = $1 AND encrypted_data LIKE '%' || $2 || '%'`,
+    [cid, uid],
+  )
+
+  for (const r of rows.rows) {
+    const id = String(r.id)
+    const cur = String(r.encrypted_data ?? '')
+    const next = scrubRecipientFromEncryptedData(cur, uid)
+    if (next !== cur) {
+      await client.query(
+        `UPDATE messages
+         SET encrypted_data = $1
+         WHERE id = $2`,
+        [next, id],
+      )
+    }
+  }
+}
+
 export async function signedCleanupExpiredUsers(now = new Date()) {
   const asDate = now instanceof Date ? now : new Date(now)
 
   const result = await transaction(async (client) => {
+    // Capture affected users so we can scrub their IDs from ciphertext envelopes
+    // before deleting the users (which would cascade chat_members).
+    const toDelete = await client.query(
+      `SELECT id
+       FROM users
+       WHERE remove_date <= $1`,
+      [asDate],
+    )
+    const toDeleteIds = toDelete.rows.map((r) => String(r.id)).filter(Boolean)
+
+    for (const uid of toDeleteIds) {
+      const chats = await client.query(
+        `SELECT chat_id
+         FROM chat_members
+         WHERE user_id = $1`,
+        [uid],
+      )
+      for (const row of chats.rows) {
+        await scrubRecipientFromChatMessages(client, String(row.chat_id), uid)
+      }
+    }
+
     const deletedUsers = await client.query(
       `DELETE FROM users
        WHERE remove_date <= $1
@@ -45,6 +117,18 @@ export async function signedDeleteAccount(userId) {
   if (!userId) throw new Error('userId required')
 
   const result = await transaction(async (client) => {
+    // Scrub this user's ID from ciphertext envelopes in all chats they are a member of
+    // before deleting the user (which would cascade chat_members).
+    const chats = await client.query(
+      `SELECT chat_id
+       FROM chat_members
+       WHERE user_id = $1`,
+      [String(userId)],
+    )
+    for (const row of chats.rows) {
+      await scrubRecipientFromChatMessages(client, String(row.chat_id), String(userId))
+    }
+
     const deletedUsers = await client.query(
       `DELETE FROM users
        WHERE id = $1
@@ -678,6 +762,15 @@ export async function signedLeaveChat(userId, chatId) {
        WHERE chat_id = $1 AND user_id = $2`,
       [String(chatId), String(userId)],
     )
+
+    // If the chat remains, scrub this user's ID from the ciphertext envelopes
+    // so their userId does not remain as a recipient-key entry.
+    // If the chat is deleted (last member), messages are deleted by cascade.
+    try {
+      await scrubRecipientFromChatMessages(client, String(chatId), String(userId))
+    } catch {
+      // ignore (best-effort privacy cleanup)
+    }
 
     const left = await client.query(
       `SELECT COUNT(*)::int AS n
