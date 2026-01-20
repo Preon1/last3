@@ -1304,6 +1304,8 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
+  let wsTokenForConnection: string | null = null
+
   async function ensureTurnConfig() {
     if (turnConfig.value) return turnConfig.value
     try {
@@ -1317,6 +1319,20 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function connectWs() {
+    const currentToken = token.value
+    if (!currentToken) return
+
+    // Idempotency: avoid tearing down a healthy socket on focus/visibility events.
+    // Reconnect is still triggered when token changes (e.g. refresh) or when the socket is closed.
+    const cur = ws.value
+    if (
+      cur &&
+      (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING) &&
+      wsTokenForConnection === currentToken
+    ) {
+      return
+    }
+
     // Bump generation first so close/error events from older sockets are ignored.
     wsGeneration += 1
     const gen = wsGeneration
@@ -1325,9 +1341,9 @@ export const useSignedStore = defineStore('signed', () => {
     wsPermanentlyFailed.value = false
     clearWsReconnectTimer()
     disconnectWs()
-    if (!token.value) return
+    wsTokenForConnection = currentToken
 
-    const sock = new WebSocket(wsSignedUrl(token.value))
+    const sock = new WebSocket(wsSignedUrl(currentToken))
     ws.value = sock
 
     sock.addEventListener('open', () => {
