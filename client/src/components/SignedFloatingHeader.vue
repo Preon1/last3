@@ -51,7 +51,7 @@ const chatTitle = computed(() => {
   if (view.value !== 'chat') return String(t('common.settings'))
   const c = activeChat.value
   if (!c) return String(t('signed.chat'))
-  return c.type === 'personal' ? String(c.otherUsername ?? c.id) : String(c.name ?? c.id)
+  return String(c.name ?? c.id)
 })
 
 const groupMembers = computed(() => {
@@ -64,7 +64,7 @@ const canCall = computed(() => {
   if (view.value !== 'chat') return false
   const c = activeChat.value
   if (!c || c.type !== 'personal') return false
-  if (!c.otherUserId || !c.otherUsername) return false
+  if (!c.otherUserId) return false
   if (pendingIncomingFrom.value) return false
   if (outgoingPending.value) return false
   if (inCall.value) return false
@@ -152,8 +152,9 @@ async function onConfirmDelete() {
 function onCall() {
   const c = activeChat.value
   if (!c || c.type !== 'personal') return
-  if (!c.otherUserId || !c.otherUsername) return
-  void call.startCall(c.otherUserId, c.otherUsername)
+  if (!c.otherUserId) return
+  const otherName = String(c.name ?? c.otherUserId)
+  void call.startCall(c.otherUserId, otherName)
 }
 
 function toggleOtherMenu() {
@@ -546,7 +547,7 @@ watch([view, activeChatId], () => {
         <div v-else style="margin-top: 8px;">
           <div v-if="groupMembers.length === 0" class="muted">{{ t('signed.noMembers') }}</div>
           <ul v-else style="margin: 0; padding-left: 18px; display: grid; gap: 6px;">
-            <li v-for="m in groupMembers" :key="m.userId">{{ m.username }}</li>
+            <li v-for="m in groupMembers" :key="m.userId">{{ m.username ?? m.userId }}</li>
           </ul>
         </div>
 

@@ -6,6 +6,7 @@ import { storeToRefs } from 'pinia'
 import { cycleLocale } from '../i18n'
 import { useSignedStore } from '../stores/signed'
 import { useToastStore } from '../stores/toast'
+import { voprfNameToken } from '../utils/voprfNames'
 
 const ui = useUiStore()
 const toast = useToastStore()
@@ -252,10 +253,11 @@ async function onRegister() {
   // Check name availability before triggering register.
   busy.value = true
   try {
-    const r = await fetch('/api/auth/check-username', {
+    const nameToken = await voprfNameToken({ kind: 'user', input: u })
+    const r = await fetch('/api/auth/check-name-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u }),
+      body: JSON.stringify({ nameToken }),
     })
     const j = await r.json().catch(() => ({} as any))
     if (!r.ok) throw new Error(typeof (j as any)?.error === 'string' ? String((j as any).error) : 'Request failed')

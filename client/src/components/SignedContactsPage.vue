@@ -316,7 +316,7 @@ async function onOpen(chatId: string) {
                     :class="signed.getChatOnlineState(c.id)"
                     aria-hidden="true"
                   ></span>
-                  {{ c.type === 'personal' ? (c.otherUsername ?? c.id) : (c.name ?? c.id) }}
+                  {{ c.name ?? c.id }}
                 </span>
                 <span v-if="chatPreview(c)" class="muted contact-preview">{{ chatPreview(c) }}</span>
               </span>

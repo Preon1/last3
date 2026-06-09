@@ -51,6 +51,63 @@ async function scrubRecipientFromChatMessages(client, chatId, recipientUserId) {
   }
 }
 
+function scrubUserFromChatNamesJson(names, userId) {
+  const uid = typeof userId === 'string' ? userId : ''
+  if (!uid) return names
+  if (!names || typeof names !== 'object') return names
+
+  // names is a JSONB object mapping subjectUserId -> encryptedBlobString
+  const out = { ...names }
+
+  // Remove the leaving/deleted user's own entry.
+  if (Object.prototype.hasOwnProperty.call(out, uid)) {
+    delete out[uid]
+  }
+
+  // Remove them as a recipient from everyone else's blob.
+  for (const [subjectUserId, enc] of Object.entries(out)) {
+    if (!subjectUserId) continue
+    if (typeof enc !== 'string') continue
+    const next = scrubRecipientFromEncryptedData(enc, uid)
+    if (next !== enc) out[subjectUserId] = next
+  }
+
+  return out
+}
+
+async function scrubUserFromChatMetadata(client, chatId, userId) {
+  const cid = String(chatId || '')
+  const uid = String(userId || '')
+  if (!cid || !uid) return
+
+  const r = await client.query(
+    `SELECT chat_name_enc, names
+     FROM chats
+     WHERE id = $1
+     LIMIT 1`,
+    [cid],
+  )
+  const row = r?.rows?.[0]
+  if (!row) return
+
+  const curChatNameEnc = typeof row.chat_name_enc === 'string' ? row.chat_name_enc : ''
+  const nextChatNameEnc = scrubRecipientFromEncryptedData(curChatNameEnc, uid)
+
+  const curNames = row.names ?? {}
+  const nextNames = scrubUserFromChatNamesJson(curNames, uid)
+
+  const changed = (nextChatNameEnc !== curChatNameEnc) || (JSON.stringify(nextNames) !== JSON.stringify(curNames))
+  if (!changed) return
+
+  await client.query(
+    `UPDATE chats
+     SET chat_name_enc = $1,
+         names = $2
+     WHERE id = $3`,
+    [nextChatNameEnc, nextNames, cid],
+  )
+}
+
 export async function signedCleanupExpiredUsers(now = new Date()) {
   const asDate = now instanceof Date ? now : new Date(now)
 
@@ -74,6 +131,7 @@ export async function signedCleanupExpiredUsers(now = new Date()) {
       )
       for (const row of chats.rows) {
         await scrubRecipientFromChatMessages(client, String(row.chat_id), uid)
+        await scrubUserFromChatMetadata(client, String(row.chat_id), uid)
       }
     }
 
@@ -127,6 +185,7 @@ export async function signedDeleteAccount(userId) {
     )
     for (const row of chats.rows) {
       await scrubRecipientFromChatMessages(client, String(row.chat_id), String(userId))
+      await scrubUserFromChatMetadata(client, String(row.chat_id), String(userId))
     }
 
     const deletedUsers = await client.query(
@@ -161,7 +220,7 @@ export async function signedDeleteAccount(userId) {
 
 export async function signedListChats(userId) {
   const chats = await query(
-    `SELECT c.id, c.chat_type, c.chat_name
+    `SELECT c.id, c.chat_type, c.chat_name_enc, c.names
      FROM chats c
      INNER JOIN chat_members cm ON cm.chat_id = c.id
      WHERE cm.user_id = $1
@@ -172,7 +231,6 @@ export async function signedListChats(userId) {
   const personal = await query(
     `SELECT c.id AS chat_id,
             u.id AS other_user_id,
-            u.username AS other_username,
             u.public_key AS other_public_key
      FROM chats c
      INNER JOIN chat_members me ON me.chat_id = c.id AND me.user_id = $1
@@ -188,7 +246,9 @@ export async function signedListChats(userId) {
     .map((c) => {
     const id = String(c.id)
     const type = String(c.chat_type)
-    const base = { id, type, ...(c.chat_name ? { name: String(c.chat_name) } : {}) }
+    const chatNameEnc = typeof c.chat_name_enc === 'string' ? String(c.chat_name_enc) : ''
+    const names = c.names ?? {}
+    const base = { id, type, chatNameEnc, names }
 
     if (type === 'personal') {
       const p = personalByChatId.get(id)
@@ -196,7 +256,6 @@ export async function signedListChats(userId) {
         return {
           ...base,
           otherUserId: String(p.other_user_id),
-          otherUsername: String(p.other_username),
           otherPublicKey: String(p.other_public_key),
         }
       }
@@ -216,10 +275,9 @@ async function signedLastMessagesForUserByChatIds(userId, chatIds) {
 
   // Only return messages visible to the caller (membership + visibility border).
   const r = await query(
-    `SELECT DISTINCT ON (m.chat_id) m.chat_id, m.id, m.sender_id, u.username AS sender_username, m.encrypted_data
+    `SELECT DISTINCT ON (m.chat_id) m.chat_id, m.id, m.sender_id, m.encrypted_data, m.signature
      FROM messages m
      INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
-     INNER JOIN users u ON u.id = m.sender_id
      WHERE m.chat_id = ANY($2::uuid[])
        AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
      ORDER BY m.chat_id, m.id DESC`,
@@ -230,8 +288,8 @@ async function signedLastMessagesForUserByChatIds(userId, chatIds) {
     chatId: String(row.chat_id),
     id: String(row.id),
     senderId: String(row.sender_id),
-    senderUsername: String(row.sender_username ?? ''),
     encryptedData: String(row.encrypted_data),
+    signature: typeof row.signature === 'string' ? String(row.signature) : '',
   }))
 }
 
@@ -292,16 +350,14 @@ export async function signedUnreadCounts(userId) {
   return result.rows.map((r) => ({ chatId: String(r.chat_id), count: Number(r.count) || 0 }))
 }
 
-export async function signedCreatePersonalChat(userId, otherUsername) {
-  const otherRes = await query('SELECT id, username, public_key, introvert_mode FROM users WHERE username = $1', [otherUsername])
-  if (otherRes.rows.length === 0) {
-    return { ok: false, reason: 'not_found' }
-  }
+export async function signedCreatePersonalChat(userId, otherUserId, names) {
+  const otherRes = await query('SELECT id, public_key, introvert_mode FROM users WHERE id = $1', [String(otherUserId)])
+  if (otherRes.rows.length === 0) return { ok: false, reason: 'not_found' }
 
   const other = otherRes.rows[0]
-  const otherUserId = String(other.id)
+  const otherId = String(other.id)
 
-  if (otherUserId === String(userId)) {
+  if (otherId === String(userId)) {
     return { ok: false, reason: 'self' }
   }
 
@@ -313,7 +369,7 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
      INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id = $2
      WHERE c.chat_type = 'personal'
      LIMIT 1`,
-    [userId, otherUserId],
+    [userId, otherId],
   )
 
   if (existing.rows.length) {
@@ -322,8 +378,7 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
       chat: {
         id: String(existing.rows[0].id),
         type: 'personal',
-        otherUserId,
-        otherUsername: String(other.username),
+        otherUserId: otherId,
         otherPublicKey: String(other.public_key),
       },
     }
@@ -335,11 +390,14 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
     return { ok: false, reason: 'introvert' }
   }
 
+  const namesJson = (names && typeof names === 'object') ? names : {}
+
   const created = await transaction(async (client) => {
     const chatRes = await client.query(
-      `INSERT INTO chats (chat_type, chat_name)
-       VALUES ('personal', NULL)
+      `INSERT INTO chats (chat_type, chat_name_enc, names)
+       VALUES ('personal', '', $1)
        RETURNING id`,
+      [namesJson],
     )
 
     const chatId = String(chatRes.rows[0].id)
@@ -347,7 +405,7 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
     await client.query(
       `INSERT INTO chat_members (chat_id, user_id)
        VALUES ($1, $2), ($1, $3)`,
-      [chatId, userId, otherUserId],
+      [chatId, userId, otherId],
     )
 
     return chatId
@@ -358,24 +416,24 @@ export async function signedCreatePersonalChat(userId, otherUsername) {
     chat: {
       id: String(created),
       type: 'personal',
-      otherUserId,
-      otherUsername: String(other.username),
+      otherUserId: otherId,
       otherPublicKey: String(other.public_key),
     },
   }
 }
 
-export async function signedCreateGroupChat(userId, chatName) {
-  const name = typeof chatName === 'string' ? chatName.trim() : ''
-  if (!name) return { ok: false, reason: 'bad_name' }
-  if (name.length > 64) return { ok: false, reason: 'bad_name' }
+export async function signedCreateGroupChat(userId, chatNameEnc, names) {
+  const enc = typeof chatNameEnc === 'string' ? chatNameEnc : ''
+  if (!enc) return { ok: false, reason: 'bad_name' }
+  if (enc.length > 100_000) return { ok: false, reason: 'bad_name' }
+  const namesJson = (names && typeof names === 'object') ? names : {}
 
   const chatId = await transaction(async (client) => {
     const chatRes = await client.query(
-      `INSERT INTO chats (chat_type, chat_name)
-       VALUES ('group', $1)
+      `INSERT INTO chats (chat_type, chat_name_enc, names)
+       VALUES ('group', $1, $2)
        RETURNING id`,
-      [name],
+      [enc, namesJson],
     )
 
     const id = String(chatRes.rows[0].id)
@@ -388,7 +446,7 @@ export async function signedCreateGroupChat(userId, chatName) {
     return id
   })
 
-  return { ok: true, chat: { id: String(chatId), type: 'group', name } }
+  return { ok: true, chat: { id: String(chatId), type: 'group', chatNameEnc: enc, names: namesJson } }
 }
 
 export async function signedListChatMembers(userId, chatId) {
@@ -409,22 +467,21 @@ export async function signedListChatMembers(userId, chatId) {
   }
 
   const r = await query(
-    `SELECT u.id, u.username, u.public_key
+    `SELECT u.id, u.public_key
      FROM chat_members cm
      INNER JOIN users u ON u.id = cm.user_id
      WHERE cm.chat_id = $1
-     ORDER BY u.username ASC`,
+     ORDER BY u.id ASC`,
     [chatId],
   )
 
   return r.rows.map((row) => ({
     userId: String(row.id),
-    username: String(row.username),
     publicKey: String(row.public_key),
   }))
 }
 
-export async function signedAddGroupMember(userId, chatId, username) {
+export async function signedAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc) {
   await assertChatMember(userId, chatId)
 
   const chat = await query(
@@ -437,19 +494,19 @@ export async function signedAddGroupMember(userId, chatId, username) {
   if (chat.rows.length === 0) return { ok: false, reason: 'not_found' }
   if (String(chat.rows[0].chat_type) !== 'group') return { ok: false, reason: 'not_group' }
 
-  const u = typeof username === 'string' ? username.trim() : ''
-  if (!u) return { ok: false, reason: 'bad_username' }
-
-  const otherRes = await query('SELECT id, username, public_key, introvert_mode FROM users WHERE username = $1', [u])
+  const otherRes = await query('SELECT id, public_key, introvert_mode FROM users WHERE id = $1', [String(otherUserId)])
   if (otherRes.rows.length === 0) return { ok: false, reason: 'not_found' }
 
   const other = otherRes.rows[0]
-  const otherUserId = String(other.id)
+  const otherId = String(other.id)
 
-  if (String(otherUserId) === String(userId)) return { ok: false, reason: 'self' }
+  if (String(otherId) === String(userId)) return { ok: false, reason: 'self' }
 
   // Introvert mode: user cannot be added to chats by others.
   if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
+
+  const namesJson = (names && typeof names === 'object') ? names : {}
+  const nextChatNameEnc = typeof chatNameEnc === 'string' ? chatNameEnc : null
 
   const ins = await query(
     `INSERT INTO chat_members (chat_id, user_id, visible_after_message_id)
@@ -460,17 +517,25 @@ export async function signedAddGroupMember(userId, chatId, username) {
      )
      ON CONFLICT DO NOTHING
      RETURNING user_id`,
-    [chatId, otherUserId, uuidv7()],
+    [chatId, otherId, uuidv7()],
   )
   if (!ins.rows.length) return { ok: false, reason: 'already_member' }
 
+  await query(
+    `UPDATE chats
+     SET names = $1,
+         chat_name_enc = COALESCE($2, chat_name_enc)
+     WHERE id = $3`,
+    [namesJson, nextChatNameEnc, String(chatId)],
+  )
+
   return {
     ok: true,
-    member: { userId: otherUserId, username: String(other.username), publicKey: String(other.public_key) },
+    member: { userId: otherId, publicKey: String(other.public_key) },
   }
 }
 
-export async function signedRenameGroupChat(userId, chatId, name) {
+export async function signedRenameGroupChat(userId, chatId, chatNameEnc) {
   await assertChatMember(userId, chatId)
 
   const chat = await query(
@@ -483,15 +548,15 @@ export async function signedRenameGroupChat(userId, chatId, name) {
   if (chat.rows.length === 0) return { ok: false, reason: 'not_found' }
   if (String(chat.rows[0].chat_type) !== 'group') return { ok: false, reason: 'not_group' }
 
-  const n = typeof name === 'string' ? name.trim() : ''
-  // Match username length constraints: 3–64.
-  if (n.length < 3 || n.length > 64) return { ok: false, reason: 'bad_name' }
+  const enc = typeof chatNameEnc === 'string' ? chatNameEnc : ''
+  if (!enc) return { ok: false, reason: 'bad_name' }
+  if (enc.length > 100_000) return { ok: false, reason: 'bad_name' }
 
   await query(
     `UPDATE chats
-     SET chat_name = $1
+     SET chat_name_enc = $1
      WHERE id = $2`,
-    [n, chatId],
+    [enc, chatId],
   )
 
   const members = await query(
@@ -503,7 +568,7 @@ export async function signedRenameGroupChat(userId, chatId, name) {
 
   return {
     ok: true,
-    chat: { id: String(chatId), type: 'group', name: n },
+    chat: { id: String(chatId), type: 'group', chatNameEnc: enc },
     memberIds: members.rows.map((r) => String(r.user_id)),
   }
 }
@@ -530,19 +595,17 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
 
   const params = beforeId ? [chatId, userId, beforeId, lim] : [chatId, userId, lim]
   const sql = beforeId
-     ? `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
+     ? `SELECT m.id, m.encrypted_data, m.signature, m.sender_id
        FROM messages m
        INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
-       INNER JOIN users u ON u.id = m.sender_id
        WHERE m.chat_id = $1
          AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
          AND m.id < $3
        ORDER BY m.id DESC
        LIMIT $4`
-     : `SELECT m.id, m.encrypted_data, m.sender_id, u.username AS sender_username
+     : `SELECT m.id, m.encrypted_data, m.signature, m.sender_id
        FROM messages m
        INNER JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
-       INNER JOIN users u ON u.id = m.sender_id
        WHERE m.chat_id = $1
          AND (cm.visible_after_message_id IS NULL OR m.id > cm.visible_after_message_id)
        ORDER BY m.id DESC
@@ -553,21 +616,21 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
     id: String(row.id),
     chatId: String(chatId),
     senderId: String(row.sender_id),
-    senderUsername: String(row.sender_username ?? ''),
     encryptedData: String(row.encrypted_data),
+    signature: typeof row.signature === 'string' ? String(row.signature) : '',
   }))
 }
 
-export async function signedSendMessage({ senderId, chatId, encryptedData }) {
+export async function signedSendMessage({ senderId, chatId, encryptedData, signature = '' }) {
   await assertChatMember(senderId, chatId)
 
   const messageId = uuidv7()
 
   const result = await transaction(async (client) => {
     await client.query(
-      `INSERT INTO messages (id, chat_id, encrypted_data, sender_id)
-       VALUES ($1, $2, $3, $4)`,
-      [messageId, chatId, encryptedData, senderId],
+      `INSERT INTO messages (id, chat_id, encrypted_data, signature, sender_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [messageId, chatId, encryptedData, String(signature || ''), senderId],
     )
 
     const members = await client.query(
@@ -680,7 +743,7 @@ export async function signedDeleteMessage({ userId, chatId, messageId }) {
   return result
 }
 
-export async function signedUpdateMessage({ userId, chatId, messageId, encryptedData }) {
+export async function signedUpdateMessage({ userId, chatId, messageId, encryptedData, signature = '' }) {
   await assertChatMember(userId, chatId)
   const enc = typeof encryptedData === 'string' ? encryptedData : ''
   if (!enc) return { ok: false, reason: 'bad_payload' }
@@ -706,9 +769,10 @@ export async function signedUpdateMessage({ userId, chatId, messageId, encrypted
 
     await client.query(
       `UPDATE messages
-       SET encrypted_data = $1
-       WHERE id = $2 AND chat_id = $3`,
-      [enc, String(messageId), String(chatId)],
+       SET encrypted_data = $1,
+           signature = $2
+       WHERE id = $3 AND chat_id = $4`,
+      [enc, String(signature || ''), String(messageId), String(chatId)],
     )
 
     return { ok: true, memberIds }
@@ -768,6 +832,14 @@ export async function signedLeaveChat(userId, chatId) {
     // If the chat is deleted (last member), messages are deleted by cascade.
     try {
       await scrubRecipientFromChatMessages(client, String(chatId), String(userId))
+    } catch {
+      // ignore (best-effort privacy cleanup)
+    }
+
+    // Option A: also scrub this user's ID from chat metadata (names + chat name)
+    // so the server can remove user-specific encrypted blobs without client help.
+    try {
+      await scrubUserFromChatMetadata(client, String(chatId), String(userId))
     } catch {
       // ignore (best-effort privacy cleanup)
     }

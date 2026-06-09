@@ -21,19 +21,25 @@ import {
   encryptSmallStringWithPublicKeyJwk,
   encryptSignedMessage,
   generateRsaKeyPair,
+  importRsaPssPrivateKeyJwk,
+  importRsaPssPublicKeyJwk,
   importRsaPrivateKeyJwk,
   publicJwkFromPrivateJwk,
+  signSignedEnvelope,
+  verifySignedEnvelope,
 } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 import { APP_VERSION as CLIENT_APP_VERSION } from '../appVersion'
 import { useToastStore } from './toast'
+import { voprfNameToken } from '../utils/voprfNames'
 
 export type SignedChat = {
   id: string
   type: 'personal' | 'group'
   name?: string
+  chatNameEnc?: string
+  names?: Record<string, string>
   otherUserId?: string
-  otherUsername?: string
   otherPublicKey?: string
 }
 
@@ -41,8 +47,8 @@ export type SignedLastMessageWire = {
   id: string
   chatId: string
   senderId: string
-  senderUsername?: string
   encryptedData: string
+  signature?: string
 }
 
 export type SignedLastMessagePreview = {
@@ -56,7 +62,7 @@ export type SignedLastMessagePreview = {
 
 export type SignedChatMember = {
   userId: string
-  username: string
+  username?: string
   publicKey: string
 }
 
@@ -64,9 +70,11 @@ export type SignedMessage = {
   id: string
   chatId: string
   senderId: string
-  senderUsername?: string
   encryptedData: string
+  signature?: string
 }
+
+export type SignedMessageVerification = 'verified' | 'unverifiable'
 
 export type SignedDecryptedMessage = {
   id: string
@@ -77,6 +85,7 @@ export type SignedDecryptedMessage = {
   fromUsername: string
   text: string
   replyToId?: string | null
+  verification: SignedMessageVerification
 }
 
 function apiBase() {
@@ -94,6 +103,18 @@ const MAX_PASSWORD_LEN = 512
 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large'
+
+// Signature verification: cache imported RSA-PSS verify keys by JWK string.
+const verifyKeyCache = new Map<string, CryptoKey>()
+
+async function getVerifyKeyFromPublicJwk(publicJwkJson: string): Promise<CryptoKey> {
+  const jwk = String(publicJwkJson ?? '')
+  const cached = verifyKeyCache.get(jwk)
+  if (cached) return cached
+  const k = await importRsaPssPublicKeyJwk(jwk)
+  verifyKeyCache.set(jwk, k)
+  return k
+}
 
 function uuidV7ToUnixMs(id: string): number | null {
   const hex = String(id).replace(/-/g, '')
@@ -144,6 +165,7 @@ export const useSignedStore = defineStore('signed', () => {
   const introvertMode = ref<boolean>(false)
   const publicKeyJwk = ref<string | null>(null)
   const privateKey = ref<CryptoKey | null>(null)
+  const signingKey = ref<CryptoKey | null>(null)
 
   const vaultEncrypted = ref<string>('')
   const vaultPlain = ref<VaultPlain | null>(null)
@@ -965,6 +987,7 @@ export const useSignedStore = defineStore('signed', () => {
       const jwkJson = await localData.decryptStayString(blob)
       lastPrivateJwkJsonForStay = jwkJson
       privateKey.value = await importRsaPrivateKeyJwk(jwkJson)
+      signingKey.value = await importRsaPssPrivateKeyJwk(jwkJson)
       publicKeyJwk.value = publicJwkFromPrivateJwk(jwkJson)
       return true
     } catch {
@@ -1047,6 +1070,7 @@ export const useSignedStore = defineStore('signed', () => {
     const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
     lastPrivateJwkJsonForStay = privateJwk
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
+    signingKey.value = await importRsaPssPrivateKeyJwk(privateJwk)
     publicKeyJwk.value = publicJwkFromPrivateJwk(privateJwk)
 
     // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
@@ -1195,10 +1219,14 @@ export const useSignedStore = defineStore('signed', () => {
           (lastPrivateJwkJsonForStay ? publicJwkFromPrivateJwk(lastPrivateJwkJsonForStay) : null)
         if (!publicJwk) return false
 
+        const uname = username.value
+        if (!uname) return false
+        const nameToken = await voprfNameToken({ kind: 'user', input: uname })
+
         const initRes = await fetch(`${apiBase()}/api/auth/login-init`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: username.value, publicKey: publicJwk }),
+          body: JSON.stringify({ nameToken, publicKey: publicJwk }),
         })
         const initJson = await initRes.json().catch(() => ({}))
         if (!initRes.ok) return false
@@ -1221,7 +1249,7 @@ export const useSignedStore = defineStore('signed', () => {
         token.value = typeof (finalJson as any)?.token === 'string' ? String((finalJson as any).token) : null
         expiresAtMs.value = typeof (finalJson as any)?.expiresAt === 'number' ? Number((finalJson as any).expiresAt) : null
         userId.value = typeof (finalJson as any)?.userId === 'string' ? String((finalJson as any).userId) : userId.value
-        username.value = typeof (finalJson as any)?.username === 'string' ? String((finalJson as any).username) : username.value
+        // Server no longer returns plaintext usernames; keep the local value.
         hiddenMode.value = Boolean((finalJson as any)?.hiddenMode)
         introvertMode.value = Boolean((finalJson as any)?.introvertMode)
         publicKeyJwk.value = publicJwk
@@ -1428,17 +1456,25 @@ export const useSignedStore = defineStore('signed', () => {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null
         const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
-        const senderUsername = typeof obj.senderUsername === 'string' ? obj.senderUsername : null
         const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+        const signature = typeof obj.signature === 'string' ? obj.signature : ''
         if (!chatId || !id || !senderId || !encryptedData) return
+
+        const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
+        if (verification === 'invalid') {
+          toast.push({
+            title: 'Unverified message',
+            message: 'Blocked a message with an invalid signature.',
+            variant: 'error',
+            timeoutMs: 8000,
+          })
+          return
+        }
 
         if (privateKey.value && userId.value) {
           try {
             const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
-            const displayName =
-              senderUsername ??
-              membersByChatId.value[chatId]?.find((m) => String(m.userId) === String(senderId))?.username ??
-              String(senderId)
+            const displayName = await resolveDisplayNameInChat(chatId, senderId)
             const msg: SignedDecryptedMessage = {
               id,
               chatId,
@@ -1448,6 +1484,7 @@ export const useSignedStore = defineStore('signed', () => {
               fromUsername: displayName,
               text: plain.text,
               replyToId: plain.replyToId,
+              verification,
             }
 
             const cur = messagesByChatId.value[chatId] ?? []
@@ -1464,7 +1501,7 @@ export const useSignedStore = defineStore('signed', () => {
               try {
                 const shouldNotify = typeof document !== 'undefined' && document.visibilityState !== 'visible'
                 if (shouldNotify) {
-                  notify('Last', senderUsername ? `New message from ${senderUsername}` : 'New message', {
+                  notify('Last', displayName ? `New message from ${displayName}` : 'New message', {
                     tag: `lrcom-chat-${String(chatId)}`,
                   })
                 }
@@ -1483,7 +1520,7 @@ export const useSignedStore = defineStore('signed', () => {
             // Best-effort: keep chat list previews fresh.
             lastMessageByChatId.value = {
               ...lastMessageByChatId.value,
-              [chatId]: { id, chatId, senderId, senderUsername: senderUsername ?? displayName, encryptedData },
+              [chatId]: { id, chatId, senderId, encryptedData, signature },
             }
             lastMessagePreviewByChatId.value = {
               ...lastMessagePreviewByChatId.value,
@@ -1491,7 +1528,7 @@ export const useSignedStore = defineStore('signed', () => {
                 id,
                 chatId,
                 senderId,
-                senderUsername: senderUsername ?? displayName,
+                senderUsername: displayName,
                 tsMs: uuidV7ToUnixMs(id) ?? 0,
                 text: plain.text,
               },
@@ -1536,17 +1573,25 @@ export const useSignedStore = defineStore('signed', () => {
         const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
         const id = typeof obj.id === 'string' ? obj.id : null
         const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
-        const senderUsername = typeof obj.senderUsername === 'string' ? obj.senderUsername : null
         const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+        const signature = typeof obj.signature === 'string' ? obj.signature : ''
         if (!chatId || !id || !senderId || !encryptedData) return
+
+        const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
+        if (verification === 'invalid') {
+          toast.push({
+            title: 'Unverified edit',
+            message: 'Blocked an edited message with an invalid signature.',
+            variant: 'error',
+            timeoutMs: 8000,
+          })
+          return
+        }
 
         if (privateKey.value && userId.value) {
           try {
             const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
-            const displayName =
-              senderUsername ??
-              membersByChatId.value[chatId]?.find((m) => String(m.userId) === String(senderId))?.username ??
-              String(senderId)
+            const displayName = await resolveDisplayNameInChat(chatId, senderId)
             const cur = messagesByChatId.value[chatId] ?? []
             const next = cur.map((m) =>
               m.id === id
@@ -1558,6 +1603,7 @@ export const useSignedStore = defineStore('signed', () => {
                     fromUsername: displayName,
                     text: plain.text,
                     replyToId: plain.replyToId,
+                    verification,
                   }
                 : m,
             )
@@ -1566,7 +1612,7 @@ export const useSignedStore = defineStore('signed', () => {
             if (lastMessageByChatId.value[chatId]?.id === id) {
               lastMessageByChatId.value = {
                 ...lastMessageByChatId.value,
-                [chatId]: { id, chatId, senderId, senderUsername: senderUsername ?? displayName, encryptedData },
+                [chatId]: { id, chatId, senderId, encryptedData, signature },
               }
               lastMessagePreviewByChatId.value = {
                 ...lastMessagePreviewByChatId.value,
@@ -1574,7 +1620,7 @@ export const useSignedStore = defineStore('signed', () => {
                   id,
                   chatId,
                   senderId,
-                  senderUsername: senderUsername ?? displayName,
+                  senderUsername: displayName,
                   tsMs: uuidV7ToUnixMs(id) ?? 0,
                   text: plain.text,
                 },
@@ -1630,8 +1676,54 @@ export const useSignedStore = defineStore('signed', () => {
 
   async function refreshChats() {
     const j = await fetchJson('/api/signed/chats', { headers: { ...authHeaders() } })
-    const nextChats: SignedChat[] = Array.isArray(j.chats) ? j.chats : []
+
+    const wireChats: any[] = Array.isArray((j as any)?.chats) ? (j as any).chats : []
+    const nextChats: SignedChat[] = wireChats
+      .map((c: any) => {
+        const id = typeof c?.id === 'string' ? String(c.id) : ''
+        const type = (c?.type === 'personal' || c?.type === 'group') ? c.type : null
+        if (!id || !type) return null
+
+        const chatNameEnc = typeof c?.chatNameEnc === 'string' ? String(c.chatNameEnc) : ''
+        const names = c?.names && typeof c.names === 'object' ? (c.names as Record<string, string>) : {}
+        const otherUserId = typeof c?.otherUserId === 'string' ? String(c.otherUserId) : undefined
+        const otherPublicKey = typeof c?.otherPublicKey === 'string' ? String(c.otherPublicKey) : undefined
+
+        return {
+          id,
+          type,
+          chatNameEnc,
+          names,
+          otherUserId,
+          otherPublicKey,
+        } as SignedChat
+      })
+      .filter((x): x is SignedChat => Boolean(x))
+
     chats.value = nextChats
+
+    // Best-effort: compute display names from encrypted metadata.
+    if (privateKey.value && userId.value) {
+      const withNames = await Promise.all(
+        nextChats.map(async (c) => {
+          try {
+            if (c.type === 'group') {
+              const dec = await decryptChatTextFromEnvelope(c.chatNameEnc ?? '')
+              return { ...c, name: dec || 'Group' }
+            }
+            if (c.type === 'personal' && c.otherUserId) {
+              const enc = (c.names && typeof c.names === 'object') ? c.names[c.otherUserId] : ''
+              const dec = await decryptChatTextFromEnvelope(typeof enc === 'string' ? enc : '')
+              return { ...c, name: dec || c.otherUserId }
+            }
+            return c
+          } catch {
+            return c
+          }
+        }),
+      )
+      chats.value = withNames
+    }
 
     // New server versions may include `lastMessage` on each chat.
     const nextLast: Record<string, SignedLastMessageWire | null> = {}
@@ -1647,14 +1739,14 @@ export const useSignedStore = defineStore('signed', () => {
         const id = typeof lm?.id === 'string' ? String(lm.id) : ''
         const senderId = typeof lm?.senderId === 'string' ? String(lm.senderId) : ''
         const encryptedData = typeof lm?.encryptedData === 'string' ? String(lm.encryptedData) : ''
-        const senderUsername = typeof lm?.senderUsername === 'string' ? String(lm.senderUsername) : ''
+        const signature = typeof lm?.signature === 'string' ? String(lm.signature) : ''
 
         if (!id || !senderId || !encryptedData) {
           nextLast[chatId] = null
           continue
         }
 
-        nextLast[chatId] = { id, chatId, senderId, senderUsername, encryptedData }
+        nextLast[chatId] = { id, chatId, senderId, encryptedData, signature }
       }
     }
     lastMessageByChatId.value = nextLast
@@ -1673,11 +1765,12 @@ export const useSignedStore = defineStore('signed', () => {
             })
             const tsMs = uuidV7ToUnixMs(lm.id) ?? 0
             const text = typeof plain?.text === 'string' ? plain.text : ''
+            const senderUsername = await resolveDisplayNameInChat(chatId, lm.senderId)
             const preview: SignedLastMessagePreview = {
               id: lm.id,
               chatId,
               senderId: lm.senderId,
-              senderUsername: lm.senderUsername ?? '',
+              senderUsername,
               tsMs,
               text,
             }
@@ -1727,12 +1820,26 @@ export const useSignedStore = defineStore('signed', () => {
 
     const list: SignedChatMember[] = Array.isArray(j.members)
       ? j.members
-          .filter((m: any) => m && typeof m.userId === 'string' && typeof m.username === 'string' && typeof m.publicKey === 'string')
-          .map((m: any) => ({ userId: String(m.userId), username: String(m.username), publicKey: String(m.publicKey) }))
+          .filter((m: any) => m && typeof m.userId === 'string' && typeof m.publicKey === 'string')
+          .map((m: any) => ({ userId: String(m.userId), publicKey: String(m.publicKey) }))
       : []
 
-    membersByChatId.value = { ...membersByChatId.value, [chatId]: list }
-    return list
+    let out = list
+    try {
+      if (privateKey.value && userId.value) {
+        out = await Promise.all(
+          list.map(async (m) => ({
+            ...m,
+            username: await resolveDisplayNameInChat(chatId, m.userId),
+          })),
+        )
+      }
+    } catch {
+      // ignore
+    }
+
+    membersByChatId.value = { ...membersByChatId.value, [chatId]: out }
+    return out
   }
 
   async function ensureChatMembers(chatId: string) {
@@ -1819,10 +1926,20 @@ export const useSignedStore = defineStore('signed', () => {
 
   async function updateMessage(chatId: string, messageId: string, encryptedData: string) {
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
+
+    let signature = ''
+    try {
+      if (signingKey.value && userId.value) {
+        signature = await signSignedEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
+      }
+    } catch {
+      signature = ''
+    }
+
     await fetchJson('/api/signed/messages/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ chatId, messageId, encryptedData }),
+      body: JSON.stringify({ chatId, messageId, encryptedData, signature }),
     })
   }
 
@@ -1864,9 +1981,9 @@ export const useSignedStore = defineStore('signed', () => {
     await updateMessage(chatId, messageId, encryptedData)
 
     // Optimistic local patch (WS update is best-effort).
-    const next = cur.map((m) =>
+    const next: SignedDecryptedMessage[] = cur.map((m): SignedDecryptedMessage =>
       m.id === messageId
-        ? { ...m, senderId: userId.value as string, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId }
+        ? { ...m, senderId: userId.value as string, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId, verification: 'verified' }
         : m,
     )
     messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
@@ -1906,19 +2023,178 @@ export const useSignedStore = defineStore('signed', () => {
     view.value = 'settings'
   }
 
+  async function lookupSignedUserByUsername(name: string): Promise<{ userId: string; publicKey: string }> {
+    const u = String(name ?? '').trim()
+    if (!u) throw new Error('Username required')
+
+    const nameToken = await voprfNameToken({ kind: 'user', input: u })
+    const j = await fetchJson('/api/signed/users/lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ nameToken }),
+    })
+
+    const userIdOut = typeof (j as any)?.userId === 'string' ? String((j as any).userId) : ''
+    const publicKeyOut = typeof (j as any)?.publicKey === 'string' ? String((j as any).publicKey) : ''
+    if (!userIdOut || !publicKeyOut) throw new Error('not_found')
+    return { userId: userIdOut, publicKey: publicKeyOut }
+  }
+
+  async function encryptChatTextToRecipients(params: {
+    text: string
+    recipients: Array<{ userId: string; publicKeyJwk: string }>
+  }): Promise<string> {
+    return await encryptSignedMessage({
+      plaintext: { text: String(params.text ?? ''), atIso: new Date().toISOString() },
+      recipients: params.recipients,
+    })
+  }
+
+  async function decryptChatTextFromEnvelope(enc: string): Promise<string | null> {
+    if (!privateKey.value || !userId.value) return null
+    const s = String(enc ?? '')
+    if (!s) return null
+    try {
+      const plain = await decryptSignedMessage({ encryptedData: s, myUserId: userId.value, myPrivateKey: privateKey.value })
+      return typeof plain?.text === 'string' ? plain.text : ''
+    } catch {
+      return null
+    }
+  }
+
+  async function buildNamesJson(params: {
+    recipients: Array<{ userId: string; publicKeyJwk: string }>
+    namesPlainByUserId: Record<string, string>
+  }): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const [uid, nm] of Object.entries(params.namesPlainByUserId ?? {})) {
+      const key = String(uid)
+      if (!key) continue
+      out[key] = await encryptChatTextToRecipients({ text: String(nm ?? ''), recipients: params.recipients })
+    }
+    return out
+  }
+
+  async function resolveDisplayNameInChat(chatId: string, subjectUserId: string): Promise<string> {
+    const uid = String(subjectUserId ?? '')
+    if (!uid) return ''
+
+    if (userId.value && username.value && String(uid) === String(userId.value)) return username.value
+
+    const chat = getChat(chatId)
+    if (!chat) return uid
+
+    const names = (chat.names && typeof chat.names === 'object') ? chat.names : null
+    const enc = names && typeof (names as any)[uid] === 'string' ? String((names as any)[uid]) : ''
+    const dec = await decryptChatTextFromEnvelope(enc)
+    if (dec) return dec
+
+    if (chat.type === 'personal' && chat.otherUserId && String(chat.otherUserId) === uid && typeof chat.name === 'string' && chat.name) {
+      return chat.name
+    }
+
+    return uid
+  }
+
+  function resolveSenderPublicKeyJwk(chatId: string, senderId: string): string | null {
+    const sid = String(senderId ?? '')
+    if (!sid) return null
+
+    if (userId.value && publicKeyJwk.value && String(sid) === String(userId.value)) {
+      return publicKeyJwk.value
+    }
+
+    const chat = getChat(chatId)
+    if (!chat) return null
+
+    if (chat.type === 'personal') {
+      if (chat.otherUserId && String(chat.otherUserId) === sid && chat.otherPublicKey) return String(chat.otherPublicKey)
+      return null
+    }
+
+    const members = membersByChatId.value[chatId] ?? []
+    const m = members.find((x) => String(x.userId) === sid)
+    return m?.publicKey ? String(m.publicKey) : null
+  }
+
+  async function verifyIncomingEnvelope(params: {
+    chatId: string
+    senderId: string
+    encryptedData: string
+    signature: string
+  }): Promise<boolean | null> {
+    const sig = String(params.signature ?? '')
+    if (!sig) return null
+
+    let pubJwk = resolveSenderPublicKeyJwk(params.chatId, params.senderId)
+    if (!pubJwk) {
+      const chat = getChat(params.chatId)
+      if (chat?.type === 'group') {
+        try {
+          await ensureChatMembers(params.chatId)
+        } catch {
+          // ignore
+        }
+        pubJwk = resolveSenderPublicKeyJwk(params.chatId, params.senderId)
+      }
+    }
+    if (!pubJwk) return null
+
+    const verifyKey = await getVerifyKeyFromPublicJwk(pubJwk)
+    return await verifySignedEnvelope({
+      verifyKey,
+      signatureB64: sig,
+      senderId: String(params.senderId),
+      chatId: String(params.chatId),
+      encryptedData: String(params.encryptedData),
+    })
+  }
+
+  async function getIncomingEnvelopeVerification(params: {
+    chatId: string
+    senderId: string
+    encryptedData: string
+    signature: string
+  }): Promise<SignedMessageVerification | 'invalid'> {
+    try {
+      const ok = await verifyIncomingEnvelope(params)
+      if (ok === false) return 'invalid'
+      return ok === true ? 'verified' : 'unverifiable'
+    } catch {
+      return 'unverifiable'
+    }
+  }
+
   async function createPersonalChat(friendUsername: string) {
     const u = friendUsername.trim()
     if (!u) throw new Error('Username required')
+
+    if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
 
     // Avoid creating a private chat with yourself.
     if (username.value && u.toLowerCase() === String(username.value).toLowerCase()) {
       throw new Error('self')
     }
 
+    const other = await lookupSignedUserByUsername(u)
+
+    const recipients = [
+      { userId: userId.value, publicKeyJwk: publicKeyJwk.value },
+      { userId: other.userId, publicKeyJwk: other.publicKey },
+    ]
+
+    const names = await buildNamesJson({
+      recipients,
+      namesPlainByUserId: {
+        [userId.value]: username.value,
+        [other.userId]: u,
+      },
+    })
+
     const j = await fetchJson('/api/signed/chats/create-personal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ username: u }),
+      body: JSON.stringify({ otherUserId: other.userId, names }),
     })
 
     await refreshChats()
@@ -1933,10 +2209,16 @@ export const useSignedStore = defineStore('signed', () => {
     const n = name.trim()
     if (!n) throw new Error('Name required')
 
+    if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
+
+    const recipients = [{ userId: userId.value, publicKeyJwk: publicKeyJwk.value }]
+    const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
+    const names = await buildNamesJson({ recipients, namesPlainByUserId: { [userId.value]: username.value } })
+
     const j = await fetchJson('/api/signed/chats/create-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ name: n }),
+      body: JSON.stringify({ chatNameEnc, names }),
     })
 
     await refreshChats()
@@ -1947,21 +2229,52 @@ export const useSignedStore = defineStore('signed', () => {
     const u = memberUsername.trim()
     if (!u) throw new Error('Username required')
 
+    if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
+
+    const chat = getChat(chatId)
+    if (!chat || chat.type !== 'group') throw new Error('not_group')
+
+    const other = await lookupSignedUserByUsername(u)
+
+    const curMembers = await ensureChatMembers(chatId)
+    const recipients: Array<{ userId: string; publicKeyJwk: string }> = [
+      ...curMembers.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey })),
+      { userId: other.userId, publicKeyJwk: other.publicKey },
+    ]
+
+    const groupNamePlain =
+      (await decryptChatTextFromEnvelope(chat.chatNameEnc ?? '')) ??
+      (typeof chat.name === 'string' ? chat.name : '')
+
+    const chatNameEnc = await encryptChatTextToRecipients({ text: groupNamePlain || 'Group', recipients })
+
+    // Re-encrypt all existing per-user name blobs to include the new recipient,
+    // and add a blob for the new member using the entered username.
+    const curNames = (chat.names && typeof chat.names === 'object') ? chat.names : {}
+    const namesPlainByUserId: Record<string, string> = {}
+    for (const [uid, enc] of Object.entries(curNames)) {
+      const t = await decryptChatTextFromEnvelope(typeof enc === 'string' ? enc : '')
+      namesPlainByUserId[String(uid)] = t ?? String(uid)
+    }
+    namesPlainByUserId[other.userId] = u
+
+    const names = await buildNamesJson({ recipients, namesPlainByUserId })
+
     const j = await fetchJson('/api/signed/chats/add-member', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ chatId, username: u }),
+      body: JSON.stringify({ chatId, otherUserId: other.userId, chatNameEnc, names }),
     })
 
     // Best-effort: update cached members.
     const member = j?.member
-    if (member && typeof member.userId === 'string' && typeof member.username === 'string' && typeof member.publicKey === 'string') {
+    if (member && typeof member.userId === 'string' && typeof member.publicKey === 'string') {
       const cur = membersByChatId.value[chatId] ?? []
       const exists = cur.some((m) => m.userId === String(member.userId))
       if (!exists) {
         membersByChatId.value = {
           ...membersByChatId.value,
-          [chatId]: [...cur, { userId: String(member.userId), username: String(member.username), publicKey: String(member.publicKey) }],
+          [chatId]: [...cur, { userId: String(member.userId), publicKey: String(member.publicKey) }],
         }
       }
     } else {
@@ -1980,17 +2293,21 @@ export const useSignedStore = defineStore('signed', () => {
     if (!cid) throw new Error('chatId required')
     if (n.length < 3 || n.length > 64) throw new Error('Name must be 3-64 characters')
 
+    const members = await ensureChatMembers(cid)
+    const recipients = members.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey }))
+    const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
+
     const j = await fetchJson('/api/signed/chats/rename-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ chatId: cid, name: n }),
+      body: JSON.stringify({ chatId: cid, chatNameEnc }),
     })
 
     const chat = j?.chat
     if (!chat || typeof chat.id !== 'string') throw new Error('Bad response')
 
     // Best-effort: update local chat list.
-    chats.value = chats.value.map((c) => (String(c.id) === String(chat.id) ? { ...c, name: String(chat.name ?? n) } : c))
+    chats.value = chats.value.map((c) => (String(c.id) === String(chat.id) ? { ...c, name: n, chatNameEnc } : c))
     return chat
   }
 
@@ -2001,7 +2318,18 @@ export const useSignedStore = defineStore('signed', () => {
       headers: { ...authHeaders() },
     })
 
-    const list: SignedMessage[] = Array.isArray(j.messages) ? j.messages : []
+    const wire: any[] = Array.isArray(j.messages) ? j.messages : []
+    const list: SignedMessage[] = wire
+      .map((m: any) => {
+        const id = typeof m?.id === 'string' ? String(m.id) : ''
+        const senderId = typeof m?.senderId === 'string' ? String(m.senderId) : ''
+        const encryptedData = typeof m?.encryptedData === 'string' ? String(m.encryptedData) : ''
+        const signature = typeof m?.signature === 'string' ? String(m.signature) : ''
+        if (!id || !senderId || !encryptedData) return null
+        const out: SignedMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
+        return out
+      })
+      .filter((x): x is SignedMessage => x !== null)
 
     if (!privateKey.value || !userId.value) {
       messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [] }
@@ -2012,17 +2340,26 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     const out: SignedDecryptedMessage[] = []
+    let blocked = 0
     for (const m of list) {
       try {
+        const verification = await getIncomingEnvelopeVerification({
+          chatId,
+          senderId: String(m.senderId),
+          encryptedData: String(m.encryptedData),
+          signature: typeof m.signature === 'string' ? m.signature : '',
+        })
+        if (verification === 'invalid') {
+          blocked += 1
+          continue
+        }
+
         const plain = await decryptSignedMessage({
           encryptedData: m.encryptedData,
           myUserId: userId.value,
           myPrivateKey: privateKey.value,
         })
-        const displayName =
-          typeof m.senderUsername === 'string'
-            ? m.senderUsername
-            : membersByChatId.value[chatId]?.find((mm) => String(mm.userId) === String(m.senderId))?.username ?? String(m.senderId)
+        const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
         out.push({
           id: m.id,
           chatId,
@@ -2032,10 +2369,20 @@ export const useSignedStore = defineStore('signed', () => {
           fromUsername: displayName,
           text: plain.text,
           replyToId: plain.replyToId,
+          verification,
         })
       } catch {
         // ignore undecryptable messages
       }
+    }
+
+    if (blocked) {
+      toast.push({
+        title: 'Unverified messages',
+        message: `Blocked ${blocked} message${blocked === 1 ? '' : 's'} with invalid signatures.`,
+        variant: 'error',
+        timeoutMs: 8000,
+      })
     }
 
     // API returns newest-first; render oldest-first.
@@ -2075,20 +2422,40 @@ export const useSignedStore = defineStore('signed', () => {
         { headers: { ...authHeaders() } },
       )
 
-      const list: SignedMessage[] = Array.isArray(j.messages) ? j.messages : []
+      const wire: any[] = Array.isArray(j.messages) ? j.messages : []
+      const list: SignedMessage[] = wire
+        .map((m: any) => {
+          const id = typeof m?.id === 'string' ? String(m.id) : ''
+          const senderId = typeof m?.senderId === 'string' ? String(m.senderId) : ''
+          const encryptedData = typeof m?.encryptedData === 'string' ? String(m.encryptedData) : ''
+          const signature = typeof m?.signature === 'string' ? String(m.signature) : ''
+          if (!id || !senderId || !encryptedData) return null
+          const out: SignedMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
+          return out
+        })
+        .filter((x): x is SignedMessage => x !== null)
 
       const decoded: SignedDecryptedMessage[] = []
+      let blocked = 0
       for (const m of list) {
         try {
+          const verification = await getIncomingEnvelopeVerification({
+            chatId,
+            senderId: String(m.senderId),
+            encryptedData: String(m.encryptedData),
+            signature: typeof m.signature === 'string' ? m.signature : '',
+          })
+          if (verification === 'invalid') {
+            blocked += 1
+            continue
+          }
+
           const plain = await decryptSignedMessage({
             encryptedData: m.encryptedData,
             myUserId: userId.value,
             myPrivateKey: privateKey.value,
           })
-          const displayName =
-            typeof m.senderUsername === 'string'
-              ? m.senderUsername
-              : membersByChatId.value[chatId]?.find((mm) => String(mm.userId) === String(m.senderId))?.username ?? String(m.senderId)
+          const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
           decoded.push({
             id: m.id,
             chatId,
@@ -2098,10 +2465,20 @@ export const useSignedStore = defineStore('signed', () => {
             fromUsername: displayName,
             text: plain.text,
             replyToId: plain.replyToId,
+            verification,
           })
         } catch {
           // ignore
         }
+      }
+
+      if (blocked) {
+        toast.push({
+          title: 'Unverified messages',
+          message: `Blocked ${blocked} message${blocked === 1 ? '' : 's'} with invalid signatures.`,
+          variant: 'error',
+          timeoutMs: 8000,
+        })
       }
 
       // API returns newest-first; convert to oldest-first.
@@ -2130,6 +2507,7 @@ export const useSignedStore = defineStore('signed', () => {
     const t = text.trim()
     if (!t) return
     if (!userId.value || !username.value || !publicKeyJwk.value) throw new Error('Not logged in')
+    if (!signingKey.value) throw new Error('Not unlocked')
 
     const chat = chats.value.find((c) => c.id === chatId)
     if (!chat) throw new Error('Chat not found')
@@ -2156,12 +2534,14 @@ export const useSignedStore = defineStore('signed', () => {
       recipients,
     })
 
+    const signature = await signSignedEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
+
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
     const j = await fetchJson('/api/signed/messages/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ chatId, encryptedData }),
+      body: JSON.stringify({ chatId, encryptedData, signature }),
     })
 
     const msgId = typeof j.messageId === 'string' ? j.messageId : null
@@ -2172,7 +2552,7 @@ export const useSignedStore = defineStore('signed', () => {
     if (cur.some((m) => m.id === msgId)) return
     messagesByChatId.value = {
       ...messagesByChatId.value,
-      [chatId]: [...cur, { id: msgId, chatId, senderId: userId.value, atIso, modifiedAtIso: null, fromUsername: username.value, text: t, replyToId }],
+      [chatId]: [...cur, { id: msgId, chatId, senderId: userId.value, atIso, modifiedAtIso: null, fromUsername: username.value, text: t, replyToId, verification: 'verified' }],
     }
   }
 
@@ -2191,11 +2571,13 @@ export const useSignedStore = defineStore('signed', () => {
       throw new Error('Expiration days must be between 7 and 365')
     }
 
-    // Check name availability before generating/storing key material.
-    const check = await fetchJson('/api/auth/check-username', {
+    const nameToken = await voprfNameToken({ kind: 'user', input: u })
+
+    // Check name-token availability before generating/storing key material.
+    const check = await fetchJson('/api/auth/check-name-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u }),
+      body: JSON.stringify({ nameToken }),
     })
     if (check && check.exists === true) {
       throw new Error('Username already exists')
@@ -2212,6 +2594,7 @@ export const useSignedStore = defineStore('signed', () => {
     // Import private key before setting token/userId so App.vue doesn't interpret
     // the session as "signed in but locked" mid-register and auto-logout.
     const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
+    const importedSigningKey = await importRsaPssPrivateKeyJwk(privateJwk)
 
     const vaultJson = makeVaultJson(exp)
     const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
@@ -2221,7 +2604,7 @@ export const useSignedStore = defineStore('signed', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: u,
+        nameToken,
         publicKey: publicJwk,
         removeDate,
         vault: vaultEnc,
@@ -2231,7 +2614,7 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = typeof j.token === 'string' ? j.token : null
     expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
-    username.value = typeof j.username === 'string' ? j.username : u
+    username.value = u
     hiddenMode.value = Boolean(j?.hiddenMode)
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
@@ -2244,6 +2627,7 @@ export const useSignedStore = defineStore('signed', () => {
     storeRemoveDateIso(removeDate)
 
     privateKey.value = importedPrivateKey
+    signingKey.value = importedSigningKey
 
     // Persist key material only after server registration succeeds.
     await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
@@ -2285,13 +2669,16 @@ export const useSignedStore = defineStore('signed', () => {
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
     const priv = await importRsaPrivateKeyJwk(privateJwk)
+    const signPriv = await importRsaPssPrivateKeyJwk(privateJwk)
 
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
+
+    const nameToken = await voprfNameToken({ kind: 'user', input: u })
 
     const init = await fetchJson('/api/auth/login-init', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, publicKey: publicJwk }),
+      body: JSON.stringify({ nameToken, publicKey: publicJwk }),
     })
 
     const challengeId = typeof (init as any)?.challengeId === 'string' ? String((init as any).challengeId) : ''
@@ -2309,11 +2696,12 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = typeof j.token === 'string' ? j.token : null
     expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
-    username.value = typeof j.username === 'string' ? j.username : u
+    username.value = u
     hiddenMode.value = Boolean(j?.hiddenMode)
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
     privateKey.value = priv
+    signingKey.value = signPriv
 
     vaultEncrypted.value = typeof (j as any)?.vault === 'string' ? String((j as any).vault) : ''
     if (vaultEncrypted.value) {
@@ -2380,17 +2768,20 @@ export const useSignedStore = defineStore('signed', () => {
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
     const priv = await importRsaPrivateKeyJwk(privateJwk)
+    const signPriv = await importRsaPssPrivateKeyJwk(privateJwk)
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
 
     const vaultJson = makeVaultJson(exp)
     const vaultEnc = await encryptSmallStringWithPublicKeyJwk({ plaintext: vaultJson, publicKeyJwkJson: publicJwk })
     const removeDate = computeRemoveDateIsoForNow(exp)
 
+    const nameToken = await voprfNameToken({ kind: 'user', input: u })
+
     const j = await fetchJson('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: u,
+        nameToken,
         publicKey: publicJwk,
         removeDate,
         vault: vaultEnc,
@@ -2400,7 +2791,7 @@ export const useSignedStore = defineStore('signed', () => {
     token.value = typeof j.token === 'string' ? j.token : null
     expiresAtMs.value = typeof (j as any)?.expiresAt === 'number' ? Number((j as any).expiresAt) : null
     userId.value = typeof j.userId === 'string' ? j.userId : null
-    username.value = typeof j.username === 'string' ? j.username : u
+    username.value = u
     hiddenMode.value = Boolean(j?.hiddenMode)
     introvertMode.value = Boolean(j?.introvertMode)
     publicKeyJwk.value = publicJwk
@@ -2413,6 +2804,7 @@ export const useSignedStore = defineStore('signed', () => {
     storeRemoveDateIso(removeDate)
 
     privateKey.value = priv
+    signingKey.value = signPriv
 
     if (token.value && userId.value && username.value) {
       storeSession(
@@ -2472,6 +2864,7 @@ export const useSignedStore = defineStore('signed', () => {
     introvertMode.value = false
     publicKeyJwk.value = null
     privateKey.value = null
+    signingKey.value = null
     vaultEncrypted.value = ''
     vaultPlain.value = null
     removeDateIso.value = null

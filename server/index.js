@@ -6,6 +6,7 @@ import express from 'express';
 import webpush from 'web-push';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
+import { Oprf, VOPRFServer, generatePublicKey, randomPrivateKey, EvaluationRequest, Evaluation } from '@cloudflare/voprf-ts';
 import { debugError } from './logger.js';
 import { APP_VERSION as SERVER_APP_VERSION } from './appVersion.js';
 import {
@@ -20,7 +21,7 @@ import {
   deleteSubscriptionsByEndpoint,
 } from './pushDb.js';
 import { initDatabase, query, runMigrations } from './db.js';
-import { registerUser, findUserByUsernameAndPublicKey, getUserByUsername } from './auth.js';
+import { registerUser, findUserByNameTokenAndPublicKey, userTokenExists, getUserByNameToken } from './auth.js';
 import { issueToken, rotateToken, getSessionForToken, requireSignedAuth, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './signedSession.js';
 import {
   signedListChats,
@@ -79,6 +80,29 @@ const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? '';
 const PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 
 const VAPID_SUBJECT = (process.env.VAPID_SUBJECT ?? '').trim() || 'mailto:admin@localhost';
+
+// VOPRF: server holds secret key, client gets opaque name tokens.
+// If VOPRF_PRIVATE_KEY_B64U is not provided, we generate a random key at startup.
+// WARNING: changing this key invalidates all existing name tokens in DB.
+const VOPRF_SUITE = Oprf.Suite.P256_SHA256;
+const VOPRF_PRIVATE_KEY_B64U = (process.env.VOPRF_PRIVATE_KEY_B64U ?? '').trim();
+
+function b64uToBytes(s) {
+  const str = String(s || '');
+  return new Uint8Array(Buffer.from(str, 'base64url'));
+}
+
+function bytesToB64u(bytes) {
+  return Buffer.from(bytes).toString('base64url');
+}
+
+const voprfPrivateKey = VOPRF_PRIVATE_KEY_B64U
+  ? b64uToBytes(VOPRF_PRIVATE_KEY_B64U)
+  : await randomPrivateKey(VOPRF_SUITE);
+
+const voprfPublicKey = generatePublicKey(VOPRF_SUITE, voprfPrivateKey);
+const VOPRF_PUBLIC_KEY_B64U = bytesToB64u(voprfPublicKey);
+const voprfServer = new VOPRFServer(VOPRF_SUITE, voprfPrivateKey);
 
 // Login challenges are RAM-only. Server restart => login retry required.
 // challengeId -> { userId: string, challenge: string, expiresAtMs: number }
@@ -374,24 +398,44 @@ app.post('/api/signed/push/disable', requireSignedAuth, (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ appName: APP_NAME });
+  res.json({
+    appName: APP_NAME,
+    voprf: { mode: 'VOPRF', suite: 'P256_SHA256', publicKeyB64u: VOPRF_PUBLIC_KEY_B64U },
+  });
+});
+
+// VOPRF blind evaluation endpoint.
+app.post('/api/voprf/eval', (req, res) => {
+  (async () => {
+    const evalReqB64u = typeof req.body?.evalReqB64u === 'string' ? req.body.evalReqB64u : '';
+    if (!evalReqB64u) return res.status(400).json({ error: 'evalReqB64u required' });
+    if (evalReqB64u.length > 200_000) return res.status(413).json({ error: 'Too large' });
+
+    const reqBytes = b64uToBytes(evalReqB64u);
+    const evalReq = EvaluationRequest.deserialize(VOPRF_SUITE, reqBytes);
+    const evaluation = await voprfServer.blindEvaluate(evalReq);
+    const evaluationB64u = bytesToB64u(evaluation.serialize());
+    res.json({ success: true, evaluationB64u });
+  })().catch(() => {
+    res.status(400).json({ error: 'Bad request' });
+  });
 });
 
 // Auth endpoints (password is local-only; server never sees it)
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const username = typeof req.body?.username === 'string' ? req.body.username : '';
+    const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
     const publicKey = typeof req.body?.publicKey === 'string' ? req.body.publicKey : '';
     const removeDateIso = typeof req.body?.removeDate === 'string' ? req.body.removeDate : '';
     const vault = typeof req.body?.vault === 'string' ? req.body.vault : '';
 
-    if (!username || !publicKey || !removeDateIso || !vault) {
+    if (!nameToken || !publicKey || !removeDateIso || !vault) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const removeDate = new Date(removeDateIso);
 
-    const user = await registerUser({ username, publicKey, removeDate, vault });
+    const user = await registerUser({ nameToken, publicKey, removeDate, vault });
 
     const { token, expiresAt, evicted } = issueToken(String(user.id));
 
@@ -413,7 +457,6 @@ app.post('/api/auth/register', async (req, res) => {
       token,
       expiresAt,
       userId: user.id,
-      username: user.username,
       hiddenMode: Boolean(user.hidden_mode),
       introvertMode: Boolean(user.introvert_mode),
     });
@@ -425,18 +468,18 @@ app.post('/api/auth/register', async (req, res) => {
 // Step 1: init login with username + public key, return encrypted challenge.
 app.post('/api/auth/login-init', async (req, res) => {
   try {
-    const username = typeof req.body?.username === 'string' ? req.body.username : '';
+    const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
     const publicKey = typeof req.body?.publicKey === 'string' ? req.body.publicKey : '';
-    if (!username || !publicKey) {
+    if (!nameToken || !publicKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const user = await findUserByUsernameAndPublicKey({ username, publicKey });
+    const user = await findUserByNameTokenAndPublicKey({ nameToken, publicKey });
     if (!user) {
       // Special case for account recreation: if the username does not exist at all,
       // allow the client to offer re-registering with an existing local key.
-      const byUsername = await getUserByUsername(username);
-      if (!byUsername) {
+      const byToken = await getUserByNameToken(nameToken);
+      if (!byToken) {
         return res.status(404).json({ error: 'User not found' });
       }
       return res.status(401).json({ error: 'Unauthorized' });
@@ -483,7 +526,7 @@ app.post('/api/auth/login-final', async (req, res) => {
 
     const userId = String(entry.userId);
     const u = await query(
-      'SELECT id, username, public_key, hidden_mode, introvert_mode, vault FROM users WHERE id = $1',
+      'SELECT id, public_key, hidden_mode, introvert_mode, vault FROM users WHERE id = $1',
       [userId],
     );
     const user = u?.rows?.[0];
@@ -511,7 +554,6 @@ app.post('/api/auth/login-final', async (req, res) => {
       token,
       expiresAt,
       userId: String(user.id),
-      username: String(user.username),
       hiddenMode: Boolean(user.hidden_mode),
       introvertMode: Boolean(user.introvert_mode),
       vault: typeof user.vault === 'string' ? user.vault : '',
@@ -615,18 +657,18 @@ app.post('/api/signed/account/introvert-mode', requireSignedAuth, async (req, re
   }
 });
 
-app.post('/api/auth/check-username', async (req, res) => {
+app.post('/api/auth/check-name-token', async (req, res) => {
   try {
-    const { username } = req.body;
+    const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
     
-    if (!username) {
-      return res.status(400).json({ error: 'Username required' });
+    if (!nameToken) {
+      return res.status(400).json({ error: 'nameToken required' });
     }
 
-    const user = await getUserByUsername(username);
+    const exists = await userTokenExists(nameToken);
 
     res.json({
-      exists: !!user,
+      exists,
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -735,10 +777,11 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
 app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
-    const otherUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
-    if (!otherUsername) return res.status(400).json({ error: 'Username required' });
+    const otherUserId = typeof req.body?.otherUserId === 'string' ? req.body.otherUserId : '';
+    const names = req.body?.names;
+    if (!otherUserId || !names) return res.status(400).json({ error: 'otherUserId and names required' });
 
-    const result = await signedCreatePersonalChat(userId, otherUsername);
+    const result = await signedCreatePersonalChat(userId, otherUserId, names);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       if (result.reason === 'introvert') {
@@ -776,10 +819,36 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
 app.post('/api/signed/chats/create-group', requireSignedAuth, async (req, res) => {
   try {
     const userId = String(req._signedUserId);
-    const name = typeof req.body?.name === 'string' ? req.body.name : '';
-    const result = await signedCreateGroupChat(userId, name);
+    const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
+    const names = req.body?.names;
+    const result = await signedCreateGroupChat(userId, chatNameEnc, names);
     if (!result.ok) return res.status(400).json({ error: result.reason });
     res.json({ success: true, chat: result.chat });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Signed user lookup by nameToken (VOPRF output). Returns userId+publicKey.
+app.post('/api/signed/users/lookup', requireSignedAuth, async (req, res) => {
+  try {
+    const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
+    if (!nameToken) return res.status(400).json({ error: 'nameToken required' });
+
+    const r = await query(
+      'SELECT id::text AS id, public_key, introvert_mode FROM users WHERE name_token = $1 LIMIT 1',
+      [nameToken],
+    );
+    const row = r?.rows?.[0];
+    if (!row?.id) return res.status(404).json({ error: 'not_found' });
+    if (Boolean(row.introvert_mode)) {
+      return res.status(403).json({
+        error:
+          'This is in introvert mode and he can not be added. If it your friend ask him to create a chat, or disaple introvert mode',
+      });
+    }
+
+    res.json({ success: true, userId: String(row.id), publicKey: String(row.public_key ?? '') });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -804,10 +873,14 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
   try {
     const userId = String(req._signedUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
-    const username = typeof req.body?.username === 'string' ? req.body.username : '';
-    if (!chatId || !username) return res.status(400).json({ error: 'chatId and username required' });
+    const otherUserId = typeof req.body?.otherUserId === 'string' ? req.body.otherUserId : '';
+    const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
+    const names = req.body?.names;
+    if (!chatId || !otherUserId || !names || !chatNameEnc) {
+      return res.status(400).json({ error: 'chatId, otherUserId, chatNameEnc, names required' });
+    }
 
-    const result = await signedAddGroupMember(userId, chatId, username);
+    const result = await signedAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       if (result.reason === 'introvert') {
@@ -844,10 +917,10 @@ app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) =
   try {
     const userId = String(req._signedUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
-    const name = typeof req.body?.name === 'string' ? req.body.name : '';
-    if (!chatId || !name) return res.status(400).json({ error: 'chatId and name required' });
+    const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
+    if (!chatId || !chatNameEnc) return res.status(400).json({ error: 'chatId and chatNameEnc required' });
 
-    const result = await signedRenameGroupChat(userId, chatId, name);
+    const result = await signedRenameGroupChat(userId, chatId, chatNameEnc);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       return res.status(code).json({ error: result.reason });
@@ -911,16 +984,14 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
     const senderId = String(req._signedUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
+    const signature = typeof req.body?.signature === 'string' ? req.body.signature : '';
     if (!chatId || !encryptedData) return res.status(400).json({ error: 'chatId and encryptedData required' });
 
     if (Buffer.byteLength(encryptedData, 'utf8') > MAX_ENCRYPTED_MESSAGE_BYTES) {
       return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
     }
 
-    const senderUsernameRes = await query('SELECT username FROM users WHERE id = $1 LIMIT 1', [senderId]);
-    const senderUsername = String(senderUsernameRes?.rows?.[0]?.username ?? '');
-
-    const { messageId, memberIds } = await signedSendMessage({ senderId, chatId, encryptedData });
+    const { messageId, memberIds } = await signedSendMessage({ senderId, chatId, encryptedData, signature });
 
     // Best-effort realtime notify to signed sockets.
     const payload = {
@@ -928,8 +999,8 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       chatId,
       id: messageId,
       senderId,
-      senderUsername,
       encryptedData,
+      signature,
     };
     for (const uid of memberIds) {
       forEachSignedSocket(uid, (ws) => {
@@ -991,6 +1062,7 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId : '';
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
+    const signature = typeof req.body?.signature === 'string' ? req.body.signature : '';
     if (!chatId || !messageId || !encryptedData) {
       return res.status(400).json({ error: 'chatId, messageId, encryptedData required' });
     }
@@ -999,17 +1071,14 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
       return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
     }
 
-    const r = await signedUpdateMessage({ userId, chatId, messageId, encryptedData });
+    const r = await signedUpdateMessage({ userId, chatId, messageId, encryptedData, signature });
     if (!r.ok) {
       if (r.reason === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
       if (r.reason === 'bad_payload') return res.status(400).json({ error: 'Bad payload' });
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const senderUsernameRes = await query('SELECT username FROM users WHERE id = $1 LIMIT 1', [userId]);
-    const senderUsername = String(senderUsernameRes?.rows?.[0]?.username ?? '');
-
-    const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, senderUsername, encryptedData };
+    const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, encryptedData, signature };
     for (const uid of r.memberIds) {
       forEachSignedSocket(uid, (ws) => {
         if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
@@ -1624,13 +1693,7 @@ wss.on('connection', async (ws, req) => {
         ws.isAlive = true;
       });
 
-      let signedName = '';
-      try {
-        const r = await query('SELECT username FROM users WHERE id = $1', [String(uid)]);
-        signedName = String(r?.rows?.[0]?.username ?? '') || '';
-      } catch {
-        signedName = '';
-      }
+      const signedName = '';
 
       const prev = signedUsers.get(uid);
 

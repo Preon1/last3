@@ -303,6 +303,8 @@ const en = {
       typeMessage: 'Type a message...',
       replying: 'Replying',
       replyingTo: 'Replying to {name}',
+      unverifiableMessage: 'Unverifiable',
+      unverifiableMessageHint: 'This message was delivered, but its signature could not be verified.',
         remove: 'Entfernen',
       replyTo: 'Reply to {name}',
         removeSpecific: 'Einen bestimmten Schlüssel entfernen',

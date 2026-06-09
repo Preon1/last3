@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  username VARCHAR(64) UNIQUE NOT NULL,
+  name_token TEXT UNIQUE NOT NULL,
   public_key TEXT NOT NULL,
   vault TEXT NOT NULL DEFAULT '',
   remove_date TIMESTAMP NOT NULL,
@@ -14,14 +14,15 @@ CREATE TABLE IF NOT EXISTS users (
   introvert_mode BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_name_token ON users(name_token);
 CREATE INDEX idx_users_remove_date ON users(remove_date);
 
 -- Chats table
 CREATE TABLE IF NOT EXISTS chats (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   chat_type VARCHAR(10) NOT NULL CHECK (chat_type IN ('personal', 'group')),
-  chat_name TEXT
+  chat_name_enc TEXT NOT NULL DEFAULT '',
+  names JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX idx_chats_type ON chats(chat_type);
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY,
   chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  encrypted_data TEXT NOT NULL
+  encrypted_data TEXT NOT NULL,
+  signature TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_messages_chat ON messages(chat_id);

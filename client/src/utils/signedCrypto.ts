@@ -220,6 +220,26 @@ export async function importRsaPublicKeyJwk(jwkJson: string) {
   )
 }
 
+function stripJwkOps(jwk: any) {
+  if (!jwk || typeof jwk !== 'object') return jwk
+  const out = { ...jwk }
+  // Some JWKs include key_ops that can prevent re-import for different usages.
+  delete (out as any).key_ops
+  delete (out as any).alg
+  return out
+}
+
+export async function importRsaPssPublicKeyJwk(jwkJson: string) {
+  const jwk = stripJwkOps(JSON.parse(jwkJson))
+  return crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'RSA-PSS', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  )
+}
+
 export async function importRsaPrivateKeyJwk(jwkJson: string) {
   const jwk = JSON.parse(jwkJson)
   return crypto.subtle.importKey(
@@ -229,6 +249,63 @@ export async function importRsaPrivateKeyJwk(jwkJson: string) {
     false,
     ['decrypt'],
   )
+}
+
+export async function importRsaPssPrivateKeyJwk(jwkJson: string) {
+  const jwk = stripJwkOps(JSON.parse(jwkJson))
+  return crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'RSA-PSS', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+}
+
+export async function signSignedEnvelope(params: { signingKey: CryptoKey; senderId: string; chatId: string; encryptedData: string }) {
+  const payload = JSON.stringify({
+    v: 1,
+    senderId: String(params.senderId),
+    chatId: String(params.chatId),
+    encryptedData: String(params.encryptedData),
+  })
+
+  const sig = await crypto.subtle.sign(
+    { name: 'RSA-PSS', saltLength: 32 },
+    params.signingKey,
+    encUtf8(payload),
+  )
+  return b64(sig)
+}
+
+export async function verifySignedEnvelope(params: {
+  verifyKey: CryptoKey
+  signatureB64: string
+  senderId: string
+  chatId: string
+  encryptedData: string
+}) {
+  const sigB64 = String(params.signatureB64 ?? '')
+  if (!sigB64) return false
+
+  const payload = JSON.stringify({
+    v: 1,
+    senderId: String(params.senderId),
+    chatId: String(params.chatId),
+    encryptedData: String(params.encryptedData),
+  })
+
+  try {
+    const sig = unb64(sigB64)
+    return await crypto.subtle.verify(
+      { name: 'RSA-PSS', saltLength: 32 },
+      params.verifyKey,
+      sig,
+      encUtf8(payload),
+    )
+  } catch {
+    return false
+  }
 }
 
 export async function encryptSmallStringWithPublicKeyJwk(params: {

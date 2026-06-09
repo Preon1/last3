@@ -9,6 +9,7 @@
     "delete-user": "node scripts/delete-user.js"
   },
   "dependencies": {
+    "@cloudflare/voprf-ts": "^1.0.0",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "pg": "^8.13.1",

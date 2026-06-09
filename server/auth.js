@@ -1,11 +1,5 @@
 import { query } from './db.js'
 
-function assertUsernameIsXssSafe(username) {
-  const u = String(username ?? '')
-  if (u.includes('<') || u.includes('>')) throw new Error('Username contains unsafe characters')
-  if (/[\u0000-\u001F\u007F]/.test(u)) throw new Error('Username contains unsafe characters')
-}
-
 function parseRsaPublicJwk(jwkString) {
   if (!jwkString || typeof jwkString !== 'string') return null
   try {
@@ -34,13 +28,13 @@ export function normalizePublicKeyJwkString(jwkString) {
 /**
  * Register a new user
  */
-export async function registerUser({ username, publicKey, removeDate, vault }) {
+export async function registerUser({ nameToken, publicKey, removeDate, vault }) {
   // Validate inputs
-  if (!username || username.length < 3 || username.length > 64) {
-    throw new Error('Username must be between 3 and 64 characters')
+  const token = typeof nameToken === 'string' ? nameToken.trim() : ''
+  // VOPRF output is opaque; constrain size to avoid abuse.
+  if (!token || token.length < 16 || token.length > 256) {
+    throw new Error('nameToken invalid')
   }
-
-  assertUsernameIsXssSafe(username)
 
   if (!publicKey) {
     throw new Error('Public key is required')
@@ -64,10 +58,10 @@ export async function registerUser({ username, publicKey, removeDate, vault }) {
     throw new Error('vault too large')
   }
 
-  // Check if username already exists
+  // Check if nameToken already exists
   const existingUser = await query(
-    'SELECT id FROM users WHERE username = $1',
-    [username]
+    'SELECT id FROM users WHERE name_token = $1',
+    [token]
   )
   
   if (existingUser.rows.length > 0) {
@@ -76,10 +70,10 @@ export async function registerUser({ username, publicKey, removeDate, vault }) {
 
   // Insert user
   const result = await query(
-    `INSERT INTO users (username, public_key, remove_date, vault)
+    `INSERT INTO users (name_token, public_key, remove_date, vault)
      VALUES ($1, $2, $3, $4)
-     RETURNING id, username, public_key, remove_date, hidden_mode, introvert_mode, vault`,
-    [username, normalizedPublicKey, removeDate, vault]
+     RETURNING id, name_token, public_key, remove_date, hidden_mode, introvert_mode, vault`,
+    [token, normalizedPublicKey, removeDate, vault]
   )
 
   return result.rows[0]
@@ -88,15 +82,15 @@ export async function registerUser({ username, publicKey, removeDate, vault }) {
 /**
  * Find a user by username+publicKey exact match.
  */
-export async function findUserByUsernameAndPublicKey({ username, publicKey }) {
-  if (!username || typeof username !== 'string') return null
+export async function findUserByNameTokenAndPublicKey({ nameToken, publicKey }) {
+  if (!nameToken || typeof nameToken !== 'string') return null
   if (!publicKey || typeof publicKey !== 'string') return null
   const normalizedPublicKey = normalizeRsaPublicJwkString(publicKey)
   if (!normalizedPublicKey) return null
 
   const userResult = await query(
-    'SELECT id, username, public_key, remove_date, hidden_mode, introvert_mode, vault FROM users WHERE username = $1 AND public_key = $2',
-    [username, normalizedPublicKey],
+    'SELECT id, name_token, public_key, remove_date, hidden_mode, introvert_mode, vault FROM users WHERE name_token = $1 AND public_key = $2',
+    [nameToken, normalizedPublicKey],
   )
 
   return userResult.rows[0] || null
@@ -105,11 +99,10 @@ export async function findUserByUsernameAndPublicKey({ username, publicKey }) {
 /**
  * Check if username exists
  */
-export async function userExists(username) {
-  const result = await query(
-    'SELECT id FROM users WHERE username = $1',
-    [username]
-  )
+export async function userTokenExists(nameToken) {
+  const token = typeof nameToken === 'string' ? nameToken.trim() : ''
+  if (!token) return false
+  const result = await query('SELECT id FROM users WHERE name_token = $1', [token])
   return result.rows.length > 0
 }
 
@@ -118,19 +111,18 @@ export async function userExists(username) {
  */
 export async function getUserById(userId) {
   const result = await query(
-    'SELECT id, username, public_key FROM users WHERE id = $1',
+    'SELECT id, public_key FROM users WHERE id = $1',
     [userId]
   )
   return result.rows[0] || null
 }
 
 /**
- * Get user by username
+ * Get user by name token
  */
-export async function getUserByUsername(username) {
-  const result = await query(
-    'SELECT id, username, public_key, vault, remove_date FROM users WHERE username = $1',
-    [username]
-  )
+export async function getUserByNameToken(nameToken) {
+  const token = typeof nameToken === 'string' ? nameToken.trim() : ''
+  if (!token) return null
+  const result = await query('SELECT id, public_key, vault, remove_date FROM users WHERE name_token = $1', [token])
   return result.rows[0] || null
 }

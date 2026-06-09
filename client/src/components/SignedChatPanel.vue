@@ -831,7 +831,14 @@ function onMessagesScroll() {
         @pointercancel="onMsgPointerCancel"
       >
         <div class="chat-meta">
-          <span>{{ m.fromUsername }}</span>
+          <span class="chat-meta-left">
+            <span>{{ m.fromUsername }}</span>
+            <span
+              v-if="m.verification === 'unverifiable'"
+              class="chat-verify-flag"
+              :title="String(t('chat.unverifiableMessageHint'))"
+            >{{ t('chat.unverifiableMessage') }}</span>
+          </span>
 
           <span class="muted" style="margin-left: 10px;">
             <template v-if="m.modifiedAtIso">
@@ -941,5 +948,27 @@ function onMessagesScroll() {
 <style scoped>
 .small{
   padding: 8px;
+}
+
+.chat-meta-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-verify-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--danger) 18%, var(--border));
+  background: color-mix(in srgb, var(--glass-bg) 78%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 38%, var(--muted));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>
