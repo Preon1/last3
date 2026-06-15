@@ -108,7 +108,7 @@ async function scrubUserFromChatMetadata(client, chatId, userId) {
   )
 }
 
-export async function signedCleanupExpiredUsers(now = new Date()) {
+export async function authCleanupExpiredUsers(now = new Date()) {
   const asDate = now instanceof Date ? now : new Date(now)
 
   const result = await transaction(async (client) => {
@@ -171,7 +171,7 @@ export async function signedCleanupExpiredUsers(now = new Date()) {
   return result
 }
 
-export async function signedDeleteAccount(userId) {
+export async function authDeleteAccount(userId) {
   if (!userId) throw new Error('userId required')
 
   const result = await transaction(async (client) => {
@@ -218,7 +218,7 @@ export async function signedDeleteAccount(userId) {
   return result
 }
 
-export async function signedListChats(userId) {
+export async function authListChats(userId) {
   const chats = await query(
     `SELECT c.id, c.chat_type, c.chat_name_enc, c.names
      FROM chats c
@@ -269,7 +269,7 @@ export async function signedListChats(userId) {
     .filter(Boolean)
 }
 
-async function signedLastMessagesForUserByChatIds(userId, chatIds) {
+async function authLastMessagesForUserByChatIds(userId, chatIds) {
   const ids = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
   if (!ids.length) return []
 
@@ -293,7 +293,7 @@ async function signedLastMessagesForUserByChatIds(userId, chatIds) {
   }))
 }
 
-export async function signedGetLastMessagesForChatIds(userId, chatIds, opts = {}) {
+export async function authGetLastMessagesForChatIds(userId, chatIds, opts = {}) {
   const enforceMembership = opts?.enforceMembership !== false
   const list = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
   if (!list.length) return []
@@ -317,17 +317,17 @@ export async function signedGetLastMessagesForChatIds(userId, chatIds, opts = {}
     }
   }
 
-  const rows = await signedLastMessagesForUserByChatIds(userId, unique)
+  const rows = await authLastMessagesForUserByChatIds(userId, unique)
   const byChatId = new Map(rows.map((m) => [String(m.chatId), m]))
 
   // Preserve caller order; chats with no messages get null.
   return list.map((cid) => byChatId.get(String(cid)) ?? null)
 }
 
-export async function signedListChatsWithLastMessage(userId) {
-  const chats = await signedListChats(userId)
+export async function authListChatsWithLastMessage(userId) {
+  const chats = await authListChats(userId)
   const chatIds = chats.map((c) => c.id)
-  const last = await signedGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: false })
+  const last = await authGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: false })
   const lastByChatId = new Map(
     chatIds.map((cid, i) => [String(cid), last[i]]),
   )
@@ -338,7 +338,7 @@ export async function signedListChatsWithLastMessage(userId) {
   }))
 }
 
-export async function signedUnreadCounts(userId) {
+export async function authUnreadCounts(userId) {
   const result = await query(
     `SELECT chat_id, COUNT(*)::int AS count
      FROM unread_messages
@@ -350,7 +350,7 @@ export async function signedUnreadCounts(userId) {
   return result.rows.map((r) => ({ chatId: String(r.chat_id), count: Number(r.count) || 0 }))
 }
 
-export async function signedCreatePersonalChat(userId, otherUserId, names) {
+export async function authCreatePersonalChat(userId, otherUserId, names) {
   const otherRes = await query('SELECT id, public_key, introvert_mode FROM users WHERE id = $1', [String(otherUserId)])
   if (otherRes.rows.length === 0) return { ok: false, reason: 'not_found' }
 
@@ -422,7 +422,7 @@ export async function signedCreatePersonalChat(userId, otherUserId, names) {
   }
 }
 
-export async function signedCreateGroupChat(userId, chatNameEnc, names) {
+export async function authCreateGroupChat(userId, chatNameEnc, names) {
   const enc = typeof chatNameEnc === 'string' ? chatNameEnc : ''
   if (!enc) return { ok: false, reason: 'bad_name' }
   if (enc.length > 100_000) return { ok: false, reason: 'bad_name' }
@@ -449,7 +449,7 @@ export async function signedCreateGroupChat(userId, chatNameEnc, names) {
   return { ok: true, chat: { id: String(chatId), type: 'group', chatNameEnc: enc, names: namesJson } }
 }
 
-export async function signedListChatMembers(userId, chatId) {
+export async function authListChatMembers(userId, chatId) {
   await assertChatMember(userId, chatId)
 
   const chat = await query(
@@ -481,7 +481,7 @@ export async function signedListChatMembers(userId, chatId) {
   }))
 }
 
-export async function signedAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc) {
+export async function authAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc) {
   await assertChatMember(userId, chatId)
 
   const chat = await query(
@@ -535,7 +535,7 @@ export async function signedAddGroupMember(userId, chatId, otherUserId, names, c
   }
 }
 
-export async function signedRenameGroupChat(userId, chatId, chatNameEnc) {
+export async function authRenameGroupChat(userId, chatId, chatNameEnc) {
   await assertChatMember(userId, chatId)
 
   const chat = await query(
@@ -588,7 +588,7 @@ async function assertChatMember(userId, chatId) {
   }
 }
 
-export async function signedFetchMessages(userId, chatId, limit = 50, beforeId = null) {
+export async function authFetchMessages(userId, chatId, limit = 50, beforeId = null) {
   await assertChatMember(userId, chatId)
 
   const lim = Math.max(1, Math.min(200, Number(limit) || 50))
@@ -621,7 +621,7 @@ export async function signedFetchMessages(userId, chatId, limit = 50, beforeId =
   }))
 }
 
-export async function signedSendMessage({ senderId, chatId, encryptedData, signature = '' }) {
+export async function authSendMessage({ senderId, chatId, encryptedData, signature = '' }) {
   await assertChatMember(senderId, chatId)
 
   const messageId = uuidv7()
@@ -663,7 +663,7 @@ export async function signedSendMessage({ senderId, chatId, encryptedData, signa
   return result
 }
 
-export async function signedMarkChatRead(userId, chatId) {
+export async function authMarkChatRead(userId, chatId) {
   await assertChatMember(userId, chatId)
   await query(
     `DELETE FROM unread_messages
@@ -672,7 +672,7 @@ export async function signedMarkChatRead(userId, chatId) {
   )
 }
 
-export async function signedMarkMessagesRead(userId, chatId, messageIds) {
+export async function authMarkMessagesRead(userId, chatId, messageIds) {
   await assertChatMember(userId, chatId)
 
   const ids = Array.isArray(messageIds) ? messageIds.map(String).filter(Boolean) : []
@@ -695,7 +695,7 @@ export async function signedMarkMessagesRead(userId, chatId, messageIds) {
   return { unreadCount }
 }
 
-export async function signedUnreadMessageIds(userId, chatId, limit = 500) {
+export async function authUnreadMessageIds(userId, chatId, limit = 500) {
   await assertChatMember(userId, chatId)
   const lim = Math.max(1, Math.min(5000, Number(limit) || 500))
   const r = await query(
@@ -709,7 +709,7 @@ export async function signedUnreadMessageIds(userId, chatId, limit = 500) {
   return r.rows.map((x) => String(x.message_id))
 }
 
-export async function signedDeleteMessage({ userId, chatId, messageId }) {
+export async function authDeleteMessage({ userId, chatId, messageId }) {
   await assertChatMember(userId, chatId)
 
   const result = await transaction(async (client) => {
@@ -743,7 +743,7 @@ export async function signedDeleteMessage({ userId, chatId, messageId }) {
   return result
 }
 
-export async function signedUpdateMessage({ userId, chatId, messageId, encryptedData, signature = '' }) {
+export async function authUpdateMessage({ userId, chatId, messageId, encryptedData, signature = '' }) {
   await assertChatMember(userId, chatId)
   const enc = typeof encryptedData === 'string' ? encryptedData : ''
   if (!enc) return { ok: false, reason: 'bad_payload' }
@@ -781,7 +781,7 @@ export async function signedUpdateMessage({ userId, chatId, messageId, encrypted
   return result
 }
 
-export async function signedLeaveChat(userId, chatId) {
+export async function authLeaveChat(userId, chatId) {
   await assertChatMember(userId, chatId)
 
   const result = await transaction(async (client) => {
@@ -878,7 +878,7 @@ export async function signedLeaveChat(userId, chatId) {
   return result
 }
 
-export async function signedDeletePersonalChat(userId, chatId) {
+export async function authDeletePersonalChat(userId, chatId) {
   await assertChatMember(userId, chatId)
 
   const result = await transaction(async (client) => {

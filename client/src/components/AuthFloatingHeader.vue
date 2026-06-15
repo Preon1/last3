@@ -2,12 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useCallStore } from '../stores/call'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const call = useCallStore()
-const { view, otherChatsUnread, activeChatId, chats, membersByChatId } = storeToRefs(signed)
+const { view, otherChatsUnread, activeChatId, chats, membersByChatId } = storeToRefs(authStore)
 const { joinConfirmToId, joinConfirmToName, inCall, outgoingPending, pendingIncomingFrom, joinPending } = storeToRefs(call)
 const { t } = useI18n()
 
@@ -44,13 +44,13 @@ const activeChat = computed(() => {
 const chatOnlineState = computed(() => {
   const cid = activeChatId.value
   if (!cid) return null
-  return signed.getChatOnlineState(cid)
+  return authStore.getChatOnlineState(cid)
 })
 
 const chatTitle = computed(() => {
   if (view.value !== 'chat') return String(t('common.settings'))
   const c = activeChat.value
-  if (!c) return String(t('signed.chat'))
+  if (!c) return String(t('chat'))
   return String(c.name ?? c.id)
 })
 
@@ -90,16 +90,16 @@ const canOpenOtherMenu = computed(() => {
 
 const deleteTitle = computed(() => {
   if (activeChat.value?.type === 'group') {
-    return deleteIsLastMember.value ? String(t('signed.deleteGroup')) : String(t('signed.leaveGroup'))
+    return deleteIsLastMember.value ? String(t('deleteGroup')) : String(t('leaveGroup'))
   }
-  return String(t('signed.deleteChat'))
+  return String(t('deleteChat'))
 })
 
 const deleteBody = computed(() => {
   if (activeChat.value?.type === 'group') {
-    return deleteIsLastMember.value ? String(t('signed.deleteGroupWarning')) : String(t('signed.leaveGroupRemoveMyMessagesWarning'))
+    return deleteIsLastMember.value ? String(t('deleteGroupWarning')) : String(t('leaveGroupRemoveMyMessagesWarning'))
   }
-  return String(t('signed.deleteChatWarning'))
+  return String(t('deleteChatWarning'))
 })
 
 function openDeleteConfirm() {
@@ -113,7 +113,7 @@ function openDeleteConfirm() {
     deleteInfoBusy.value = true
     void (async () => {
       try {
-        const list = await signed.fetchChatMembers(String(activeChatId.value))
+        const list = await authStore.fetchChatMembers(String(activeChatId.value))
         deleteIsLastMember.value = Array.isArray(list) && list.length <= 1
       } catch {
         // ignore
@@ -140,10 +140,10 @@ async function onConfirmDelete() {
   deleteBusy.value = true
   deleteReport.value = ''
   try {
-    await signed.deleteChat(cid)
+    await authStore.deleteChat(cid)
     closeDeleteConfirm()
   } catch (e: any) {
-    deleteReport.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    deleteReport.value = typeof e?.message === 'string' ? e.message : String(t('genericError'))
   } finally {
     deleteBusy.value = false
   }
@@ -174,9 +174,9 @@ function openMembersList() {
   membersBusy.value = true
   void (async () => {
     try {
-      await signed.fetchChatMembers(cid)
+      await authStore.fetchChatMembers(cid)
     } catch (e: any) {
-      membersErr.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+      membersErr.value = typeof e?.message === 'string' ? e.message : String(t('genericError'))
     } finally {
       membersBusy.value = false
     }
@@ -239,24 +239,24 @@ async function onRenameGroup() {
   if (!cid) return
   const n = renameName.value.trim()
   if (n.length < 3 || n.length > 64) {
-    renameReport.value = String(t('signed.renameGroupBadLength'))
+    renameReport.value = String(t('renameGroupBadLength'))
     return
   }
 
   renameBusy.value = true
   try {
-    await signed.renameGroupChat(cid, n)
+    await authStore.renameGroupChat(cid, n)
 
     // Requirement: send an automated message to the group after rename.
     try {
-      await signed.sendMessage(cid, `I renamed group to ${n}.`)
+      await authStore.sendMessage(cid, `I renamed group to ${n}.`)
     } catch {
       // ignore
     }
 
     closeRenameGroup()
   } catch (e: any) {
-    renameReport.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    renameReport.value = typeof e?.message === 'string' ? e.message : String(t('genericError'))
   } finally {
     renameBusy.value = false
   }
@@ -270,8 +270,8 @@ async function onAddMember() {
   if (!u) return
 
   // Avoid adding yourself.
-  if (signed.username && u.toLowerCase() === String(signed.username).toLowerCase()) {
-    addMemberReport.value = String(t('signed.cannotChatWithSelf'))
+  if (authStore.username && u.toLowerCase() === String(authStore.username).toLowerCase()) {
+    addMemberReport.value = String(t('cannotChatWithSelf'))
     return
   }
 
@@ -279,32 +279,32 @@ async function onAddMember() {
   try {
     // Ensure we check against an up-to-date member list.
     try {
-      await signed.fetchChatMembers(cid)
+      await authStore.fetchChatMembers(cid)
     } catch {
       // ignore
     }
     const curMembers = membersByChatId.value[cid] ?? []
     const exists = curMembers.some((m) => String(m.username || '').toLowerCase() === u.toLowerCase())
     if (exists) {
-      addMemberReport.value = String(t('signed.memberAlreadyInGroup'))
+      addMemberReport.value = String(t('memberAlreadyInGroup'))
       return
     }
 
-    await signed.addGroupMember(cid, u)
+    await authStore.addGroupMember(cid, u)
 
     // Requirement: send an automated message after successful member add.
     try {
-      await signed.sendMessage(cid, 'I added a new user to this chat.')
+      await authStore.sendMessage(cid, 'I added a new user to this chat.')
     } catch {
       // ignore
     }
 
-    addMemberReport.value = String(t('signed.memberAddedOk'))
+    addMemberReport.value = String(t('memberAddedOk'))
     addMemberUsername.value = ''
   } catch (e: any) {
-    const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const msg = typeof e?.message === 'string' ? e.message : String(t('genericError'))
     if (msg === 'self') {
-      addMemberReport.value = String(t('signed.cannotChatWithSelf'))
+      addMemberReport.value = String(t('cannotChatWithSelf'))
       return
     }
     const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
@@ -313,7 +313,7 @@ async function onAddMember() {
       return
     }
     if (msg === 'already_member') {
-      addMemberReport.value = String(t('signed.memberAlreadyInGroup'))
+      addMemberReport.value = String(t('memberAlreadyInGroup'))
       return
     }
     addMemberReport.value = msg
@@ -381,7 +381,7 @@ watch([view, activeChatId], () => {
 
 <template>
   <div class="floating-header" v-if="view !== 'contacts'">
-    <button class="secondary icon-only" type="button" :aria-label="String(t('common.back'))" @click="signed.goHome">
+    <button class="secondary icon-only" type="button" :aria-label="String(t('common.back'))" @click="authStore.goHome">
       <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#bracket-left"></use></svg>
     </button>
 
@@ -408,7 +408,7 @@ watch([view, activeChatId], () => {
         v-if="activeChat?.type === 'personal'"
         class="secondary icon-only"
         type="button"
-        :aria-label="String(t('chat.callAria'))"
+        :aria-label="String(t('chatting.callAria'))"
         :disabled="!canCall"
         @click="onCall"
       >
@@ -436,7 +436,7 @@ watch([view, activeChatId], () => {
             role="menuitem"
             @click="openMembersList"
           >
-            {{ t('signed.membersList') }}
+            {{ t('membersList') }}
           </button>
 
           <button
@@ -447,7 +447,7 @@ watch([view, activeChatId], () => {
             :disabled="addMemberBusy"
             @click="openAddMember"
           >
-            {{ t('signed.addMember') }}
+            {{ t('addMember') }}
           </button>
 
           <button
@@ -458,7 +458,7 @@ watch([view, activeChatId], () => {
             :disabled="renameBusy"
             @click="openRenameGroup"
           >
-            {{ t('signed.renameGroup') }}
+            {{ t('renameGroup') }}
           </button>
 
           <button
@@ -468,7 +468,7 @@ watch([view, activeChatId], () => {
             :disabled="!canDeleteChat"
             @click="openDeleteConfirm"
           >
-            {{ activeChat?.type === 'group' ? t('signed.leaveGroup') : t('signed.deleteChat') }}
+            {{ activeChat?.type === 'group' ? t('leaveGroup') : t('deleteChat') }}
           </button>
         </div>
       </div>
@@ -479,13 +479,13 @@ watch([view, activeChatId], () => {
       class="modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="deleteChatTitleSigned"
+      aria-labelledby="deleteChatTitleAuth"
       @click="(e) => { if (e.target === e.currentTarget) closeDeleteConfirm() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="deleteChatTitleSigned">{{ deleteTitle }}</div>
+        <div class="modal-title" id="deleteChatTitleAuth">{{ deleteTitle }}</div>
 
-        <div v-if="deleteInfoBusy" class="muted" style="margin-top: 8px;">{{ t('signed.membersLoading') }}</div>
+        <div v-if="deleteInfoBusy" class="muted" style="margin-top: 8px;">{{ t('membersLoading') }}</div>
         <div v-else class="muted" style="margin-top: 8px;">{{ deleteBody }}</div>
         <div v-if="deleteReport" class="status" aria-live="polite" style="margin-top: 8px;">{{ deleteReport }}</div>
 
@@ -501,11 +501,11 @@ watch([view, activeChatId], () => {
       class="modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="renameGroupTitleSigned"
+      aria-labelledby="renameGroupTitleAuth"
       @click="(e) => { if (e.target === e.currentTarget) closeRenameGroup() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="renameGroupTitleSigned">{{ t('signed.renameGroup') }}</div>
+        <div class="modal-title" id="renameGroupTitleAuth">{{ t('renameGroup') }}</div>
 
         <div class="field" style="margin-top: 8px;">
           <input
@@ -515,7 +515,7 @@ watch([view, activeChatId], () => {
             minlength="3"
             maxlength="64"
             autocomplete="off"
-            :placeholder="String(t('signed.renameGroupPlaceholder'))"
+            :placeholder="String(t('renameGroupPlaceholder'))"
             @keydown.enter.prevent="onRenameGroup"
           />
           <div v-if="renameReport" class="status" aria-live="polite">{{ renameReport }}</div>
@@ -524,7 +524,7 @@ watch([view, activeChatId], () => {
         <div class="modal-actions">
           <button class="secondary" type="button" :disabled="renameBusy" @click="closeRenameGroup">{{ t('common.close') }}</button>
           <button type="button" :disabled="renameBusy || renameName.trim().length < 3 || renameName.trim().length > 64" @click="onRenameGroup">
-            {{ t('signed.renameGroup') }}
+            {{ t('renameGroup') }}
           </button>
         </div>
       </div>
@@ -535,17 +535,17 @@ watch([view, activeChatId], () => {
       class="modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="membersListTitleSigned"
+      aria-labelledby="membersListTitleAuth"
       @click="(e) => { if (e.target === e.currentTarget) closeMembersList() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="membersListTitleSigned">{{ t('signed.membersList') }}</div>
+        <div class="modal-title" id="membersListTitleAuth">{{ t('membersList') }}</div>
 
         <div v-if="membersErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ membersErr }}</div>
-        <div v-else-if="membersBusy" class="muted" style="margin-top: 8px;">{{ t('signed.membersLoading') }}</div>
+        <div v-else-if="membersBusy" class="muted" style="margin-top: 8px;">{{ t('membersLoading') }}</div>
 
         <div v-else style="margin-top: 8px;">
-          <div v-if="groupMembers.length === 0" class="muted">{{ t('signed.noMembers') }}</div>
+          <div v-if="groupMembers.length === 0" class="muted">{{ t('noMembers') }}</div>
           <ul v-else style="margin: 0; padding-left: 18px; display: grid; gap: 6px;">
             <li v-for="m in groupMembers" :key="m.userId">{{ m.username ?? m.userId }}</li>
           </ul>
@@ -562,11 +562,11 @@ watch([view, activeChatId], () => {
       class="modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="addMemberTitleSigned"
+      aria-labelledby="addMemberTitleAuth"
       @click="(e) => { if (e.target === e.currentTarget) closeAddMember() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="addMemberTitleSigned">{{ t('signed.addMember') }}</div>
+        <div class="modal-title" id="addMemberTitleAuth">{{ t('addMember') }}</div>
 
         <div class="field" style="margin-top: 8px;">
           <input
@@ -575,7 +575,7 @@ watch([view, activeChatId], () => {
             :disabled="addMemberBusy || !activeChatId"
             maxlength="64"
             autocomplete="off"
-            :placeholder="String(t('signed.memberPlaceholder'))"
+            :placeholder="String(t('memberPlaceholder'))"
             @keydown.enter.prevent="onAddMember"
           />
           <div v-if="addMemberReport" class="status" aria-live="polite">{{ addMemberReport }}</div>
@@ -583,7 +583,7 @@ watch([view, activeChatId], () => {
 
         <div class="modal-actions">
           <button class="secondary" type="button" :disabled="addMemberBusy" @click="closeAddMember">{{ t('common.close') }}</button>
-          <button type="button" :disabled="addMemberBusy || !addMemberUsername.trim()" @click="onAddMember">{{ t('signed.addMember') }}</button>
+          <button type="button" :disabled="addMemberBusy || !addMemberUsername.trim()" @click="onAddMember">{{ t('addMember') }}</button>
         </div>
       </div>
     </div>
@@ -593,13 +593,13 @@ watch([view, activeChatId], () => {
       class="modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="joinConfirmTitleSigned"
+      aria-labelledby="joinConfirmTitleAuth"
       @click="(e) => { if (e.target === e.currentTarget) call.cancelJoinConfirm() }"
     >
       <div class="modal-card">
-        <div class="modal-title" id="joinConfirmTitleSigned">{{ t('chat.joinOngoingTitle') }}</div>
+        <div class="modal-title" id="joinConfirmTitleAuth">{{ t('chatting.joinOngoingTitle') }}</div>
         <div class="muted" style="margin-bottom: 12px;">
-          {{ joinConfirmToName ? t('chat.joinOngoingBodyNamed', { name: joinConfirmToName }) : t('chat.joinOngoingBody') }}
+          {{ joinConfirmToName ? t('chatting.joinOngoingBodyNamed', { name: joinConfirmToName }) : t('chatting.joinOngoingBody') }}
         </div>
         <div class="modal-actions">
           <button class="secondary" type="button" @click="call.cancelJoinConfirm">{{ t('common.cancel') }}</button>

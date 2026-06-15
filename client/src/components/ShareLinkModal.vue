@@ -3,16 +3,16 @@ import { computed, ref, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const ui = useUiStore()
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
 const { shareLinkOpen } = storeToRefs(ui)
-const { username } = storeToRefs(signed)
+const { username } = storeToRefs(authStore)
 
 const link = computed(() => {
   const u = String(username.value ?? '').trim()

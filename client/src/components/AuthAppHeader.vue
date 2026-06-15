@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
-const { view } = storeToRefs(signed)
+const { view } = storeToRefs(authStore)
 </script>
 
 <template>
@@ -20,7 +20,7 @@ const { view } = storeToRefs(signed)
         class="secondary icon-only"
         type="button"
         :aria-label="String(t('common.settings'))"
-        @click="signed.openSettings"
+        @click="authStore.openSettings"
       >
         <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#filter"></use></svg>
       </button>

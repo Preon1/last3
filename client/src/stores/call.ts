@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useSignedStore } from './signed'
+import { useAuthStore } from './auth'
 import { notify, vibrate } from '../utils/notify'
 import { i18n } from '../i18n'
 
@@ -39,20 +39,20 @@ function micErrorToStatus(err: unknown) {
 }
 
 export const useCallStore = defineStore('call', () => {
-  const signed = useSignedStore()
+  const authStore = useAuthStore()
 
-  function isSignedActive() {
-    return Boolean(signed.signedIn && signed.privateKey)
+  function isAuthActive() {
+    return Boolean(authStore.authIn && authStore.privateKey)
   }
 
   function myId() {
-    return isSignedActive() ? signed.userId : null
+    return isAuthActive() ? authStore.userId : null
   }
 
   async function ensureTurn() {
-    if (isSignedActive()) {
+    if (isAuthActive()) {
       try {
-        await signed.ensureTurnConfig()
+        await authStore.ensureTurnConfig()
       } catch {
         // ignore
       }
@@ -60,12 +60,12 @@ export const useCallStore = defineStore('call', () => {
   }
 
   function getTurnConfig(): TurnConfig | null {
-    const cfg = isSignedActive() ? (signed.turnConfig as any) : null
+    const cfg = isAuthActive() ? (authStore.turnConfig as any) : null
     return (cfg ?? null) as TurnConfig | null
   }
 
   function send(obj: unknown) {
-    if (isSignedActive()) signed.sendReliableMessage(obj)
+    if (isAuthActive()) authStore.sendReliableMessage(obj)
   }
 
   const roomId = ref<string | null>(null)
@@ -606,7 +606,7 @@ export const useCallStore = defineStore('call', () => {
       // Suppress OS-level notifications when user is actively in the app on
       // contacts list (they can already see incoming-call UI).
       const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
-      const onContacts = signed.view === 'contacts'
+      const onContacts = authStore.view === 'contacts'
       const shouldSystemNotify = !(foreground && onContacts)
       if (shouldSystemNotify) {
         notify(
@@ -841,11 +841,11 @@ export const useCallStore = defineStore('call', () => {
     if (handlerInstalled) return
     handlerInstalled = true
 
-    signed.registerInboundHandler((type, obj) => {
+    authStore.registerInboundHandler((type, obj) => {
       void handleInbound(type, obj)
     })
 
-    signed.registerDisconnectHandler(() => {
+    authStore.registerDisconnectHandler(() => {
       intentionalHangup = true
       resetCallState()
       status.value = ''

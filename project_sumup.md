@@ -34,7 +34,7 @@ Important implementation points:
 - Challenge-response login flow:
 	- /api/auth/login-init: server encrypts challenge to stored public key.
 	- /api/auth/login-final: client proves private key possession.
-- Bearer tokens are in-memory (signedSession.js), rotated via /api/signed/session/refresh.
+- Bearer tokens are in-memory (authSession.js), rotated via /api/private/session/refresh.
 - Multi-device sessions supported with eviction and forced logout notifications.
 
 ### 3.2 VOPRF-Based Name Tokens
@@ -95,8 +95,8 @@ Important implementation points:
 
 ### 4.4 Clear Separation of Responsibilities
 - server/index.js orchestrates API + WebTransport flows.
-- server/signedDb.js contains signed chat/message data logic.
-- server/signedSession.js owns in-memory token/session handling.
+- server/authDb.js contains signed chat/message data logic.
+- server/authSession.js owns in-memory token/session handling.
 - client/stores/signed.ts is the central signed app state coordinator.
 - client/stores/call.ts isolates call state machine and media handling.
 
@@ -165,7 +165,7 @@ Follow these project rules when changing code.
 ## 6) Quick Agent Onboarding Checklist
 
 Before coding:
-- Read server/index.js, server/signedDb.js, client/src/stores/signed.ts, client/src/stores/call.ts.
+- Read server/index.js, server/authDb.js, client/src/stores/signed.ts, client/src/stores/call.ts.
 - Confirm if change touches security/privacy, auth/session, WebTransport signaling, or DB schema.
 
 During coding:

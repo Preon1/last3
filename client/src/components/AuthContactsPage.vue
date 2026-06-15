@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import { useToastStore } from '../stores/toast'
 import { useUiStore } from '../stores/ui'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const ui = useUiStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
-const { chats, unreadByChatId, activeChatId } = storeToRefs(signed)
+const { chats, unreadByChatId, activeChatId } = storeToRefs(authStore)
 
 const friend = ref('')
 const groupName = ref('')
@@ -43,8 +43,8 @@ const sortedChats = computed(() => {
     const bUnread = ub > 0
     if (aUnread !== bUnread) return aUnread ? -1 : 1
 
-    const ta = signed.getChatLastMessageTsMs(a.id)
-    const tb = signed.getChatLastMessageTsMs(b.id)
+    const ta = authStore.getChatLastMessageTsMs(a.id)
+    const tb = authStore.getChatLastMessageTsMs(b.id)
     if (ta !== tb) return tb - ta
 
     // Stable-ish fallback.
@@ -91,7 +91,7 @@ function openScanQr() {
 }
 
 function chatPreview(c: { id: string; type: 'personal' | 'group' }): string {
-  const p = signed.getChatLastMessagePreview(c.id)
+  const p = authStore.getChatLastMessagePreview(c.id)
   if (!p) return ''
 
   const timeOrDate = formatTimeOrDate(p.tsMs)
@@ -113,11 +113,11 @@ function chatPreview(c: { id: string; type: 'personal' | 'group' }): string {
 const filterLabel = computed(() => {
   const type =
     filterMode.value === 'personal'
-      ? String(t('signed.filterPrivate'))
+      ? String(t('filterPrivate'))
       : filterMode.value === 'group'
-        ? String(t('signed.filterGroups'))
-        : String(t('signed.filterAll'))
-  return String(t('signed.filterShow', { type }))
+        ? String(t('filterGroups'))
+        : String(t('filterAll'))
+  return String(t('filterShow', { type }))
 })
 
 function cycleFilterMode() {
@@ -190,7 +190,7 @@ onMounted(() => {
 
   // Extra safety: refresh chats whenever the list page is opened.
   // WS notifications are best-effort; the list should self-heal.
-  void signed.refreshChats()
+  void authStore.refreshChats()
 })
 
 onBeforeUnmount(() => {
@@ -205,13 +205,13 @@ async function onAddFriend() {
   if (!u) return
   busy.value = true
   try {
-    await signed.createPersonalChat(u)
+    await authStore.createPersonalChat(u)
     friend.value = ''
     closeAddContact()
   } catch (e: any) {
-    const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    const msg = typeof e?.message === 'string' ? e.message : String(t('genericError'))
     if (msg === 'self') {
-      err.value = String(t('signed.cannotChatWithSelf'))
+      err.value = String(t('cannotChatWithSelf'))
       return
     }
     const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
@@ -232,11 +232,11 @@ async function onCreateGroup() {
   if (!n) return
   busy.value = true
   try {
-    await signed.createGroupChat(n)
+    await authStore.createGroupChat(n)
     groupName.value = ''
     closeCreateChat()
   } catch (e: any) {
-    err.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    err.value = typeof e?.message === 'string' ? e.message : String(t('genericError'))
   } finally {
     busy.value = false
   }
@@ -246,9 +246,9 @@ async function onOpen(chatId: string) {
   err.value = ''
   busy.value = true
   try {
-    await signed.openChat(chatId)
+    await authStore.openChat(chatId)
   } catch (e: any) {
-    err.value = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+    err.value = typeof e?.message === 'string' ? e.message : String(t('genericError'))
   } finally {
     busy.value = false
   }
@@ -261,7 +261,7 @@ async function onOpen(chatId: string) {
     <div class="page-inner" style="padding-bottom:0;padding-top:0;">
       <div class="page-top">
         <div class="page-panel">
-          <div class="page-title">{{ t('signed.chats') }}</div>
+          <div class="page-title">{{ t('chats') }}</div>
 
           <div class="page-actions">
 
@@ -275,7 +275,7 @@ async function onOpen(chatId: string) {
                 aria-haspopup="menu"
                 :aria-expanded="addMenuOpen ? 'true' : 'false'"
                 :disabled="busy"
-                :aria-label="String(t('signed.add'))"
+                :aria-label="String(t('add'))"
                 @click="toggleAddMenu"
               >
                 <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#plus"></use></svg>
@@ -283,10 +283,10 @@ async function onOpen(chatId: string) {
   
               <div v-if="addMenuOpen" class="page-other-menu" role="menu">
                 <button class="secondary page-other-item" type="button" role="menuitem" @click="openAddContact">
-                  {{ t('signed.addContact') }}
+                  {{ t('addContact') }}
                 </button>
                 <button class="secondary page-other-item" type="button" role="menuitem" @click="openCreateChat">
-                  {{ t('signed.createChat') }}
+                  {{ t('createChat') }}
                 </button>
                 <button class="secondary page-other-item" type="button" role="menuitem" @click="openShareLink">
                   {{ t('common.shareLink') }}
@@ -311,9 +311,9 @@ async function onOpen(chatId: string) {
               <span class="contact-row-left">
                 <span class="name" style="display: inline-flex; align-items: center; gap: 10px;">
                   <span
-                    v-if="c.type === 'personal' && signed.getChatOnlineState(c.id)"
+                    v-if="c.type === 'personal' && authStore.getChatOnlineState(c.id)"
                     class="status-dot"
-                    :class="signed.getChatOnlineState(c.id)"
+                    :class="authStore.getChatOnlineState(c.id)"
                     aria-hidden="true"
                   ></span>
                   {{ c.name ?? c.id }}
@@ -329,7 +329,7 @@ async function onOpen(chatId: string) {
           </li>
         </template>
         <li v-else>
-          <div class="muted">{{ t('signed.noChats') }}</div>
+          <div class="muted">{{ t('noChats') }}</div>
         </li>
       </ul>
 
@@ -339,21 +339,21 @@ async function onOpen(chatId: string) {
         class="modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="signedAddContactTitle"
+        aria-labelledby="authAddContactTitle"
         @click="(e) => { if (e.target === e.currentTarget) closeAddContact() }"
       >
         <form class="modal-card" @submit.prevent="onAddFriend">
-          <div class="modal-title" id="signedAddContactTitle">{{ t('signed.addContact') }}</div>
+          <div class="modal-title" id="authAddContactTitle">{{ t('addContact') }}</div>
 
           <label class="field" for="friend">
-            <span class="field-label">{{ t('signed.addFriend') }}</span>
-            <input id="friend" v-model="friend" maxlength="64" :placeholder="String(t('signed.friendPlaceholder'))" />
+            <span class="field-label">{{ t('addFriend') }}</span>
+            <input id="friend" v-model="friend" maxlength="64" :placeholder="String(t('friendPlaceholder'))" />
           </label>
 
           <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 16px;">
             <button class="secondary" type="button" :disabled="busy" @click="closeAddContact">{{ t('common.close') }}</button>
             <button class="secondary" type="submit" :disabled="busy || !friend.trim()">
-              {{ t('signed.createChat') }}
+              {{ t('createChat') }}
             </button>
           </div>
         </form>
@@ -364,26 +364,26 @@ async function onOpen(chatId: string) {
         class="modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="signedCreateChatTitle"
+        aria-labelledby="authCreateChatTitle"
         @click="(e) => { if (e.target === e.currentTarget) closeCreateChat() }"
       >
         <form class="modal-card" @submit.prevent="onCreateGroup">
-          <div class="modal-title" id="signedCreateChatTitle">{{ t('signed.createChat') }}</div>
+          <div class="modal-title" id="authCreateChatTitle">{{ t('createChat') }}</div>
 
           <label class="field" for="group-name">
-            <span class="field-label">{{ t('signed.groupName') }}</span>
+            <span class="field-label">{{ t('groupName') }}</span>
             <input
               id="group-name"
               v-model="groupName"
               maxlength="64"
-              :placeholder="String(t('signed.groupNamePlaceholder'))"
+              :placeholder="String(t('groupNamePlaceholder'))"
             />
           </label>
 
           <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 16px;">
             <button class="secondary" type="button" :disabled="busy" @click="closeCreateChat">{{ t('common.close') }}</button>
             <button class="secondary" type="submit" :disabled="busy || !groupName.trim()">
-              {{ t('signed.createGroup') }}
+              {{ t('createGroup') }}
             </button>
           </div>
         </form>

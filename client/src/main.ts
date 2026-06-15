@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import './style.css'
 import App from './App.vue'
 import { i18n } from './i18n'
-import { useSignedStore } from './stores/signed'
+import { useAuthStore } from './stores/auth'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -17,11 +17,11 @@ try {
 		const w = window as any
 		if (!w.__lrcomResumeSyncInstalled) {
 			w.__lrcomResumeSyncInstalled = true
-			const signed = useSignedStore(pinia)
+			const authStore = useAuthStore(pinia)
 
 			const trigger = (reason: string) => {
 				try {
-					signed.bestEffortResumeSync(reason)
+					authStore.bestEffortResumeSync(reason)
 				} catch {
 					// ignore
 				}

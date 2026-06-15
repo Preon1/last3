@@ -15,7 +15,7 @@ Options:
   --help, -h       Show this help
 
 Notes:
-  - This performs the same DB deletion as Settings → Delete account (signedDeleteAccount).
+  - This performs the same DB deletion as Settings → Delete account (authDeleteAccount).
   - If the main server process is running, any in-memory session/websocket state for the user may persist until restart.
 `
   // eslint-disable-next-line no-console
@@ -107,7 +107,7 @@ async function main() {
   if (!userIdArg && !nameTokenArg && !usernameArg) usage(1)
 
   const { initDatabase, query, getPool } = await import('../db.js')
-  const { signedDeleteAccount } = await import('../signedDb.js')
+  const { authDeleteAccount } = await import('../authDb.js')
 
   initDatabase()
 
@@ -149,7 +149,7 @@ async function main() {
     }
   }
 
-  const res = await signedDeleteAccount(userId)
+  const res = await authDeleteAccount(userId)
 
   // eslint-disable-next-line no-console
   console.log(`Deleted users: ${res.deletedUsers}; deleted chats: ${res.deletedChats}`)

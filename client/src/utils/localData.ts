@@ -8,19 +8,19 @@ export const LocalEntity = {
 
   StayDeviceKey: 'stay.deviceKey',
 
-  SignedStay: 'signed.stay',
-  SignedKeys: 'signed.keys',
+  AuthStay: 'auth.stay',
+  AuthKeys: 'auth.keys',
 
-  SignedToken: 'signed.session.token',
-  SignedUserId: 'signed.session.userId',
-  SignedHiddenMode: 'signed.session.hiddenMode',
-  SignedIntrovertMode: 'signed.session.introvertMode',
-  SignedExpiresAt: 'signed.session.expiresAt',
+  AuthToken: 'auth.token',
+  AuthUserId: 'auth.userId',
+  AuthHiddenMode: 'auth.hiddenMode',
+  AuthIntrovertMode: 'auth.introvertMode',
+  AuthExpiresAt: 'auth.expiresAt',
 
-  SignedVault: 'signed.vault',
-  SignedRemoveDate: 'signed.removeDate',
-  SignedUsername: 'signed.username',
-  SignedAddUsername: 'signed.addUsername',
+  AuthVault: 'auth.vault',
+  AuthRemoveDate: 'auth.removeDate',
+  AuthUsername: 'auth.username',
+  AuthAddUsername: 'auth.addUsername',
 
   IdbStaySession: 'idb.stay.session',
   IdbStayVault: 'idb.stay.vault',
@@ -129,7 +129,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.NotificationsEnabled]: {
     id: LocalEntity.NotificationsEnabled,
     backend: 'localStorage',
-    key: 'lrcom-notifications-enabled',
+    key: 'notifications-enabled',
     codec: 'bool01',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
@@ -138,7 +138,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.PushNotificationsEnabled]: {
     id: LocalEntity.PushNotificationsEnabled,
     backend: 'localStorage',
-    key: 'lrcom-push-notifications-enabled',
+    key: 'push-notifications-enabled',
     codec: 'bool01',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
@@ -147,7 +147,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.UiTheme]: {
     id: LocalEntity.UiTheme,
     backend: 'sessionStorage',
-    key: 'lrcom-theme',
+    key: 'theme',
     codec: 'string',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
@@ -156,7 +156,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.Locale]: {
     id: LocalEntity.Locale,
     backend: 'sessionStorage',
-    key: 'lrcom-locale',
+    key: 'locale',
     codec: 'string',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
@@ -169,110 +169,110 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.StayDeviceKey]: {
     id: LocalEntity.StayDeviceKey,
     backend: 'localStorage',
-    key: 'lrcom-stay-device-key',
+    key: 'stay-device-key',
     codec: 'string',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
 
-  [LocalEntity.SignedStay]: {
-    id: LocalEntity.SignedStay,
+  [LocalEntity.AuthStay]: {
+    id: LocalEntity.AuthStay,
     backend: 'localStorage',
-    key: 'lrcom-signed-stay',
+    key: 'stay',
     codec: 'bool01',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedKeys]: {
-    id: LocalEntity.SignedKeys,
+  [LocalEntity.AuthKeys]: {
+    id: LocalEntity.AuthKeys,
     backend: 'localStorage',
-    key: 'lrcom-signed-keys',
+    key: 'keys',
     codec: 'json',
     removeOnLogout: false,
     removeOnLogoutWipe: false, // settings logout keeps encrypted key material
     removeOnAccountDelete: true,
   },
 
-  [LocalEntity.SignedToken]: {
-    id: LocalEntity.SignedToken,
+  [LocalEntity.AuthToken]: {
+    id: LocalEntity.AuthToken,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-token',
+    key: 'token',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedUserId]: {
-    id: LocalEntity.SignedUserId,
+  [LocalEntity.AuthUserId]: {
+    id: LocalEntity.AuthUserId,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-user-id',
+    key: 'user-id',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedHiddenMode]: {
-    id: LocalEntity.SignedHiddenMode,
+  [LocalEntity.AuthHiddenMode]: {
+    id: LocalEntity.AuthHiddenMode,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-hidden-mode',
+    key: 'hidden-mode',
     codec: 'bool01',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedIntrovertMode]: {
-    id: LocalEntity.SignedIntrovertMode,
+  [LocalEntity.AuthIntrovertMode]: {
+    id: LocalEntity.AuthIntrovertMode,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-introvert-mode',
+    key: 'introvert-mode',
     codec: 'bool01',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedExpiresAt]: {
-    id: LocalEntity.SignedExpiresAt,
+  [LocalEntity.AuthExpiresAt]: {
+    id: LocalEntity.AuthExpiresAt,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-expires-at',
+    key: 'expires-at',
     codec: 'number',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
 
-  [LocalEntity.SignedVault]: {
-    id: LocalEntity.SignedVault,
+  [LocalEntity.AuthVault]: {
+    id: LocalEntity.AuthVault,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-vault',
+    key: 'vault',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedRemoveDate]: {
-    id: LocalEntity.SignedRemoveDate,
+  [LocalEntity.AuthRemoveDate]: {
+    id: LocalEntity.AuthRemoveDate,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-remove-date',
+    key: 'remove-date',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
 
-  [LocalEntity.SignedUsername]: {
-    id: LocalEntity.SignedUsername,
+  [LocalEntity.AuthUsername]: {
+    id: LocalEntity.AuthUsername,
     backend: 'sessionStorage',
-    key: 'lrcom-signed-username',
+    key: 'username',
     codec: 'string',
     removeOnLogout: false,
     removeOnLogoutWipe: true,
     removeOnAccountDelete: true,
   },
-  [LocalEntity.SignedAddUsername]: {
-    id: LocalEntity.SignedAddUsername,
+  [LocalEntity.AuthAddUsername]: {
+    id: LocalEntity.AuthAddUsername,
     backend: 'sessionStorage',
-    key: 'lrcom-add-username',
+    key: 'add-username',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -283,7 +283,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.IdbStaySession]: {
     id: LocalEntity.IdbStaySession,
     backend: 'localStorage',
-    key: 'lrcom-stay-session',
+    key: 'stay-session',
     codec: 'json',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -292,7 +292,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.IdbStayVault]: {
     id: LocalEntity.IdbStayVault,
     backend: 'localStorage',
-    key: 'lrcom-stay-vault',
+    key: 'stay-vault',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -301,7 +301,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.IdbStayRemoveDate]: {
     id: LocalEntity.IdbStayRemoveDate,
     backend: 'localStorage',
-    key: 'lrcom-stay-remove-date',
+    key: 'stay-remove-date',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -310,7 +310,7 @@ const REGISTRY: Record<LocalEntityId, EntityDef> = {
   [LocalEntity.IdbStayUnlockBlob]: {
     id: LocalEntity.IdbStayUnlockBlob,
     backend: 'localStorage',
-    key: 'lrcom-stay-unlock-blob',
+    key: 'stay-unlock-blob',
     codec: 'string',
     removeOnLogout: true,
     removeOnLogoutWipe: true,
@@ -672,60 +672,60 @@ export class LocalData {
   // High-level helpers
   // -----------------
 
-  getSignedStayLoggedIn(): boolean {
-    return this.getBool(LocalEntity.SignedStay, false)
+  getAuthStayLoggedIn(): boolean {
+    return this.getBool(LocalEntity.AuthStay, false)
   }
 
-  setSignedStayLoggedIn(next: boolean) {
+  setAuthStayLoggedIn(next: boolean) {
     const v = Boolean(next)
     if (!v) {
       // Removing the key (instead of writing "0") avoids leaving a persistent trace.
-      this.remove(LocalEntity.SignedStay)
+      this.remove(LocalEntity.AuthStay)
       return
     }
-    this.setBool(LocalEntity.SignedStay, true)
+    this.setBool(LocalEntity.AuthStay, true)
   }
 
-  setSignedSession(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
+  setAuthSession(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
     const u = (params.user ?? {}) as any
-    this.setString(LocalEntity.SignedToken, params.token)
-    this.setString(LocalEntity.SignedUserId, typeof u.userId === 'string' ? u.userId : '')
+    this.setString(LocalEntity.AuthToken, params.token)
+    this.setString(LocalEntity.AuthUserId, typeof u.userId === 'string' ? u.userId : '')
 
-    // Username is stored once under SignedUsername.
-    this.setString(LocalEntity.SignedUsername, typeof u.username === 'string' ? u.username : '')
+    // Username is stored once under AuthUsername.
+    this.setString(LocalEntity.AuthUsername, typeof u.username === 'string' ? u.username : '')
 
-    this.setBool(LocalEntity.SignedHiddenMode, Boolean(u.hiddenMode))
-    this.setBool(LocalEntity.SignedIntrovertMode, Boolean(u.introvertMode))
-    if (typeof params.expiresAtMs === 'number' && Number.isFinite(params.expiresAtMs)) this.setNumber(LocalEntity.SignedExpiresAt, params.expiresAtMs)
-    else this.remove(LocalEntity.SignedExpiresAt)
+    this.setBool(LocalEntity.AuthHiddenMode, Boolean(u.hiddenMode))
+    this.setBool(LocalEntity.AuthIntrovertMode, Boolean(u.introvertMode))
+    if (typeof params.expiresAtMs === 'number' && Number.isFinite(params.expiresAtMs)) this.setNumber(LocalEntity.AuthExpiresAt, params.expiresAtMs)
+    else this.remove(LocalEntity.AuthExpiresAt)
   }
 
-  getSignedSession(): { user: any; token: string; expiresAtMs: number | null } | null {
-    const token = this.getString(LocalEntity.SignedToken)
+  getAuthSession(): { user: any; token: string; expiresAtMs: number | null } | null {
+    const token = this.getString(LocalEntity.AuthToken)
 
-    const userId = String(this.getString(LocalEntity.SignedUserId) ?? '').trim()
-    const username = String(this.getString(LocalEntity.SignedUsername) ?? '').trim()
+    const userId = String(this.getString(LocalEntity.AuthUserId) ?? '').trim()
+    const username = String(this.getString(LocalEntity.AuthUsername) ?? '').trim()
     if (!token || !userId || !username) return null
 
     const user = {
       userId,
       username,
-      hiddenMode: this.getBool(LocalEntity.SignedHiddenMode, false),
-      introvertMode: this.getBool(LocalEntity.SignedIntrovertMode, false),
+      hiddenMode: this.getBool(LocalEntity.AuthHiddenMode, false),
+      introvertMode: this.getBool(LocalEntity.AuthIntrovertMode, false),
     }
-    const e = this.getNumber(LocalEntity.SignedExpiresAt)
+    const e = this.getNumber(LocalEntity.AuthExpiresAt)
     return { user, token, expiresAtMs: e }
   }
 
-  clearSignedSession() {
-    this.remove(LocalEntity.SignedToken)
-    this.remove(LocalEntity.SignedUserId)
-    this.remove(LocalEntity.SignedHiddenMode)
-    this.remove(LocalEntity.SignedIntrovertMode)
-    this.remove(LocalEntity.SignedExpiresAt)
+  clearAuthSession() {
+    this.remove(LocalEntity.AuthToken)
+    this.remove(LocalEntity.AuthUserId)
+    this.remove(LocalEntity.AuthHiddenMode)
+    this.remove(LocalEntity.AuthIntrovertMode)
+    this.remove(LocalEntity.AuthExpiresAt)
   }
 
-  async mirrorSignedSessionToIdb(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
+  async mirrorAuthSessionToIdb(params: { user: unknown; token: string; expiresAtMs?: number | null }) {
     const u = (params.user ?? {}) as any
     await this.idbSet(LocalEntity.IdbStaySession, {
       u: {

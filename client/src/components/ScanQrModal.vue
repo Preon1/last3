@@ -3,12 +3,12 @@ import { ref, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import type { IScannerControls } from '@zxing/browser'
 
 const ui = useUiStore()
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
@@ -126,12 +126,12 @@ async function startScanning() {
 
       try {
         await stopScanning()
-        await signed.createPersonalChat(inviteUsername)
+        await authStore.createPersonalChat(inviteUsername)
         ui.closeScanQr()
       } catch (e: any) {
-        const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+        const msg = typeof e?.message === 'string' ? e.message : String(t('genericError'))
         if (msg === 'self') {
-          status.value = String(t('signed.cannotChatWithSelf'))
+          status.value = String(t('cannotChatWithSelf'))
         } else {
           const isIntrovert = msg === 'introvert' || msg.toLowerCase().includes('introvert mode')
           if (isIntrovert) {

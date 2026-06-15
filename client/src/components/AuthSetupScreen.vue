@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { storeToRefs } from 'pinia'
 import { cycleLocale } from '../i18n'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { voprfNameToken } from '../utils/voprfNames'
 
@@ -13,12 +13,12 @@ const toast = useToastStore()
 const { themeLabel } = storeToRefs(ui)
 const { t, locale } = useI18n()
 
-const signed = useSignedStore()
-const { lastUsername, username: restoredUsername, stayLoggedIn, notificationsEnabled } = storeToRefs(signed)
+const authStore = useAuthStore()
+const { lastUsername, username: restoredUsername, stayLoggedIn, notificationsEnabled } = storeToRefs(authStore)
 
 const stayLoggedInModel = computed({
   get: () => Boolean(stayLoggedIn.value),
-  set: (v: boolean) => signed.setStayLoggedIn(v),
+  set: (v: boolean) => authStore.setStayLoggedIn(v),
 })
 
 const username = ref(lastUsername.value || restoredUsername.value || '')
@@ -82,19 +82,19 @@ watchEffect((onCleanup) => {
 })
 
 const helpTitle = computed(() => {
-  if (openHelp.value === 'username') return String(t('signed.username'))
-  if (openHelp.value === 'password') return String(t('signed.password'))
-  if (openHelp.value === 'expirationDays') return String(t('signed.expirationDays'))
-  if (openHelp.value === 'stayLoggedIn') return String(t('signed.stayLoggedIn'))
+  if (openHelp.value === 'username') return String(t('username'))
+  if (openHelp.value === 'password') return String(t('password'))
+  if (openHelp.value === 'expirationDays') return String(t('expirationDays'))
+  if (openHelp.value === 'stayLoggedIn') return String(t('stayLoggedIn'))
   return ''
 })
 
 const helpBody = computed(() => {
-  if (openHelp.value === 'username') return String(t('signed.help.username'))
-  if (openHelp.value === 'password') return String(t('signed.help.password'))
-  if (openHelp.value === 'expirationDays') return String(t('signed.help.expirationDays'))
+  if (openHelp.value === 'username') return String(t('help.username'))
+  if (openHelp.value === 'password') return String(t('help.password'))
+  if (openHelp.value === 'expirationDays') return String(t('help.expirationDays'))
   if (openHelp.value === 'stayLoggedIn') {
-    return `${String(t('signed.stayLoggedInHelp'))}\n\n${String(t('signed.autoUnlockOnDevice'))}`
+    return `${String(t('stayLoggedInHelp'))}\n\n${String(t('autoUnlockOnDevice'))}`
   }
   return ''
 })
@@ -136,7 +136,7 @@ async function confirmRecreate() {
   const permPromise = startNotificationPermissionRequest()
   recreateBusy.value = true
   try {
-    await signed.recreateAccount({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    await authStore.recreateAccount({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
     void finishNotificationSetup(permPromise)
     password.value = ''
     closeRecreate()
@@ -149,11 +149,11 @@ async function confirmRecreate() {
 
 function toUserError(e: any): string {
   const msg = typeof e?.message === 'string' ? e.message : String(e)
-  if (msg === 'No local key found') return String(t('signed.errNoLocalKey'))
-  if (msg === 'Invalid credentials') return String(t('signed.errInvalidCredentials'))
-  if (msg === 'Username contains unsafe characters') return String(t('signed.errUsernameUnsafe'))
-  if (msg === 'Unauthorized') return String(t('signed.errUnauthorized'))
-  if (msg === 'Request failed') return String(t('signed.genericError'))
+  if (msg === 'No local key found') return String(t('errNoLocalKey'))
+  if (msg === 'Invalid credentials') return String(t('errInvalidCredentials'))
+  if (msg === 'Username contains unsafe characters') return String(t('errUsernameUnsafe'))
+  if (msg === 'Unauthorized') return String(t('errUnauthorized'))
+  if (msg === 'Request failed') return String(t('genericError'))
   return msg
 }
 
@@ -191,7 +191,7 @@ async function finishNotificationSetup(permPromise: Promise<NotificationPermissi
   try {
     const perm = await permPromise
     if (perm === 'granted') {
-      signed.setNotificationsEnabledLocal(true)
+      authStore.setNotificationsEnabledLocal(true)
       toast.push({
         title: String(t('toast.notificationsEnabledTitle')),
         message: String(t('toast.notificationsEnabledBody')),
@@ -202,7 +202,7 @@ async function finishNotificationSetup(permPromise: Promise<NotificationPermissi
     }
     if (perm === 'denied') {
       // Avoid "enabled" UI state when browser permission is blocked.
-      signed.setNotificationsEnabledLocal(false)
+      authStore.setNotificationsEnabledLocal(false)
       toast.error(String(t('toast.notificationsBlockedTitle')), String(t('toast.notificationsBlockedBody')))
     }
   } catch {
@@ -214,14 +214,14 @@ async function onLogin() {
   err.value = ''
   if (!canLogin.value) return
   if (password.value.length > MAX_PASSWORD_LEN) {
-    err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    err.value = String(t('errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
 
   const permPromise = startNotificationPermissionRequest()
   busy.value = true
   try {
-    await signed.login({ username: username.value.trim(), password: password.value })
+    await authStore.login({ username: username.value.trim(), password: password.value })
     void finishNotificationSetup(permPromise)
     password.value = ''
   } catch (e: any) {
@@ -241,7 +241,7 @@ async function onRegister() {
   err.value = ''
   if (!canRegister.value) return
   if (password.value.length > MAX_PASSWORD_LEN) {
-    err.value = String(t('signed.errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
+    err.value = String(t('errPasswordTooLong', { max: MAX_PASSWORD_LEN }))
     return
   }
 
@@ -262,7 +262,7 @@ async function onRegister() {
     const j = await r.json().catch(() => ({} as any))
     if (!r.ok) throw new Error(typeof (j as any)?.error === 'string' ? String((j as any).error) : 'Request failed')
     if ((j as any)?.exists === true) {
-      err.value = String(t('signed.errUsernameExists'))
+      err.value = String(t('errUsernameExists'))
       return
     }
   } catch (e: any) {
@@ -276,7 +276,7 @@ async function onRegister() {
   err.value = ''
   busy.value = true
   try {
-    await signed.register({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
+    await authStore.register({ username: u, password: password.value, expirationDays: Number(expirationDays.value) })
     void finishNotificationSetup(permPromise)
     password.value = ''
   } catch (e: any) {
@@ -299,13 +299,13 @@ function toggleMode() {
           <img class="logo logo-lg" src="/lrcom_logo.png" alt="Last" />
           <div>
             <div class="setup-title">Last</div>
-            <div class="setup-subtitle muted">{{ t('signed.subtitle') }}</div>
+            <div class="setup-subtitle muted">{{ t('subtitle') }}</div>
           </div>
         </div>
 
         <div class="setup-toggle">
           <button class="secondary" tabindex="1" type="button" @click="toggleMode">
-            {{ isRegister ? t('signed.login') : t('signed.register') }}
+            {{ isRegister ? t('login') : t('register') }}
           </button>
         </div>
       </div>
@@ -313,11 +313,11 @@ function toggleMode() {
       <form class="setup-form" autocomplete="off" @submit.prevent="isRegister ? onRegister() : onLogin()">
         <label class="field" for="signed-username">
           <div class="field-label-row">
-            <span class="field-label">{{ t('signed.username') }}</span>
+            <span class="field-label">{{ t('username') }}</span>
             <button
               class="help"
               type="button"
-              :aria-label="String(t('signed.help.usernameAria'))"
+              :aria-label="String(t('help.usernameAria'))"
               @click="toggleHelp('username')"
               tabindex="7"
             >
@@ -330,17 +330,17 @@ function toggleMode() {
             v-model="username"
             maxlength="64"
             inputmode="text"
-            :placeholder="String(t('signed.usernamePlaceholder'))"
+            :placeholder="String(t('usernamePlaceholder'))"
           />
         </label>
 
         <label class="field" for="signed-password">
           <div class="field-label-row">
-            <span class="field-label">{{ t('signed.password') }}</span>
+            <span class="field-label">{{ t('password') }}</span>
             <button
               class="help"
               type="button"
-              :aria-label="String(t('signed.help.passwordAria'))"
+              :aria-label="String(t('help.passwordAria'))"
               @click="toggleHelp('password')"
               tabindex="8"
             >
@@ -354,18 +354,18 @@ function toggleMode() {
             type="password"
             minlength="8"
             maxlength="512"
-            :placeholder="String(t('signed.passwordPlaceholder'))"
+            :placeholder="String(t('passwordPlaceholder'))"
           />
         </label>
 
         <label v-if="isRegister" class="field" for="signed-exp">
           <div class="field-label-row">
-            <span class="field-label">{{ t('signed.expirationDays') }}</span>
+            <span class="field-label">{{ t('expirationDays') }}</span>
             <button
               tabindex="9"
               class="help"
               type="button"
-              :aria-label="String(t('signed.help.expirationDaysAria'))"
+              :aria-label="String(t('help.expirationDaysAria'))"
               @click="toggleHelp('expirationDays')"
             >
               ?
@@ -376,8 +376,8 @@ function toggleMode() {
 
         
         <div class="setup-actions">
-          <button v-if="!isRegister" class="join" tabindex="5" type="submit" :disabled="busy || !canLogin">{{ t('signed.login') }}</button>
-          <button v-else class="join" tabindex="6" type="submit" :disabled="busy || !canRegister">{{ t('signed.register') }}</button>
+          <button v-if="!isRegister" class="join" tabindex="5" type="submit" :disabled="busy || !canLogin">{{ t('login') }}</button>
+          <button v-else class="join" tabindex="6" type="submit" :disabled="busy || !canRegister">{{ t('register') }}</button>
         </div>
         
         <div v-if="err" class="status" aria-live="polite">{{ err }}</div>
@@ -385,11 +385,11 @@ function toggleMode() {
         <div class="stay-row">
           <div class="field-label-row">
             <input tabindex="10" type="checkbox" v-model="stayLoggedInModel" />
-            <span class="field-label">{{ t('signed.stayLoggedIn') }}</span>
+            <span class="field-label">{{ t('stayLoggedIn') }}</span>
             <button
               class="help"
               type="button"
-              :aria-label="String(t('signed.help.stayLoggedInAria'))"
+              :aria-label="String(t('help.stayLoggedInAria'))"
               @click="toggleHelp('stayLoggedIn')"
               tabindex="11"
             >
@@ -437,19 +437,19 @@ function toggleMode() {
       @click="onRecreateBackdropClick"
     >
       <div class="modal-card" @click.stop>
-        <div class="modal-title" id="recreateTitle">{{ t('signed.recreate.title') }}</div>
+        <div class="modal-title" id="recreateTitle">{{ t('recreate.title') }}</div>
 
         <div v-if="recreateStep === 'confirm'" class="muted" style="white-space: pre-line;">
-          {{ t('signed.recreate.body', { username: username.trim() }) }}
+          {{ t('recreate.body', { username: username.trim() }) }}
         </div>
 
         <div v-else class="muted" style="white-space: pre-line;">
-          {{ t('signed.recreate.expirationHint') }}
+          {{ t('recreate.expirationHint') }}
         </div>
 
         <label v-if="recreateStep === 'expiration'" class="field" for="recreate-exp">
           <div class="field-label-row">
-            <span class="field-label">{{ t('signed.expirationDays') }}</span>
+            <span class="field-label">{{ t('expirationDays') }}</span>
           </div>
           <input id="recreate-exp" v-model.number="expirationDays" type="number" min="7" max="365" />
         </label>
@@ -457,7 +457,7 @@ function toggleMode() {
         <div v-if="recreateErr" class="status" aria-live="polite">{{ recreateErr }}</div>
 
         <div class="modal-actions" style="margin-top: 16px;">
-          <button class="secondary" type="button" :disabled="recreateBusy" @click="closeRecreate">{{ t('signed.recreate.cancel') }}</button>
+          <button class="secondary" type="button" :disabled="recreateBusy" @click="closeRecreate">{{ t('recreate.cancel') }}</button>
           <button
             v-if="recreateStep === 'confirm'"
             class="secondary"
@@ -465,7 +465,7 @@ function toggleMode() {
             :disabled="recreateBusy"
             @click="proceedRecreate"
           >
-            {{ t('signed.recreate.proceed') }}
+            {{ t('recreate.proceed') }}
           </button>
           <button
             v-else
@@ -474,7 +474,7 @@ function toggleMode() {
             :disabled="recreateBusy"
             @click="confirmRecreate"
           >
-            {{ t('signed.recreate.create') }}
+            {{ t('recreate.create') }}
           </button>
         </div>
       </div>

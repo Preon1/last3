@@ -115,7 +115,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_presence {
         match {
-          path /api/signed/presence
+          path /api/private/presence
           method POST
         }
         key    {remote_host}
@@ -125,7 +125,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_message_send {
         match {
-          path /api/signed/messages/send
+          path /api/private/messages/send
           method POST
         }
         key    {remote_host}
@@ -135,7 +135,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_message_update {
         match {
-          path /api/signed/messages/update
+          path /api/private/messages/update
           method POST
         }
         key    {remote_host}
@@ -145,7 +145,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_message_delete {
         match {
-          path /api/signed/messages/delete
+          path /api/private/messages/delete
           method POST
         }
         key    {remote_host}
@@ -155,7 +155,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_create_chat {
         match {
-          path /api/signed/chats/create-personal /api/signed/chats/create-group
+          path /api/private/chats/create-personal /api/private/chats/create-group
           method POST
         }
         key    {remote_host}
@@ -165,7 +165,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_group_admin {
         match {
-          path /api/signed/chats/add-member /api/signed/chats/rename-group
+          path /api/private/chats/add-member /api/private/chats/rename-group
           method POST
         }
         key    {remote_host}
@@ -175,7 +175,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_account_delete {
         match {
-          path /api/signed/account/delete
+          path /api/private/account/delete
           method POST
         }
         key    {remote_host}
@@ -185,7 +185,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_account_update {
         match {
-          path /api/signed/account/update
+          path /api/private/account/update
           method POST
         }
         key    {remote_host}
@@ -195,7 +195,7 @@ https://{$LRCOM_DOMAIN:localhost} {
 
       zone signed_session_refresh {
         match {
-          path /api/signed/session/refresh
+          path /api/private/session/refresh
           method POST
         }
         key    {remote_host}

@@ -5,8 +5,8 @@ import crypto from 'crypto'
 const tokens = new Map() // token -> { userId: string, sessionId: string, expiresAt: number, issuedAt: number }
 const userToTokens = new Map() // userId -> Array<{ token: string, sessionId: string, expiresAt: number, issuedAt: number }>
 
-const TOKEN_TTL_MS = Number(process.env.SIGNED_TOKEN_TTL_MS ?? 12 * 60 * 60 * 1000) // 12h
-const MAX_SESSIONS_PER_USER = Number(process.env.SIGNED_MAX_SESSIONS_PER_USER ?? 5)
+const TOKEN_TTL_MS = Number(process.env.AUTH_TOKEN_TTL_MS ?? process.env.SIGNED_TOKEN_TTL_MS ?? 12 * 60 * 60 * 1000) // 12h
+const MAX_SESSIONS_PER_USER = Number(process.env.AUTH_MAX_SESSIONS_PER_USER ?? process.env.SIGNED_MAX_SESSIONS_PER_USER ?? 5)
 
 function nowMs() {
   return Date.now()
@@ -145,14 +145,14 @@ export function parseAuthTokenFromReq(req) {
   return t || null
 }
 
-export function requireSignedAuth(req, res, next) {
+export function requireAuthSession(req, res, next) {
   const token = parseAuthTokenFromReq(req)
   const s = getSessionForToken(token)
   if (!s?.userId || !s?.sessionId) {
     res.status(401).json({ error: 'Unauthorized' })
     return
   }
-  req._signedUserId = s.userId
-  req._signedSessionId = s.sessionId
+  req._authUserId = s.userId
+  req._authSessionId = s.sessionId
   next()
 }

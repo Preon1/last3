@@ -22,29 +22,29 @@ import {
 } from './pushDb.js';
 import { initDatabase, query, runMigrations } from './db.js';
 import { registerUser, findUserByNameTokenAndPublicKey, userTokenExists, getUserByNameToken } from './auth.js';
-import { issueToken, rotateToken, getSessionForToken, requireSignedAuth, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './signedSession.js';
+import { issueToken, rotateToken, getSessionForToken, requireAuthSession, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './authSession.js';
 import {
-  signedListChats,
-  signedListChatsWithLastMessage,
-  signedUnreadCounts,
-  signedCreatePersonalChat,
-  signedCreateGroupChat,
-  signedListChatMembers,
-  signedAddGroupMember,
-  signedRenameGroupChat,
-  signedGetLastMessagesForChatIds,
-  signedFetchMessages,
-  signedSendMessage,
-  signedMarkChatRead,
-  signedMarkMessagesRead,
-  signedUnreadMessageIds,
-  signedDeleteMessage,
-  signedUpdateMessage,
-  signedLeaveChat,
-  signedDeletePersonalChat,
-  signedCleanupExpiredUsers,
-  signedDeleteAccount,
-} from './signedDb.js';
+  authListChats,
+  authListChatsWithLastMessage,
+  authUnreadCounts,
+  authCreatePersonalChat,
+  authCreateGroupChat,
+  authListChatMembers,
+  authAddGroupMember,
+  authRenameGroupChat,
+  authGetLastMessagesForChatIds,
+  authFetchMessages,
+  authSendMessage,
+  authMarkChatRead,
+  authMarkMessagesRead,
+  authUnreadMessageIds,
+  authDeleteMessage,
+  authUpdateMessage,
+  authLeaveChat,
+  authDeletePersonalChat,
+  authCleanupExpiredUsers,
+  authDeleteAccount,
+} from './authDb.js';
 
 const PORT = Number(process.env.PORT ?? 8443);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -73,10 +73,10 @@ const TLS_KEY_PATH = process.env.TLS_KEY_PATH ?? '';
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH ?? '';
 const USE_HTTPS = true;
 
-const SIGNED_CLEANUP_ENABLED = (process.env.SIGNED_CLEANUP_ENABLED ?? '1') !== '0';
+const AUTH_CLEANUP_ENABLED = (process.env.AUTH_CLEANUP_ENABLED ?? process.env.SIGNED_CLEANUP_ENABLED ?? '1') !== '0';
 // Expired-user cleanup: default every 10 minutes (configurable via env).
-const SIGNED_CLEANUP_INTERVAL_MS = Number(process.env.SIGNED_CLEANUP_INTERVAL_MS ?? 10 * 60 * 1000);
-const SIGNED_CLEANUP_INITIAL_DELAY_MS = Number(process.env.SIGNED_CLEANUP_INITIAL_DELAY_MS ?? 30 * 1000);
+const AUTH_CLEANUP_INTERVAL_MS = Number(process.env.AUTH_CLEANUP_INTERVAL_MS ?? process.env.SIGNED_CLEANUP_INTERVAL_MS ?? 10 * 60 * 1000);
+const AUTH_CLEANUP_INITIAL_DELAY_MS = Number(process.env.AUTH_CLEANUP_INITIAL_DELAY_MS ?? process.env.SIGNED_CLEANUP_INITIAL_DELAY_MS ?? 30 * 1000);
 
 // Optional Web Push (background notifications). If keys are not provided, the app
 // still supports in-tab notifications when the page is open.
@@ -187,7 +187,7 @@ async function processPushQueueOnce() {
     if (!uid || !messageId || !chatId) continue;
 
     // If the user is online, skip push.
-    if (anySignedSocketOpen(uid)) continue;
+    if (anyAuthSocketOpen(uid)) continue;
 
     // Cap retries. The row remains until unread/expired/random cleanup.
     if (attempts >= 20) continue;
@@ -318,8 +318,8 @@ app.get('/api/push/public-key', (req, res) => {
   res.json({ enabled: PUSH_ENABLED, publicKey: PUSH_ENABLED ? VAPID_PUBLIC_KEY : null });
 });
 
-// Signed session refresh: rotate bearer token without re-login.
-app.post('/api/signed/session/refresh', requireSignedAuth, (req, res) => {
+// Auth session refresh: rotate bearer token without re-login.
+app.post('/api/private/session/refresh', requireAuthSession, (req, res) => {
   try {
     const oldToken = parseAuthTokenFromReq(req);
     const rotated = rotateToken(oldToken);
@@ -330,17 +330,17 @@ app.post('/api/signed/session/refresh', requireSignedAuth, (req, res) => {
   }
 });
 
-app.post('/api/signed/session/logout-other-devices', requireSignedAuth, (req, res) => {
+app.post('/api/private/session/logout-other-devices', requireAuthSession, (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const keepSessionId = String(req._signedSessionId);
+    const userId = String(req._authUserId);
+    const keepSessionId = String(req._authSessionId);
     const { revoked } = revokeAllTokensForUser(userId, { keepSessionId });
 
     for (const s of revoked) {
       if (!s?.sessionId) continue;
-      const ws = getSignedSocketForSession(userId, s.sessionId);
+      const ws = getAuthSocketForSession(userId, s.sessionId);
       if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
-        sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_other_devices', wipeLocalKeys: false });
+        sendReliable(ws, { type: 'authForceLogout', reason: 'logout_other_devices', wipeLocalKeys: false });
         setTimeout(() => {
           try { ws.close(); } catch { /* ignore */ }
         }, 200);
@@ -353,17 +353,17 @@ app.post('/api/signed/session/logout-other-devices', requireSignedAuth, (req, re
   }
 });
 
-app.post('/api/signed/session/logout-and-remove-key-other-devices', requireSignedAuth, (req, res) => {
+app.post('/api/private/session/logout-and-remove-key-other-devices', requireAuthSession, (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const keepSessionId = String(req._signedSessionId);
+    const userId = String(req._authUserId);
+    const keepSessionId = String(req._authSessionId);
     const { revoked } = revokeAllTokensForUser(userId, { keepSessionId });
 
     for (const s of revoked) {
       if (!s?.sessionId) continue;
-      const ws = getSignedSocketForSession(userId, s.sessionId);
+      const ws = getAuthSocketForSession(userId, s.sessionId);
       if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
-        sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_remove_key_other_devices', wipeLocalKeys: true });
+        sendReliable(ws, { type: 'authForceLogout', reason: 'logout_remove_key_other_devices', wipeLocalKeys: true });
         setTimeout(() => {
           try { ws.close(); } catch { /* ignore */ }
         }, 200);
@@ -376,11 +376,11 @@ app.post('/api/signed/session/logout-and-remove-key-other-devices', requireSigne
   }
 });
 
-// Signed push subscription registration (DB-persisted, privacy-minimal).
-app.post('/api/signed/push/subscribe', requireSignedAuth, (req, res) => {
+// Auth push subscription registration (DB-persisted, privacy-minimal).
+app.post('/api/private/push/subscribe', requireAuthSession, (req, res) => {
   (async () => {
     if (!PUSH_ENABLED) return res.status(503).json({ error: 'Push disabled' });
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const sub = req.body?.subscription;
     const r = await upsertPushSubscriptionForUser({ userId, subscriptionJson: sub });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Invalid subscription' });
@@ -390,10 +390,10 @@ app.post('/api/signed/push/subscribe', requireSignedAuth, (req, res) => {
   });
 });
 
-// Signed push disable: wipe subscriptions and queue.
-app.post('/api/signed/push/disable', requireSignedAuth, (req, res) => {
+// Auth push disable: wipe subscriptions and queue.
+app.post('/api/private/push/disable', requireAuthSession, (req, res) => {
   (async () => {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     await deletePushStateForUser(userId);
     res.json({ success: true });
   })().catch(() => {
@@ -447,9 +447,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (Array.isArray(evicted) && evicted.length) {
       for (const s of evicted) {
         if (!s?.sessionId) continue;
-        const ws = getSignedSocketForSession(String(user.id), s.sessionId);
+        const ws = getAuthSocketForSession(String(user.id), s.sessionId);
         if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
-          sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
+          sendReliable(ws, { type: 'authForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
           setTimeout(() => {
             try { ws.close(); } catch { /* ignore */ }
           }, 200);
@@ -544,9 +544,9 @@ app.post('/api/auth/login-final', async (req, res) => {
     if (Array.isArray(evicted) && evicted.length) {
       for (const s of evicted) {
         if (!s?.sessionId) continue;
-        const ws = getSignedSocketForSession(userId, s.sessionId);
+        const ws = getAuthSocketForSession(userId, s.sessionId);
         if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
-          sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
+          sendReliable(ws, { type: 'authForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
           setTimeout(() => {
             try { ws.close(); } catch { /* ignore */ }
           }, 200);
@@ -568,10 +568,10 @@ app.post('/api/auth/login-final', async (req, res) => {
   }
 });
 
-app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
+app.post('/api/private/account/update', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const sessionId = String(req._signedSessionId);
+    const userId = String(req._authUserId);
+    const sessionId = String(req._authSessionId);
 
     const hiddenMode = req.body?.hiddenMode;
     const introvertMode = req.body?.introvertMode;
@@ -619,7 +619,7 @@ app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
 
     // Best-effort: sync settings to other online sessions for this user.
     const payload = {
-      type: 'signedAccountUpdated',
+      type: 'authAccountUpdated',
       ...(hiddenMode !== undefined && typeof hiddenMode === 'boolean' ? { hiddenMode } : {}),
       ...(introvertMode !== undefined && typeof introvertMode === 'boolean' ? { introvertMode } : {}),
     };
@@ -634,28 +634,28 @@ app.post('/api/signed/account/update', requireSignedAuth, async (req, res) => {
 });
 
 // Backwards-compatible endpoints (legacy clients)
-app.post('/api/signed/account/hidden-mode', requireSignedAuth, async (req, res) => {
+app.post('/api/private/account/hidden-mode', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const sessionId = String(req._signedSessionId);
+    const userId = String(req._authUserId);
+    const sessionId = String(req._authSessionId);
     const hiddenMode = req.body?.hiddenMode;
     if (typeof hiddenMode !== 'boolean') return res.status(400).json({ error: 'hiddenMode boolean required' });
     await query('UPDATE users SET hidden_mode = $2 WHERE id = $1', [userId, hiddenMode]);
-    sendToUserAllExceptSession(userId, sessionId, { type: 'signedAccountUpdated', hiddenMode });
+    sendToUserAllExceptSession(userId, sessionId, { type: 'authAccountUpdated', hiddenMode });
     res.json({ success: true, hiddenMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/api/signed/account/introvert-mode', requireSignedAuth, async (req, res) => {
+app.post('/api/private/account/introvert-mode', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const sessionId = String(req._signedSessionId);
+    const userId = String(req._authUserId);
+    const sessionId = String(req._authSessionId);
     const introvertMode = req.body?.introvertMode;
     if (typeof introvertMode !== 'boolean') return res.status(400).json({ error: 'introvertMode boolean required' });
     await query('UPDATE users SET introvert_mode = $2 WHERE id = $1', [userId, introvertMode]);
-    sendToUserAllExceptSession(userId, sessionId, { type: 'signedAccountUpdated', introvertMode });
+    sendToUserAllExceptSession(userId, sessionId, { type: 'authAccountUpdated', introvertMode });
     res.json({ success: true, introvertMode });
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -680,26 +680,26 @@ app.post('/api/auth/check-name-token', async (req, res) => {
   }
 });
 
-// Signed-mode API (token auth; no cookies)
-app.get('/api/signed/chats', requireSignedAuth, async (req, res) => {
+// Auth-mode API (token auth; no cookies)
+app.get('/api/private/chats', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
-    const chats = await signedListChatsWithLastMessage(userId);
-    const unread = await signedUnreadCounts(userId);
+    const userId = String(req._authUserId);
+    const chats = await authListChatsWithLastMessage(userId);
+    const unread = await authUnreadCounts(userId);
     res.json({ success: true, chats, unread });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/api/signed/chats/last-messages', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/last-messages', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatIdsRaw = req.body?.chatIds;
     const chatIds = Array.isArray(chatIdsRaw) ? chatIdsRaw.map(String).filter(Boolean) : [];
     if (!chatIds.length) return res.status(400).json({ error: 'chatIds required' });
 
-    const lastMessages = await signedGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: true });
+    const lastMessages = await authGetLastMessagesForChatIds(userId, chatIds, { enforceMembership: true });
     res.json({ success: true, lastMessages });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -763,8 +763,8 @@ async function buildPresenceSnapshotForUser(userId, idsInput) {
   const busy = [];
   for (const id of ids) {
     if (hidden.has(id)) continue;
-    if (anySignedSocketOpen(id)) online.push(id);
-    const su = signedUsers.get(id);
+    if (anyAuthSocketOpen(id)) online.push(id);
+    const su = authUsers.get(id);
     if (su && su.roomId) busy.push(id);
   }
 
@@ -775,11 +775,11 @@ async function buildPresenceSnapshotForUser(userId, idsInput) {
   };
 }
 
-// Signed presence (privacy-preserving): caller provides a list of userIds; response
-// only indicates which of those are currently connected to signed WS.
-app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
+// Auth presence (privacy-preserving): caller provides a list of userIds; response
+// only indicates which of those are currently connected to auth WS.
+app.post('/api/private/presence', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const raw = req.body?.userIds;
     const snapshot = await buildPresenceSnapshotForUser(userId, raw);
     res.json({ success: true, ...snapshot });
@@ -788,14 +788,14 @@ app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/create-personal', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const otherUserId = typeof req.body?.otherUserId === 'string' ? req.body.otherUserId : '';
     const names = req.body?.names;
     if (!otherUserId || !names) return res.status(400).json({ error: 'otherUserId and names required' });
 
-    const result = await signedCreatePersonalChat(userId, otherUserId, names);
+    const result = await authCreatePersonalChat(userId, otherUserId, names);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       if (result.reason === 'introvert') {
@@ -813,9 +813,9 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
       const chatId = String(result?.chat?.id ?? '');
       const otherUserId = String(result?.chat?.otherUserId ?? '');
       if (chatId && otherUserId) {
-        const payload = { type: 'signedChatsChanged' };
+        const payload = { type: 'authChatsChanged' };
         for (const uid of [userId, otherUserId]) {
-          forEachSignedSocket(String(uid), (ws) => {
+          forEachAuthSocket(String(uid), (ws) => {
             if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
           });
         }
@@ -830,12 +830,12 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
   }
 });
 
-app.post('/api/signed/chats/create-group', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/create-group', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
     const names = req.body?.names;
-    const result = await signedCreateGroupChat(userId, chatNameEnc, names);
+    const result = await authCreateGroupChat(userId, chatNameEnc, names);
     if (!result.ok) return res.status(400).json({ error: result.reason });
     res.json({ success: true, chat: result.chat });
   } catch {
@@ -843,8 +843,8 @@ app.post('/api/signed/chats/create-group', requireSignedAuth, async (req, res) =
   }
 });
 
-// Signed user lookup by nameToken (VOPRF output). Returns userId+publicKey.
-app.post('/api/signed/users/lookup', requireSignedAuth, async (req, res) => {
+// Auth user lookup by nameToken (VOPRF output). Returns userId+publicKey.
+app.post('/api/private/users/lookup', requireAuthSession, async (req, res) => {
   try {
     const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
     if (!nameToken) return res.status(400).json({ error: 'nameToken required' });
@@ -868,13 +868,13 @@ app.post('/api/signed/users/lookup', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.get('/api/signed/chats/members', requireSignedAuth, async (req, res) => {
+app.get('/api/private/chats/members', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
     if (!chatId) return res.status(400).json({ error: 'chatId required' });
 
-    const members = await signedListChatMembers(userId, chatId);
+    const members = await authListChatMembers(userId, chatId);
     res.json({ success: true, members });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -883,9 +883,9 @@ app.get('/api/signed/chats/members', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/add-member', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const otherUserId = typeof req.body?.otherUserId === 'string' ? req.body.otherUserId : '';
     const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
@@ -894,7 +894,7 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
       return res.status(400).json({ error: 'chatId, otherUserId, chatNameEnc, names required' });
     }
 
-    const result = await signedAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc);
+    const result = await authAddGroupMember(userId, chatId, otherUserId, names, chatNameEnc);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       if (result.reason === 'introvert') {
@@ -910,9 +910,9 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
     try {
       const addedUserId = String(result?.member?.userId ?? '');
       const targets = [addedUserId, userId].filter(Boolean);
-      const payload = { type: 'signedChatsChanged' };
+      const payload = { type: 'authChatsChanged' };
       for (const uid of targets) {
-        forEachSignedSocket(String(uid), (ws) => {
+        forEachAuthSocket(String(uid), (ws) => {
           if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
         });
       }
@@ -927,23 +927,23 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
   }
 });
 
-app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/rename-group', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
     if (!chatId || !chatNameEnc) return res.status(400).json({ error: 'chatId and chatNameEnc required' });
 
-    const result = await signedRenameGroupChat(userId, chatId, chatNameEnc);
+    const result = await authRenameGroupChat(userId, chatId, chatNameEnc);
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : 400;
       return res.status(code).json({ error: result.reason });
     }
 
     try {
-      const payload = { type: 'signedChatsChanged' };
+      const payload = { type: 'authChatsChanged' };
       for (const uid of result.memberIds || []) {
-        forEachSignedSocket(String(uid), (ws) => {
+        forEachAuthSocket(String(uid), (ws) => {
           if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
         });
       }
@@ -958,16 +958,16 @@ app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) =
   }
 });
 
-app.get('/api/signed/messages', requireSignedAuth, async (req, res) => {
+app.get('/api/private/messages', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
     if (!chatId) return res.status(400).json({ error: 'chatId required' });
 
     const limit = typeof req.query?.limit === 'string' ? Number(req.query.limit) : 50;
     const before = typeof req.query?.before === 'string' ? req.query.before : null;
 
-    const messages = await signedFetchMessages(userId, chatId, limit, before);
+    const messages = await authFetchMessages(userId, chatId, limit, before);
     res.json({ success: true, messages });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -976,13 +976,13 @@ app.get('/api/signed/messages', requireSignedAuth, async (req, res) => {
 });
 
 // List unread message UUIDs for a chat (spec requirement).
-app.get('/api/signed/messages/unread', requireSignedAuth, async (req, res) => {
+app.get('/api/private/messages/unread', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
     if (!chatId) return res.status(400).json({ error: 'chatId required' });
     const limit = typeof req.query?.limit === 'string' ? Number(req.query.limit) : 500;
-    const messageIds = await signedUnreadMessageIds(userId, chatId, limit);
+    const messageIds = await authUnreadMessageIds(userId, chatId, limit);
     res.json({ success: true, chatId, messageIds });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -993,9 +993,9 @@ app.get('/api/signed/messages/unread', requireSignedAuth, async (req, res) => {
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024;
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large';
 
-app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
+app.post('/api/private/messages/send', requireAuthSession, async (req, res) => {
   try {
-    const senderId = String(req._signedUserId);
+    const senderId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
     const signature = typeof req.body?.signature === 'string' ? req.body.signature : '';
@@ -1005,11 +1005,11 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
     }
 
-    const { messageId, memberIds } = await signedSendMessage({ senderId, chatId, encryptedData, signature });
+    const { messageId, memberIds } = await authSendMessage({ senderId, chatId, encryptedData, signature });
 
-    // Best-effort realtime notify to signed sockets.
+    // Best-effort realtime notify to auth sockets.
     const payload = {
-      type: 'signedMessage',
+      type: 'authMessage',
       chatId,
       id: messageId,
       senderId,
@@ -1017,7 +1017,7 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
       signature,
     };
     for (const uid of memberIds) {
-      forEachSignedSocket(uid, (ws) => {
+      forEachAuthSocket(uid, (ws) => {
         if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
@@ -1026,7 +1026,7 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
     // Do not include message plaintext.
     for (const uid of memberIds) {
       if (String(uid) === String(senderId)) continue;
-      if (anySignedSocketOpen(uid)) continue;
+      if (anyAuthSocketOpen(uid)) continue;
 
       // Enqueue push attempt for this unread message.
       try {
@@ -1043,22 +1043,22 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/messages/delete', requireSignedAuth, async (req, res) => {
+app.post('/api/private/messages/delete', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId : '';
     if (!chatId || !messageId) return res.status(400).json({ error: 'chatId and messageId required' });
 
-    const r = await signedDeleteMessage({ userId, chatId, messageId });
+    const r = await authDeleteMessage({ userId, chatId, messageId });
     if (!r.ok) {
       if (r.reason === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const payload = { type: 'signedMessageDeleted', chatId, id: messageId };
+    const payload = { type: 'authMessageDeleted', chatId, id: messageId };
     for (const uid of r.memberIds) {
-      forEachSignedSocket(uid, (ws) => {
+      forEachAuthSocket(uid, (ws) => {
         if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
@@ -1070,9 +1070,9 @@ app.post('/api/signed/messages/delete', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
+app.post('/api/private/messages/update', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId : '';
     const encryptedData = typeof req.body?.encryptedData === 'string' ? req.body.encryptedData : '';
@@ -1085,16 +1085,16 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
       return res.status(413).json({ error: ERR_ENCRYPTED_TOO_LARGE });
     }
 
-    const r = await signedUpdateMessage({ userId, chatId, messageId, encryptedData, signature });
+    const r = await authUpdateMessage({ userId, chatId, messageId, encryptedData, signature });
     if (!r.ok) {
       if (r.reason === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
       if (r.reason === 'bad_payload') return res.status(400).json({ error: 'Bad payload' });
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, encryptedData, signature };
+    const payload = { type: 'authMessageUpdated', chatId, id: messageId, senderId: userId, encryptedData, signature };
     for (const uid of r.memberIds) {
-      forEachSignedSocket(uid, (ws) => {
+      forEachAuthSocket(uid, (ws) => {
         if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
@@ -1106,18 +1106,18 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/messages/mark-read', requireSignedAuth, async (req, res) => {
+app.post('/api/private/messages/mark-read', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     if (!chatId) return res.status(400).json({ error: 'chatId required' });
     const messageIdsRaw = req.body?.messageIds;
     if (Array.isArray(messageIdsRaw) && messageIdsRaw.length) {
-      const { unreadCount } = await signedMarkMessagesRead(userId, chatId, messageIdsRaw);
+      const { unreadCount } = await authMarkMessagesRead(userId, chatId, messageIdsRaw);
       return res.json({ success: true, chatId, unreadCount });
     }
 
-    await signedMarkChatRead(userId, chatId);
+    await authMarkChatRead(userId, chatId);
     res.json({ success: true, chatId, unreadCount: 0 });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
@@ -1125,30 +1125,30 @@ app.post('/api/signed/messages/mark-read', requireSignedAuth, async (req, res) =
   }
 });
 
-app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
+app.post('/api/private/chats/delete', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
     if (!chatId) return res.status(400).json({ error: 'chatId required' });
 
     // Spec: in personal chats, deletion deletes the whole chat for both users.
     // For groups, this endpoint acts as "leave" (UI labels it accordingly).
-    const del = await signedDeletePersonalChat(userId, chatId);
+    const del = await authDeletePersonalChat(userId, chatId);
     if (del && del.ok) {
-      const payload = { type: 'signedChatDeleted', chatId };
+      const payload = { type: 'authChatDeleted', chatId };
       for (const uid of del.memberIds) {
-        forEachSignedSocket(uid, (ws) => {
+        forEachAuthSocket(uid, (ws) => {
           if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
         });
       }
     } else {
-      const left = await signedLeaveChat(userId, chatId);
+      const left = await authLeaveChat(userId, chatId);
       if (left && left.ok) {
         // Remaining members should refresh chat list (membership/messages changed).
         try {
-          const payload = { type: 'signedChatsChanged', chatId, reason: left.chatDeleted ? 'group_deleted' : 'member_left' };
+          const payload = { type: 'authChatsChanged', chatId, reason: left.chatDeleted ? 'group_deleted' : 'member_left' };
           for (const uid of left.remainingMemberIds || []) {
-            forEachSignedSocket(String(uid), (ws) => {
+            forEachAuthSocket(String(uid), (ws) => {
               if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
             });
           }
@@ -1164,9 +1164,9 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
             const CHUNK = 500;
             for (let i = 0; i < ids.length; i += CHUNK) {
               const part = ids.slice(i, i + CHUNK);
-              const payload = { type: 'signedMessagesDeleted', chatId, ids: part };
+              const payload = { type: 'authMessagesDeleted', chatId, ids: part };
               for (const uid of left.remainingMemberIds || []) {
-                forEachSignedSocket(String(uid), (ws) => {
+                forEachAuthSocket(String(uid), (ws) => {
                   if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
                 });
               }
@@ -1184,15 +1184,15 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
   }
 });
 
-app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
+app.post('/api/private/account/delete', requireAuthSession, async (req, res) => {
   try {
-    const userId = String(req._signedUserId);
+    const userId = String(req._authUserId);
     const token = parseAuthTokenFromReq(req);
 
     // Best-effort: force logout all sessions (online only).
     try {
-      forEachSignedSocket(userId, (ws) => {
-        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, { type: 'signedForceLogout', reason: 'account_deleted', wipeLocalKeys: false });
+      forEachAuthSocket(userId, (ws) => {
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, { type: 'authForceLogout', reason: 'account_deleted', wipeLocalKeys: false });
       });
     } catch {
       // ignore
@@ -1205,7 +1205,7 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
       // ignore
     }
 
-    await signedDeleteAccount(userId);
+    await authDeleteAccount(userId);
 
     // Revoke all tokens after deletion.
     try {
@@ -1214,9 +1214,9 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
       // ignore
     }
 
-    // Close all signed sockets after revocation.
+    // Close all auth sockets after revocation.
     try {
-      closeAllSignedSockets(userId);
+      closeAllAuthSockets(userId);
     } catch {
       // ignore
     }
@@ -1293,14 +1293,14 @@ const server = https.createServer(
 const wss = new WebSocketServer({ server });
 const WS_FALLBACK_ENABLED = false;
 
-// Signed-mode transport sessions keyed by authenticated userId + sessionId.
+// Auth-mode transport sessions keyed by authenticated userId + sessionId.
 // Current transport connection is WS; this registry is transport-agnostic.
-const signedTransportSessions = new Map(); // userId -> Map(sessionId -> transportConn)
+const authTransportSessions = new Map(); // userId -> Map(sessionId -> transportConn)
 
-// Signed-mode: in-memory user state (presence + call state). Kept RAM-only.
-const signedUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
+// Auth-mode: in-memory user state (presence + call state). Kept RAM-only.
+const authUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
 
-// Signed-only: keep small client message receipt cache (for idempotency).
+// Auth-only: keep small client message receipt cache (for idempotency).
 const STALE_WS_MS = Number(process.env.STALE_WS_MS ?? 45000);
 const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);
 
@@ -1308,7 +1308,7 @@ const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);
 // requiring the client to actively send WS messages.
 const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 30000);
 
-// Reliable WS notifications (signed mode) for small control-plane events.
+// Reliable WS notifications (auth mode) for small control-plane events.
 // We retry until the client ACKs, but only while the WS is open.
 const WS_NOTIFY_RETRY_MS = Number(process.env.WS_NOTIFY_RETRY_MS ?? 5000);
 const TRANSPORT_MAX_CTRL_PAYLOAD_BYTES = Number(process.env.TRANSPORT_MAX_CTRL_PAYLOAD_BYTES ?? 64 * 1024);
@@ -1435,10 +1435,10 @@ function createWebTransportSessionConn(params) {
 function getUserTransportSessionMap(userId) {
   const uid = String(userId ?? '');
   if (!uid) return null;
-  let m = signedTransportSessions.get(uid);
+  let m = authTransportSessions.get(uid);
   if (!m) {
     m = new Map();
-    signedTransportSessions.set(uid, m);
+    authTransportSessions.set(uid, m);
   }
   return m;
 }
@@ -1456,18 +1456,18 @@ function removeTransportSession(userId, sessionId, transportConn) {
   const uid = String(userId ?? '');
   const sid = String(sessionId ?? '');
   if (!uid || !sid) return;
-  const m = signedTransportSessions.get(uid);
+  const m = authTransportSessions.get(uid);
   if (!m) return;
   const cur = m.get(sid);
   if (cur && transportConn && cur !== transportConn) return;
   m.delete(sid);
-  if (m.size === 0) signedTransportSessions.delete(uid);
+  if (m.size === 0) authTransportSessions.delete(uid);
 }
 
 function forEachTransportSession(userId, fn) {
   const uid = String(userId ?? '');
   if (!uid) return;
-  const m = signedTransportSessions.get(uid);
+  const m = authTransportSessions.get(uid);
   if (!m) return;
   for (const transportConn of m.values()) {
     try {
@@ -1482,14 +1482,14 @@ function getTransportSessionForSessionId(userId, sessionId) {
   const uid = String(userId ?? '');
   const sid = String(sessionId ?? '');
   if (!uid || !sid) return null;
-  const m = signedTransportSessions.get(uid);
+  const m = authTransportSessions.get(uid);
   return m ? m.get(sid) ?? null : null;
 }
 
 function closeAllTransportSessions(userId) {
   const uid = String(userId ?? '');
   if (!uid) return;
-  const m = signedTransportSessions.get(uid);
+  const m = authTransportSessions.get(uid);
   if (!m) return;
   for (const transportConn of m.values()) {
     try {
@@ -1498,49 +1498,49 @@ function closeAllTransportSessions(userId) {
       // ignore
     }
   }
-  signedTransportSessions.delete(uid);
+  authTransportSessions.delete(uid);
 }
 
 function hasAnyTransportSessions(userId) {
   const uid = String(userId ?? '');
   if (!uid) return false;
-  return signedTransportSessions.has(uid);
+  return authTransportSessions.has(uid);
 }
 
 function getUserSocketMap(userId) {
   return getUserTransportSessionMap(userId);
 }
 
-function addSignedSocket(userId, sessionId, ws) {
+function addAuthSocket(userId, sessionId, ws) {
   addTransportSession(userId, sessionId, ws);
 }
 
-function removeSignedSocket(userId, sessionId, ws) {
+function removeAuthSocket(userId, sessionId, ws) {
   removeTransportSession(userId, sessionId, ws);
 }
 
-function forEachSignedSocket(userId, fn) {
+function forEachAuthSocket(userId, fn) {
   forEachTransportSession(userId, fn);
 }
 
-function anySignedSocketOpen(userId) {
+function anyAuthSocketOpen(userId) {
   let open = false;
-  forEachSignedSocket(userId, (ws) => {
+  forEachAuthSocket(userId, (ws) => {
     if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) open = true;
   });
   return open;
 }
 
-function closeAllSignedSockets(userId) {
+function closeAllAuthSockets(userId) {
   closeAllTransportSessions(userId);
 }
 
-function getSignedSocketForSession(userId, sessionId) {
+function getAuthSocketForSession(userId, sessionId) {
   return getTransportSessionForSessionId(userId, sessionId);
 }
 
 function sendToUserAll(userId, obj) {
-  forEachSignedSocket(userId, (ws) => {
+  forEachAuthSocket(userId, (ws) => {
     if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, obj);
   });
 }
@@ -1549,7 +1549,7 @@ function sendToUserAllExceptSession(userId, exceptSessionId, obj) {
   const uid = String(userId ?? '');
   const sid = String(exceptSessionId ?? '');
   if (!uid) return;
-  const m = signedTransportSessions.get(uid);
+  const m = authTransportSessions.get(uid);
   if (!m) return;
   for (const [s, ws] of m.entries()) {
     if (sid && s === sid) continue;
@@ -1558,17 +1558,17 @@ function sendToUserAllExceptSession(userId, exceptSessionId, obj) {
 }
 
 function sendToUserSession(userId, sessionId, obj) {
-  const ws = getSignedSocketForSession(userId, sessionId);
+  const ws = getAuthSocketForSession(userId, sessionId);
   if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, obj);
 }
 
 function sendToUserCallSession(userId, obj) {
   const uid = String(userId ?? '');
   if (!uid) return;
-  const u = signedUsers.get(uid);
+  const u = authUsers.get(uid);
   const preferredSid = typeof u?.controllingSessionId === 'string' ? u.controllingSessionId : null;
   if (preferredSid) {
-    const ws = getSignedSocketForSession(uid, preferredSid);
+    const ws = getAuthSocketForSession(uid, preferredSid);
     if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
       sendBestEffort(ws, obj);
       return;
@@ -1678,35 +1678,35 @@ function sendClientReceipt(user, ws, cMsgId, ok, code = null) {
 }
 
 // ------------------------
-// Signed-mode voice rooms
+// Auth-mode voice rooms
 // ------------------------
 
-// Keep signed call rooms separate from anonymous rooms.
-const signedRooms = new Map();
+// Keep auth call rooms separate from anonymous rooms.
+const authRooms = new Map();
 
-function getSignedRoom(roomId) {
-  return roomId ? signedRooms.get(roomId) : null;
+function getAuthRoom(roomId) {
+  return roomId ? authRooms.get(roomId) : null;
 }
 
-function ensureSignedRoom(roomId) {
-  if (!signedRooms.has(roomId)) {
-    signedRooms.set(roomId, { id: roomId, members: new Set(), ownerId: null, joinQueue: [], joinActive: null });
+function ensureAuthRoom(roomId) {
+  if (!authRooms.has(roomId)) {
+    authRooms.set(roomId, { id: roomId, members: new Set(), ownerId: null, joinQueue: [], joinActive: null });
   }
-  return signedRooms.get(roomId);
+  return authRooms.get(roomId);
 }
 
-function signedPickRoomOwner(room) {
+function authPickRoomOwner(room) {
   const ownerId = room.ownerId;
   if (ownerId && room.members.has(ownerId)) {
-    if (anySignedSocketOpen(ownerId)) return ownerId;
+    if (anyAuthSocketOpen(ownerId)) return ownerId;
   }
   for (const memberId of room.members) {
-    if (anySignedSocketOpen(memberId)) return memberId;
+    if (anyAuthSocketOpen(memberId)) return memberId;
   }
   return null;
 }
 
-function signedRemoveJoinRequestFromRoom(room, requesterId) {
+function authRemoveJoinRequestFromRoom(room, requesterId) {
   if (!room) return;
   if (!requesterId) return;
 
@@ -1719,24 +1719,24 @@ function signedRemoveJoinRequestFromRoom(room, requesterId) {
   }
 }
 
-function signedPumpJoinQueue(room) {
+function authPumpJoinQueue(room) {
   if (!room) return;
   if (room.joinActive) return;
   if (!Array.isArray(room.joinQueue) || room.joinQueue.length === 0) return;
 
   while (room.joinQueue.length) {
     const nextId = room.joinQueue[0];
-    const requester = signedUsers.get(nextId);
+    const requester = authUsers.get(nextId);
     if (!requester) {
       room.joinQueue.shift();
       continue;
     }
 
-    const ownerId = signedPickRoomOwner(room);
+    const ownerId = authPickRoomOwner(room);
     if (!ownerId) {
       // Nobody online to approve. Reject all pending requests.
       for (const rid of room.joinQueue.splice(0)) {
-        const u = signedUsers.get(rid);
+        const u = authUsers.get(rid);
         const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
         if (u) {
           u.joinPendingRoomId = null;
@@ -1750,24 +1750,24 @@ function signedPumpJoinQueue(room) {
 
     room.ownerId = ownerId;
     room.joinActive = nextId;
-    const owner = signedUsers.get(ownerId);
+    const owner = authUsers.get(ownerId);
     if (owner) sendToUserCallSession(ownerId, { type: 'joinRequest', from: requester.id, fromName: requester.name, roomId: room.id });
     return;
   }
 }
 
-function signedLeaveRoom(user) {
+function authLeaveRoom(user) {
   const rid = user?.roomId;
   if (!rid) return;
 
-  const room = signedRooms.get(rid);
+  const room = authRooms.get(rid);
   user.roomId = null;
   if (!room) return;
 
   room.members.delete(user.id);
 
-  signedRemoveJoinRequestFromRoom(room, user.id);
-  if (room.ownerId === user.id) room.ownerId = signedPickRoomOwner(room);
+  authRemoveJoinRequestFromRoom(room, user.id);
+  if (room.ownerId === user.id) room.ownerId = authPickRoomOwner(room);
 
   for (const memberId of room.members) {
     sendToUserCallSession(memberId, { type: 'roomPeerLeft', roomId: rid, peerId: user.id });
@@ -1776,7 +1776,7 @@ function signedLeaveRoom(user) {
   if (room.members.size <= 1) {
     const lastId = Array.from(room.members)[0];
     if (lastId) {
-      const last = signedUsers.get(lastId);
+      const last = authUsers.get(lastId);
       if (last) {
         last.roomId = null;
         last.controllingSessionId = null;
@@ -1787,7 +1787,7 @@ function signedLeaveRoom(user) {
     // Reject any pending joiners.
     if (Array.isArray(room.joinQueue)) {
       for (const jid of room.joinQueue) {
-        const u = signedUsers.get(jid);
+        const u = authUsers.get(jid);
         const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
         if (u) {
           u.joinPendingRoomId = null;
@@ -1798,7 +1798,7 @@ function signedLeaveRoom(user) {
       }
     }
     if (room.joinActive) {
-      const u = signedUsers.get(room.joinActive);
+      const u = authUsers.get(room.joinActive);
       const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
       if (u) {
         u.joinPendingRoomId = null;
@@ -1808,11 +1808,11 @@ function signedLeaveRoom(user) {
       else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
     }
 
-    signedRooms.delete(rid);
+    authRooms.delete(rid);
     return;
   }
 
-  signedPumpJoinQueue(room);
+  authPumpJoinQueue(room);
 }
 
 function getTurnHostLabel() {
@@ -1826,7 +1826,7 @@ function getTurnHostLabel() {
   return `${host}:${port}`;
 }
 
-async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
+async function handleAuthControlMessage(transportConn, authUser, sid, msg) {
   if (msg.type === 'ack') {
     const msgId = typeof msg.msgId === 'string' ? msg.msgId : null;
     if (msgId) ackReliable(transportConn, msgId);
@@ -1835,7 +1835,7 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
 
   const cMsgId = typeof msg.cMsgId === 'string' && msg.cMsgId ? msg.cMsgId : null;
   if (cMsgId) {
-    const prev = getClientReceipt(signedUser, cMsgId);
+    const prev = getClientReceipt(authUser, cMsgId);
     if (prev) {
       sendBestEffort(transportConn, prev);
       return;
@@ -1844,34 +1844,34 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
 
   if (msg.type === 'ping') {
     sendBestEffort(transportConn, { type: 'pong' });
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'presenceHeartbeat') {
     const raw = Array.isArray(msg.userIds) ? msg.userIds : [];
-    const snapshot = await buildPresenceSnapshotForUser(signedUser.id, raw);
+    const snapshot = await buildPresenceSnapshotForUser(authUser.id, raw);
     sendBestEffort(transportConn, { type: 'presenceSnapshot', ...snapshot });
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callStart') {
     const to = typeof msg.to === 'string' ? msg.to : null;
     if (!to) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'BAD_TO');
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, false, 'BAD_TO');
       return;
     }
-    const callee = signedUsers.get(to);
-    if (!callee || !anySignedSocketOpen(to)) {
+    const callee = authUsers.get(to);
+    if (!callee || !anyAuthSocketOpen(to)) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'offline' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
-    if (signedUser.roomId) {
+    if (authUser.roomId) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'busy' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
@@ -1895,7 +1895,7 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
               WHERE c.chat_type = 'personal'
               LIMIT 1
             ) AS has_personal`,
-        [signedUser.id, String(to)],
+        [authUser.id, String(to)],
       );
       authRow = auth?.rows?.[0] ?? null;
     } catch (err) {
@@ -1921,35 +1921,35 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
                   WHERE c.chat_type = 'personal'
                   LIMIT 1
                 ) AS has_personal`,
-            [signedUser.id, String(to)],
+            [authUser.id, String(to)],
           );
           const row = auth?.rows?.[0] ?? null;
           authRow = row ? { ...row, introvert: false } : null;
         } catch (err2) {
-          debugError('[signed callStart] auth query failed (fallback)', {
-            from: signedUser?.id,
+          debugError('[auth callStart] auth query failed (fallback)', {
+            from: authUser?.id,
             to,
             err: err2,
           });
           sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
-          if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+          if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
           return;
         }
       } else {
-        debugError('[signed callStart] auth query failed', {
-          from: signedUser?.id,
+        debugError('[auth callStart] auth query failed', {
+          from: authUser?.id,
           to,
           err,
         });
         sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
-        if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+        if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
         return;
       }
     }
 
     if (!authRow) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
@@ -1959,105 +1959,105 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
 
     if (!hasAny) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
     if (introvert && !hasPersonal) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'introvert' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
     if (callee.roomId) {
       sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'busy' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
     const rid = makeId();
-    const room = ensureSignedRoom(rid);
-    room.members.add(signedUser.id);
+    const room = ensureAuthRoom(rid);
+    room.members.add(authUser.id);
     room.members.add(callee.id);
-    room.ownerId = signedUser.id;
-    signedUser.roomId = rid;
-    signedUser.controllingSessionId = String(sid);
+    room.ownerId = authUser.id;
+    authUser.roomId = rid;
+    authUser.controllingSessionId = String(sid);
     callee.roomId = rid;
     callee.controllingSessionId = null;
 
     sendBestEffort(transportConn, { type: 'callStartResult', ok: true, roomId: rid });
-    sendToUserAll(callee.id, { type: 'incomingCall', from: signedUser.id, fromName: signedUser.name, roomId: rid });
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    sendToUserAll(callee.id, { type: 'incomingCall', from: authUser.id, fromName: authUser.name, roomId: rid });
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callAccept') {
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
       sendBestEffort(transportConn, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'accepted_elsewhere' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
     const from = typeof msg.from === 'string' ? msg.from : null;
-    const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
-    const caller = from ? signedUsers.get(from) : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : authUser.roomId;
+    const caller = from ? authUsers.get(from) : null;
     if (!caller) {
-      signedUser.roomId = null;
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'NOT_FOUND');
+      authUser.roomId = null;
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, false, 'NOT_FOUND');
       return;
     }
 
-    if (!rid || caller.roomId !== rid || signedUser.roomId !== rid) {
-      signedUser.roomId = null;
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'ROOM_MISMATCH');
+    if (!rid || caller.roomId !== rid || authUser.roomId !== rid) {
+      authUser.roomId = null;
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, false, 'ROOM_MISMATCH');
       return;
     }
 
-    const room = getSignedRoom(rid);
+    const room = getAuthRoom(rid);
     if (!room) {
-      signedUser.roomId = null;
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'ROOM_MISSING');
+      authUser.roomId = null;
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, false, 'ROOM_MISSING');
       return;
     }
 
-    signedUser.controllingSessionId = String(sid);
-    sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'accepted_elsewhere' });
+    authUser.controllingSessionId = String(sid);
+    sendToUserAllExceptSession(authUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'accepted_elsewhere' });
 
-    const peer = { id: signedUser.id, name: signedUser.name };
+    const peer = { id: authUser.id, name: authUser.name };
     for (const memberId of room.members) {
-      if (memberId === signedUser.id) continue;
+      if (memberId === authUser.id) continue;
       sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
     }
 
     const peers = Array.from(room.members)
-      .filter((id) => id !== signedUser.id)
+      .filter((id) => id !== authUser.id)
       .map((id) => {
-        const u2 = signedUsers.get(id);
+        const u2 = authUsers.get(id);
         return u2 ? { id: u2.id, name: u2.name } : null;
       })
       .filter(Boolean);
 
     sendBestEffort(transportConn, { type: 'roomPeers', roomId: rid, peers });
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callReject') {
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
       sendBestEffort(transportConn, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'rejected_elsewhere' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
     const from = typeof msg.from === 'string' ? msg.from : null;
-    const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
-    const caller = from ? signedUsers.get(from) : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : authUser.roomId;
+    const caller = from ? authUsers.get(from) : null;
     if (caller) sendToUserCallSession(caller.id, { type: 'callRejected', reason: 'rejected' });
     if (rid) {
-      sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'rejected' });
+      sendToUserAllExceptSession(authUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'rejected' });
 
-      const room = getSignedRoom(rid);
+      const room = getAuthRoom(rid);
       if (room && room.members.size === 2) {
         for (const memberId of room.members) {
-          const u = signedUsers.get(memberId);
+          const u = authUsers.get(memberId);
           if (u && u.roomId === rid) {
             u.roomId = null;
             u.controllingSessionId = null;
@@ -2066,7 +2066,7 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
 
         if (Array.isArray(room.joinQueue)) {
           for (const jid of room.joinQueue) {
-            const u = signedUsers.get(jid);
+            const u = authUsers.get(jid);
             const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
             if (u) {
               u.joinPendingRoomId = null;
@@ -2077,7 +2077,7 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
           }
         }
         if (room.joinActive) {
-          const u = signedUsers.get(room.joinActive);
+          const u = authUsers.get(room.joinActive);
           const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
           if (u) {
             u.joinPendingRoomId = null;
@@ -2087,130 +2087,130 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
           else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
         }
 
-        signedRooms.delete(rid);
+        authRooms.delete(rid);
       }
     }
 
-    signedUser.roomId = null;
-    signedUser.controllingSessionId = null;
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authUser.roomId = null;
+    authUser.controllingSessionId = null;
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callHangup') {
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
-    const rid = signedUser.roomId;
-    const room = rid ? getSignedRoom(rid) : null;
+    const rid = authUser.roomId;
+    const room = rid ? getAuthRoom(rid) : null;
     if (rid && room && room.members.size === 2) {
-      const otherId = Array.from(room.members).find((id) => id !== signedUser.id) ?? null;
-      const other = otherId ? signedUsers.get(otherId) : null;
+      const otherId = Array.from(room.members).find((id) => id !== authUser.id) ?? null;
+      const other = otherId ? authUsers.get(otherId) : null;
       const otherAccepted = Boolean(other?.controllingSessionId);
       if (otherId && !otherAccepted) {
         sendToUserAll(otherId, { type: 'incomingCallCancelled', roomId: rid, reason: 'hangup' });
         for (const memberId of room.members) {
-          const u = signedUsers.get(memberId);
+          const u = authUsers.get(memberId);
           if (u && u.roomId === rid) {
             u.roomId = null;
             u.controllingSessionId = null;
           }
         }
-        signedRooms.delete(rid);
-        if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+        authRooms.delete(rid);
+        if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
         return;
       }
     }
 
-    signedLeaveRoom(signedUser);
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authLeaveRoom(authUser);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callJoinRequest') {
     const to = typeof msg.to === 'string' ? msg.to : null;
-    const target = to ? signedUsers.get(to) : null;
+    const target = to ? authUsers.get(to) : null;
     if (!target || !target.roomId) {
       sendBestEffort(transportConn, { type: 'callJoinResult', ok: false, reason: 'not_in_call' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
-    const room = getSignedRoom(target.roomId);
+    const room = getAuthRoom(target.roomId);
     if (!room) {
       sendBestEffort(transportConn, { type: 'callJoinResult', ok: false, reason: 'ended' });
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
-    signedUser.joinPendingRoomId = room.id;
-    signedUser.joinPendingSessionId = String(sid);
+    authUser.joinPendingRoomId = room.id;
+    authUser.joinPendingSessionId = String(sid);
     if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
-    room.joinQueue.push(signedUser.id);
+    room.joinQueue.push(authUser.id);
     sendBestEffort(transportConn, { type: 'callJoinPending', roomId: room.id, toName: target.name });
-    signedPumpJoinQueue(room);
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callJoinCancel') {
-    if (signedUser.joinPendingSessionId && String(signedUser.joinPendingSessionId) !== String(sid)) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (authUser.joinPendingSessionId && String(authUser.joinPendingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
-    const rid = signedUser.joinPendingRoomId;
+    const rid = authUser.joinPendingRoomId;
     if (rid) {
-      const room = getSignedRoom(rid);
-      if (room) signedRemoveJoinRequestFromRoom(room, signedUser.id);
-      signedPumpJoinQueue(room);
+      const room = getAuthRoom(rid);
+      if (room) authRemoveJoinRequestFromRoom(room, authUser.id);
+      authPumpJoinQueue(room);
     }
-    signedUser.joinPendingRoomId = null;
-    signedUser.joinPendingSessionId = null;
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authUser.joinPendingRoomId = null;
+    authUser.joinPendingSessionId = null;
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callJoinReject') {
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
     const from = typeof msg.from === 'string' ? msg.from : null;
     const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
-    const requester = from ? signedUsers.get(from) : null;
-    const room = rid ? getSignedRoom(rid) : null;
+    const requester = from ? authUsers.get(from) : null;
+    const room = rid ? getAuthRoom(rid) : null;
     const joinSid = typeof requester?.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : null;
     if (requester) {
       requester.joinPendingRoomId = null;
       requester.joinPendingSessionId = null;
     }
-    if (room) signedRemoveJoinRequestFromRoom(room, from);
+    if (room) authRemoveJoinRequestFromRoom(room, from);
     if (from) {
       if (joinSid) sendToUserSession(from, joinSid, { type: 'callJoinResult', ok: false, reason: 'rejected' });
       else sendToUserAll(from, { type: 'callJoinResult', ok: false, reason: 'rejected' });
     }
-    signedPumpJoinQueue(room);
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
   if (msg.type === 'callJoinAccept') {
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
     const from = typeof msg.from === 'string' ? msg.from : null;
     const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
-    const requester = from ? signedUsers.get(from) : null;
-    const room = rid ? getSignedRoom(rid) : null;
+    const requester = from ? authUsers.get(from) : null;
+    const room = rid ? getAuthRoom(rid) : null;
     if (!requester || !room) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
     if (room.joinActive !== requester.id) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
 
@@ -2229,7 +2229,7 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
     const peers = Array.from(room.members)
       .filter((id) => id !== requester.id)
       .map((id) => {
-        const u2 = signedUsers.get(id);
+        const u2 = authUsers.get(id);
         return u2 ? { id: u2.id, name: u2.name } : null;
       })
       .filter(Boolean);
@@ -2238,8 +2238,8 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
     sendToUserCallSession(requester.id, { type: 'callJoinResult', ok: true });
 
     room.joinActive = null;
-    signedPumpJoinQueue(room);
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    authPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
@@ -2247,38 +2247,38 @@ async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
     const to = typeof msg.to === 'string' ? msg.to : null;
     const payload = msg.payload;
     if (!to) return;
-    const peer = signedUsers.get(to);
+    const peer = authUsers.get(to);
     if (!peer) return;
-    if (!signedUser.roomId || signedUser.roomId !== peer.roomId) return;
-    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    if (!authUser.roomId || authUser.roomId !== peer.roomId) return;
+    if (authUser.controllingSessionId && String(authUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
       return;
     }
-    sendToUserCallSession(peer.id, { type: 'signal', from: signedUser.id, fromName: signedUser.name, payload });
-    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    sendToUserCallSession(peer.id, { type: 'signal', from: authUser.id, fromName: authUser.name, payload });
+    if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, true);
     return;
   }
 
-  if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'UNKNOWN_TYPE');
+  if (cMsgId) sendClientReceipt(authUser, transportConn, cMsgId, false, 'UNKNOWN_TYPE');
 }
 
-function handleSignedSessionClose(uid, sid, transportConn) {
-  removeSignedSocket(uid, sid, transportConn);
+function handleAuthSessionClose(uid, sid, transportConn) {
+  removeAuthSocket(uid, sid, transportConn);
 
-  const curUser = signedUsers.get(uid);
+  const curUser = authUsers.get(uid);
 
   if (curUser?.controllingSessionId && String(curUser.controllingSessionId) === String(sid)) {
-    if (curUser.roomId) signedLeaveRoom(curUser);
+    if (curUser.roomId) authLeaveRoom(curUser);
     curUser.controllingSessionId = null;
   }
 
   if (curUser?.joinPendingSessionId && String(curUser.joinPendingSessionId) === String(sid)) {
     const rid = curUser.joinPendingRoomId;
     if (rid) {
-      const room = getSignedRoom(rid);
+      const room = getAuthRoom(rid);
       if (room) {
-        signedRemoveJoinRequestFromRoom(room, curUser.id);
-        signedPumpJoinQueue(room);
+        authRemoveJoinRequestFromRoom(room, curUser.id);
+        authPumpJoinQueue(room);
       }
     }
     curUser.joinPendingRoomId = null;
@@ -2287,16 +2287,16 @@ function handleSignedSessionClose(uid, sid, transportConn) {
 
   const stillHasSockets = hasAnyTransportSessions(String(uid));
   if (!stillHasSockets) {
-    if (curUser?.roomId) signedLeaveRoom(curUser);
-    signedUsers.delete(uid);
+    if (curUser?.roomId) authLeaveRoom(curUser);
+    authUsers.delete(uid);
   }
 }
 
-function ensureSignedUserState(uid, signedName = '') {
-  const prev = signedUsers.get(uid);
-  const signedUser = prev ?? {
+function ensureAuthUserState(uid, authName = '') {
+  const prev = authUsers.get(uid);
+  const authUser = prev ?? {
     id: uid,
-    name: signedName,
+    name: authName,
     lastMsgAt: Date.now(),
     roomId: null,
     controllingSessionId: null,
@@ -2306,10 +2306,10 @@ function ensureSignedUserState(uid, signedName = '') {
     _clientReceiptQueue: null,
   };
 
-  signedUser.name = signedName || signedUser.name;
-  signedUser.lastMsgAt = Date.now();
-  signedUsers.set(uid, signedUser);
-  return signedUser;
+  authUser.name = authName || authUser.name;
+  authUser.lastMsgAt = Date.now();
+  authUsers.set(uid, authUser);
+  return authUser;
 }
 
 async function streamToTransportMessages(readable, onMessage) {
@@ -2381,7 +2381,7 @@ async function handleWebTransportSession(session) {
 
   const uid = String(sess.userId);
   const sid = String(sess.sessionId);
-  const signedUser = ensureSignedUserState(uid, '');
+  const authUser = ensureAuthUserState(uid, '');
 
   let sessionOpen = true;
   let sessionClosedHandled = false;
@@ -2393,7 +2393,7 @@ async function handleWebTransportSession(session) {
     if (sessionClosedHandled) return;
     sessionClosedHandled = true;
     sessionOpen = false;
-    handleSignedSessionClose(uid, sid, transportConn);
+    handleAuthSessionClose(uid, sid, transportConn);
   };
 
   const pumpWriter = () => {
@@ -2441,7 +2441,7 @@ async function handleWebTransportSession(session) {
   });
 
   addTransportSession(uid, sid, transportConn);
-  sendBestEffort(transportConn, { type: 'signedHello', userId: uid });
+  sendBestEffort(transportConn, { type: 'authHello', userId: uid });
 
   void Promise.resolve(session.closed)
     .catch(() => null)
@@ -2474,15 +2474,15 @@ async function handleWebTransportSession(session) {
     if (session?.datagrams?.readable) {
       void streamToTransportMessages(session.datagrams.readable, async (msg) => {
         if (!msg) return;
-        signedUser.lastMsgAt = Date.now();
-        await handleSignedControlMessage(transportConn, signedUser, sid, msg);
+        authUser.lastMsgAt = Date.now();
+        await handleAuthControlMessage(transportConn, authUser, sid, msg);
       });
     }
 
     await streamToTransportMessages(controlStream?.readable, async (msg) => {
       if (!msg) return;
-      signedUser.lastMsgAt = Date.now();
-      await handleSignedControlMessage(transportConn, signedUser, sid, msg);
+      authUser.lastMsgAt = Date.now();
+      await handleAuthControlMessage(transportConn, authUser, sid, msg);
     });
 
     sessionOpen = false;
@@ -2525,10 +2525,10 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  // Signed-mode WS: separate world; requires token in querystring.
+  // Auth-mode WS: separate world; requires token in querystring.
   try {
     const rawUrl = typeof req?.url === 'string' ? req.url : '/';
-    if (rawUrl.startsWith('/signed')) {
+    if (rawUrl.startsWith('/private')) {
       const u = new URL(rawUrl, 'http://localhost');
       const token = u.searchParams.get('token');
       const sess = getSessionForToken(token);
@@ -2546,15 +2546,15 @@ wss.on('connection', async (ws, req) => {
         ws.isAlive = true;
       });
 
-      const signedName = '';
+      const authName = '';
 
-      const prev = signedUsers.get(uid);
+      const prev = authUsers.get(uid);
 
       // Reuse the existing per-user state on reconnect (preserves call state,
       // receipts, etc).
-      const signedUser = prev ?? {
+      const authUser = prev ?? {
         id: uid,
-        name: signedName,
+        name: authName,
         lastMsgAt: Date.now(),
         roomId: null,
         controllingSessionId: null,
@@ -2564,25 +2564,25 @@ wss.on('connection', async (ws, req) => {
         _clientReceiptQueue: null,
       };
 
-      signedUser.name = signedName || signedUser.name;
-      signedUser.lastMsgAt = Date.now();
+      authUser.name = authName || authUser.name;
+      authUser.lastMsgAt = Date.now();
 
-      ws._lrcomSignedUserId = uid;
+      ws._lrcomAuthUserId = uid;
       ws._lrcomSessionId = sid;
-      addSignedSocket(uid, sid, ws);
-      signedUsers.set(uid, signedUser);
+      addAuthSocket(uid, sid, ws);
+      authUsers.set(uid, authUser);
 
-      sendBestEffort(ws, { type: 'signedHello', userId: uid });
+      sendBestEffort(ws, { type: 'authHello', userId: uid });
 
       ws.on('message', async (data) => {
-        signedUser.lastMsgAt = Date.now();
+        authUser.lastMsgAt = Date.now();
         const msg = parseIncomingControlMessage(data);
         if (!msg) return;
-        await handleSignedControlMessage(ws, signedUser, sid, msg);
+        await handleAuthControlMessage(ws, authUser, sid, msg);
       });
 
       ws.on('close', () => {
-        handleSignedSessionClose(uid, sid, ws);
+        handleAuthSessionClose(uid, sid, ws);
       });
 
       ws.on('error', () => {
@@ -2596,15 +2596,15 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  // No anonymous/unsigned WS mode: reject anything not on /signed.
+  // No anonymous/unauth WS mode: reject anything not on /private.
   try { ws.close(); } catch { /* ignore */ }
 });
 
-// Terminate dead signed sockets (e.g. laptop sleep / mobile drop) using server
+// Terminate dead auth sockets (e.g. laptop sleep / mobile drop) using server
 // ping/pong heartbeat. This avoids disconnecting healthy-but-idle clients.
 if (WS_FALLBACK_ENABLED) {
   setInterval(() => {
-    for (const m of signedTransportSessions.values()) {
+    for (const m of authTransportSessions.values()) {
       for (const ws of m.values()) {
         try {
           if (!ws || ws.readyState !== 1) continue;
@@ -2679,18 +2679,18 @@ async function start() {
     }
   }
 
-  if (SIGNED_CLEANUP_ENABLED) {
-    const interval = Number.isFinite(SIGNED_CLEANUP_INTERVAL_MS)
-      ? Math.max(60 * 1000, SIGNED_CLEANUP_INTERVAL_MS)
+  if (AUTH_CLEANUP_ENABLED) {
+    const interval = Number.isFinite(AUTH_CLEANUP_INTERVAL_MS)
+      ? Math.max(60 * 1000, AUTH_CLEANUP_INTERVAL_MS)
       : 24 * 60 * 60 * 1000;
 
-    const initialDelay = Number.isFinite(SIGNED_CLEANUP_INITIAL_DELAY_MS)
-      ? Math.max(0, SIGNED_CLEANUP_INITIAL_DELAY_MS)
+    const initialDelay = Number.isFinite(AUTH_CLEANUP_INITIAL_DELAY_MS)
+      ? Math.max(0, AUTH_CLEANUP_INITIAL_DELAY_MS)
       : 30 * 1000;
 
     const run = async () => {
       try {
-        await signedCleanupExpiredUsers();
+        await authCleanupExpiredUsers();
       } catch {
         // No logs (privacy policy)
       }

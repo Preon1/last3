@@ -2,14 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const toast = useToastStore()
 const { t } = useI18n()
 
-const { activeChatId, messagesByChatId, userId, membersByChatId } = storeToRefs(signed)
+const { activeChatId, messagesByChatId, userId, membersByChatId } = storeToRefs(authStore)
 
 const chatInput = ref('')
 const chatMessagesEl = ref<HTMLDivElement | null>(null)
@@ -35,7 +35,7 @@ async function flushReads() {
 
   const ids = Array.from(pendingReadIds)
   pendingReadIds.clear()
-  await signed.markMessagesRead(cid, ids)
+  await authStore.markMessagesRead(cid, ids)
 }
 
 function scheduleFlush() {
@@ -527,7 +527,7 @@ onMounted(() => {
 })
 
 function showSendError(e: any) {
-  const msg = typeof e?.message === 'string' ? e.message : String(t('signed.genericError'))
+  const msg = typeof e?.message === 'string' ? e.message : String(t('genericError'))
   if (msg === 'Encrypted message too large') {
     toast.error(String(t('toast.chatTooLargeTitle')), String(t('toast.chatTooLargeBody')))
     return
@@ -542,7 +542,7 @@ async function saveEdit(chatId: string, messageId: string) {
   if (!next) return
   editBusy.value = true
   try {
-    await signed.updateMessageText(chatId, messageId, next)
+    await authStore.updateMessageText(chatId, messageId, next)
     editingId.value = null
     chatInput.value = ''
     queueMicrotask(() => autoGrowChatInput(true))
@@ -558,7 +558,7 @@ async function deleteMsg(chatId: string, messageId: string, senderId: string) {
   if (editBusy.value) return
   if (editingId.value) return
   if (!window.confirm(String(t('confirm.deleteMessage')))) return
-  await signed.deleteMessage(chatId, messageId)
+  await authStore.deleteMessage(chatId, messageId)
   if (editingId.value === messageId) cancelEdit()
 }
 
@@ -640,7 +640,7 @@ async function onSend() {
 
   const rid = replyingToId.value
   try {
-    await signed.sendMessage(cid, t0, { replyToId: rid })
+    await authStore.sendMessage(cid, t0, { replyToId: rid })
     chatInput.value = ''
     cancelReply()
     queueMicrotask(() => autoGrowChatInput(true))
@@ -787,7 +787,7 @@ async function tryLoadMore() {
   const prevTop = root.scrollTop
 
   try {
-    const r = await signed.loadMoreMessages(cid, 100)
+    const r = await authStore.loadMoreMessages(cid, 100)
     loadMoreHasMore.value = Boolean(r?.hasMore)
     await nextTick()
     const nextHeight = root.scrollHeight
@@ -836,8 +836,8 @@ function onMessagesScroll() {
             <span
               v-if="m.verification === 'unverifiable'"
               class="chat-verify-flag"
-              :title="String(t('chat.unverifiableMessageHint'))"
-            >{{ t('chat.unverifiableMessage') }}</span>
+              :title="String(t('chatting.unverifiableMessageHint'))"
+            >{{ t('chatting.unverifiableMessage') }}</span>
           </span>
 
           <span class="muted" style="margin-left: 10px;">
@@ -851,7 +851,7 @@ function onMessagesScroll() {
         </div>
 
         <div v-if="m.replyToId" class="muted" style="margin-top: 4px; font-size: 12px;">
-          {{ t('chat.replying') }}: {{ resolveReplyPreview(String(m.replyToId)) || String(m.replyToId) }}
+          {{ t('chatting.replying') }}: {{ resolveReplyPreview(String(m.replyToId)) || String(m.replyToId) }}
         </div>
 
         <div class="chat-text">
@@ -934,11 +934,11 @@ function onMessagesScroll() {
         :disabled="!activeChatId"
         rows="1"
         autocomplete="off"
-        :placeholder="String(t('chat.typeMessage'))"
+        :placeholder="String(t('chatting.typeMessage'))"
         @keydown="onChatKeydown"
         @input="autoGrowChatInput()"
       ></textarea>
-      <button class="icon-only chat-send" type="button" :disabled="!canSend" :aria-label="String(t('chat.sendAria'))" @click="onSend">
+      <button class="icon-only chat-send" type="button" :disabled="!canSend" :aria-label="String(t('chatting.sendAria'))" @click="onSend">
         <svg class="icon" aria-hidden="true" focusable="false"><use xlink:href="/icons.svg#send"></use></svg>
       </button>
     </div>

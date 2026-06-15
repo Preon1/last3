@@ -1,16 +1,16 @@
-export type SignedTransportHandlers = {
+export type AuthTransportHandlers = {
   onOpen: () => void
   onClose: () => void
   onError: () => void
   onMessage: (raw: string) => void
 }
 
-export type SignedTransportSocketState = {
+export type AuthTransportSocketState = {
   readyState: number
 }
 
-export class SignedTransportClient {
-  private socket: SignedTransportSocketState | null = null
+export class AuthTransportClient {
+  private socket: AuthTransportSocketState | null = null
   private transport: any | null = null
   private controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null
   private datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null
@@ -25,11 +25,11 @@ export class SignedTransportClient {
     return this.socket?.readyState ?? WebSocket.CLOSED
   }
 
-  connect(url: string, handlers: SignedTransportHandlers) {
+  connect(url: string, handlers: AuthTransportHandlers) {
     this.disconnect(false)
 
     const WT = (window as any)?.WebTransport
-    const state: SignedTransportSocketState = { readyState: WebSocket.CONNECTING }
+    const state: AuthTransportSocketState = { readyState: WebSocket.CONNECTING }
     this.socket = state
 
     if (typeof WT !== 'function') {
@@ -96,7 +96,7 @@ export class SignedTransportClient {
     return state
   }
 
-  private async readDatagrams(readable: ReadableStream<Uint8Array>, connectId: number, handlers: SignedTransportHandlers) {
+  private async readDatagrams(readable: ReadableStream<Uint8Array>, connectId: number, handlers: AuthTransportHandlers) {
     const reader = readable.getReader()
     const decoder = new TextDecoder()
     try {
@@ -118,7 +118,7 @@ export class SignedTransportClient {
     }
   }
 
-  private async readStreamLines(readable: ReadableStream<Uint8Array>, connectId: number, handlers: SignedTransportHandlers) {
+  private async readStreamLines(readable: ReadableStream<Uint8Array>, connectId: number, handlers: AuthTransportHandlers) {
     const reader = readable.getReader()
     const decoder = new TextDecoder()
     let acc = ''

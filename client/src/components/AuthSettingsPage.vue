@@ -4,18 +4,18 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { cycleLocale } from '../i18n'
 import { useUiStore } from '../stores/ui'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { confirmLeave } from '../utils/confirmLeave'
 import { hardReloadApp } from '../utils/hardReload'
 
 const ui = useUiStore()
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const toast = useToastStore()
 const { t, locale } = useI18n()
 
 const { themeLabel } = storeToRefs(ui)
-const { username, hiddenMode, introvertMode, notificationsEnabled, pushNotificationsEnabled, stayLoggedIn, vaultPlain, publicKeyJwk } = storeToRefs(signed)
+const { username, hiddenMode, introvertMode, notificationsEnabled, pushNotificationsEnabled, stayLoggedIn, vaultPlain, publicKeyJwk } = storeToRefs(authStore)
 
 const expirationDaysDraft = ref<string>('')
 const expirationBusy = ref(false)
@@ -42,20 +42,20 @@ function closeHelp() {
 const helpTitle = computed(() => {
   if (openHelp.value === 'notifications') return String(t('notifications.settingsLabel'))
   if (openHelp.value === 'push') return String(t('notifications.pushLabel'))
-  if (openHelp.value === 'hiddenMode') return String(t('signed.hiddenMode'))
-  if (openHelp.value === 'introvertMode') return String(t('signed.introvertMode'))
-  if (openHelp.value === 'expirationDays') return String(t('signed.expirationDays'))
+  if (openHelp.value === 'hiddenMode') return String(t('hiddenMode'))
+  if (openHelp.value === 'introvertMode') return String(t('introvertMode'))
+  if (openHelp.value === 'expirationDays') return String(t('expirationDays'))
   return ''
 })
 
 const helpBody = computed(() => {
   if (openHelp.value === 'notifications') return String(t('notifications.settingsHint'))
   if (openHelp.value === 'push') return String(t('notifications.pushHint'))
-  if (openHelp.value === 'hiddenMode') return String(t('signed.hiddenModeHelp'))
-  if (openHelp.value === 'introvertMode') return String(t('signed.introvertModeHelp'))
+  if (openHelp.value === 'hiddenMode') return String(t('hiddenModeHelp'))
+  if (openHelp.value === 'introvertMode') return String(t('introvertModeHelp'))
   if (openHelp.value === 'expirationDays') {
-    const parts = [String(t('signed.expirationDaysSettingsHelp')), String(t('signed.expirationDaysRangeInfo'))]
-    if (!publicKeyJwk.value) parts.push(String(t('signed.expirationDaysUnlockHint')))
+    const parts = [String(t('expirationDaysSettingsHelp')), String(t('expirationDaysRangeInfo'))]
+    if (!publicKeyJwk.value) parts.push(String(t('expirationDaysUnlockHint')))
     return parts.join('\n\n')
   }
   return ''
@@ -79,17 +79,17 @@ function onManageKeys() {
 
 function onLogout() {
   if (!confirmLeave('Last')) return
-  signed.logout(true)
+  authStore.logout(true)
 }
 
 async function onLogoutOtherDevices() {
   if (logoutOthersBusy.value) return
   logoutOthersBusy.value = true
   try {
-    await signed.logoutOtherDevices()
+    await authStore.logoutOtherDevices()
     toast.push({
-      title: String(t('signed.settingsToast.savedTitle')),
-      message: String(t('signed.settingsToast.otherDevicesLoggedOut')),
+      title: String(t('settingsToast.savedTitle')),
+      message: String(t('settingsToast.otherDevicesLoggedOut')),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -97,13 +97,13 @@ async function onLogoutOtherDevices() {
     const msg = e instanceof Error ? e.message : String(e)
     const body =
       msg === 'Unauthorized'
-        ? String(t('signed.errUnauthorized'))
+        ? String(t('errUnauthorized'))
         : msg === 'Server error' || msg === 'Request failed'
-          ? String(t('signed.settingsToast.serverError'))
+          ? String(t('settingsToast.serverError'))
           : msg === 'Not logged in'
-            ? String(t('signed.settingsToast.notLoggedIn'))
-            : String(t('signed.genericError'))
-    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+            ? String(t('settingsToast.notLoggedIn'))
+            : String(t('genericError'))
+    toast.error(String(t('settingsToast.failedTitle')), body)
   } finally {
     logoutOthersBusy.value = false
   }
@@ -119,10 +119,10 @@ async function onLogoutAndRemoveKeyOtherDevices() {
   }
   logoutOthersBusy.value = true
   try {
-    await signed.logoutAndRemoveKeyOtherDevices()
+    await authStore.logoutAndRemoveKeyOtherDevices()
     toast.push({
-      title: String(t('signed.settingsToast.savedTitle')),
-      message: String(t('signed.settingsToast.otherDevicesLoggedOutWiped')),
+      title: String(t('settingsToast.savedTitle')),
+      message: String(t('settingsToast.otherDevicesLoggedOutWiped')),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -130,13 +130,13 @@ async function onLogoutAndRemoveKeyOtherDevices() {
     const msg = e instanceof Error ? e.message : String(e)
     const body =
       msg === 'Unauthorized'
-        ? String(t('signed.errUnauthorized'))
+        ? String(t('errUnauthorized'))
         : msg === 'Server error' || msg === 'Request failed'
-          ? String(t('signed.settingsToast.serverError'))
+          ? String(t('settingsToast.serverError'))
           : msg === 'Not logged in'
-            ? String(t('signed.settingsToast.notLoggedIn'))
-            : String(t('signed.genericError'))
-    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+            ? String(t('settingsToast.notLoggedIn'))
+            : String(t('genericError'))
+    toast.error(String(t('settingsToast.failedTitle')), body)
   } finally {
     logoutOthersBusy.value = false
   }
@@ -164,10 +164,10 @@ async function onConfirmDeleteAccount() {
   deleteAccountErr.value = ''
   deleteAccountBusy.value = true
   try {
-    await signed.deleteAccount()
+    await authStore.deleteAccount()
     deleteAccountOpen.value = false
   } catch {
-    deleteAccountErr.value = String(t('signed.genericError'))
+    deleteAccountErr.value = String(t('genericError'))
   } finally {
     deleteAccountBusy.value = false
   }
@@ -210,10 +210,10 @@ async function onToggleHiddenMode(ev: Event) {
   if (!target) return
   const next = Boolean(target.checked)
   try {
-    await signed.updateHiddenMode(next)
+    await authStore.updateHiddenMode(next)
     toast.push({
-      title: String(t('signed.settingsToast.savedTitle')),
-      message: String(t(next ? 'signed.settingsToast.hiddenModeOn' : 'signed.settingsToast.hiddenModeOff')),
+      title: String(t('settingsToast.savedTitle')),
+      message: String(t(next ? 'authStore.settingsToast.hiddenModeOn' : 'authStore.settingsToast.hiddenModeOff')),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -221,15 +221,15 @@ async function onToggleHiddenMode(ev: Event) {
     const msg = e instanceof Error ? e.message : String(e)
     const body =
       msg === 'Unauthorized'
-        ? String(t('signed.errUnauthorized'))
+        ? String(t('errUnauthorized'))
         : msg === 'Server error' || msg === 'Request failed'
-          ? String(t('signed.settingsToast.serverError'))
+          ? String(t('settingsToast.serverError'))
           : msg === 'Not logged in'
-            ? String(t('signed.settingsToast.notLoggedIn'))
+            ? String(t('settingsToast.notLoggedIn'))
             : msg === 'vault too large'
-              ? String(t('signed.settingsToast.vaultTooLarge'))
-              : String(t('signed.genericError'))
-    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+              ? String(t('settingsToast.vaultTooLarge'))
+              : String(t('genericError'))
+    toast.error(String(t('settingsToast.failedTitle')), body)
   }
 }
 
@@ -238,10 +238,10 @@ async function onToggleIntrovertMode(ev: Event) {
   if (!target) return
   const next = Boolean(target.checked)
   try {
-    await signed.updateIntrovertMode(next)
+    await authStore.updateIntrovertMode(next)
     toast.push({
-      title: String(t('signed.settingsToast.savedTitle')),
-      message: String(t(next ? 'signed.settingsToast.introvertModeOn' : 'signed.settingsToast.introvertModeOff')),
+      title: String(t('settingsToast.savedTitle')),
+      message: String(t(next ? 'authStore.settingsToast.introvertModeOn' : 'authStore.settingsToast.introvertModeOff')),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -249,15 +249,15 @@ async function onToggleIntrovertMode(ev: Event) {
     const msg = e instanceof Error ? e.message : String(e)
     const body =
       msg === 'Unauthorized'
-        ? String(t('signed.errUnauthorized'))
+        ? String(t('errUnauthorized'))
         : msg === 'Server error' || msg === 'Request failed'
-          ? String(t('signed.settingsToast.serverError'))
+          ? String(t('settingsToast.serverError'))
           : msg === 'Not logged in'
-            ? String(t('signed.settingsToast.notLoggedIn'))
+            ? String(t('settingsToast.notLoggedIn'))
             : msg === 'vault too large'
-              ? String(t('signed.settingsToast.vaultTooLarge'))
-              : String(t('signed.genericError'))
-    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+              ? String(t('settingsToast.vaultTooLarge'))
+              : String(t('genericError'))
+    toast.error(String(t('settingsToast.failedTitle')), body)
   }
 }
 
@@ -267,26 +267,26 @@ async function onToggleNotifications(ev: Event) {
   const next = Boolean(target.checked)
 
   if (!next) {
-    signed.setNotificationsEnabledLocal(false)
+    authStore.setNotificationsEnabledLocal(false)
     return
   }
 
   // Must be user-initiated to satisfy browser permission rules.
   try {
     if (typeof Notification === 'undefined') {
-      signed.setNotificationsEnabledLocal(false)
+      authStore.setNotificationsEnabledLocal(false)
       return
     }
 
     const perm = await Notification.requestPermission()
     if (perm !== 'granted') {
-      signed.setNotificationsEnabledLocal(false)
+      authStore.setNotificationsEnabledLocal(false)
       return
     }
 
-    signed.setNotificationsEnabledLocal(true)
+    authStore.setNotificationsEnabledLocal(true)
   } catch {
-    signed.setNotificationsEnabledLocal(false)
+    authStore.setNotificationsEnabledLocal(false)
   }
 }
 
@@ -297,12 +297,12 @@ async function onTogglePushNotifications(ev: Event) {
 
   // Only allow enabling push when stay-logged-in is enabled.
   if (!stayLoggedIn.value) {
-    signed.setPushNotificationsEnabledLocal(false)
+    authStore.setPushNotificationsEnabledLocal(false)
     return
   }
 
   if (!next) {
-    await signed.disablePushNotifications()
+    await authStore.disablePushNotifications()
     return
   }
 
@@ -313,35 +313,35 @@ async function onTogglePushNotifications(ev: Event) {
       const r = await fetch('/api/push/public-key', { cache: 'no-store' })
       const j = (await r.json().catch(() => ({}))) as { enabled?: boolean; publicKey?: string | null }
       if (!r.ok || !j?.enabled || !j?.publicKey) {
-        signed.setPushNotificationsEnabledLocal(false)
-        toast.error(String(t('signed.settingsToast.failedTitle')), String(t('notifications.pushServerDisabled')))
+        authStore.setPushNotificationsEnabledLocal(false)
+        toast.error(String(t('settingsToast.failedTitle')), String(t('notifications.pushServerDisabled')))
         return
       }
     } catch {
-      signed.setPushNotificationsEnabledLocal(false)
-      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.settingsToast.serverError')))
+      authStore.setPushNotificationsEnabledLocal(false)
+      toast.error(String(t('settingsToast.failedTitle')), String(t('settingsToast.serverError')))
       return
     }
 
     if (typeof Notification === 'undefined') {
-      signed.setPushNotificationsEnabledLocal(false)
+      authStore.setPushNotificationsEnabledLocal(false)
       return
     }
 
     const perm = await Notification.requestPermission()
     if (perm !== 'granted') {
-      signed.setPushNotificationsEnabledLocal(false)
+      authStore.setPushNotificationsEnabledLocal(false)
       return
     }
 
-    signed.setPushNotificationsEnabledLocal(true)
-    const ok = await signed.trySyncPushSubscription()
+    authStore.setPushNotificationsEnabledLocal(true)
+    const ok = await authStore.trySyncPushSubscription()
     if (!ok) {
-      signed.setPushNotificationsEnabledLocal(false)
+      authStore.setPushNotificationsEnabledLocal(false)
       toast.error(String(t('toast.notificationsFailedTitle')), String(t('toast.notificationsFailedBody')))
     }
   } catch {
-    signed.setPushNotificationsEnabledLocal(false)
+    authStore.setPushNotificationsEnabledLocal(false)
   }
 }
 
@@ -351,15 +351,15 @@ async function onSaveExpirationDays() {
   try {
     const n = Number(expirationDaysDraft.value)
     if (!Number.isFinite(n) || n < 7 || n > 365) {
-      expirationErr.value = String(t('signed.expirationDaysRangeError'))
-      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.expirationDaysRangeError')))
+      expirationErr.value = String(t('expirationDaysRangeError'))
+      toast.error(String(t('settingsToast.failedTitle')), String(t('expirationDaysRangeError')))
       return
     }
-    await signed.updateExpirationDays(n)
+    await authStore.updateExpirationDays(n)
 
     toast.push({
-      title: String(t('signed.settingsToast.savedTitle')),
-      message: String(t('signed.settingsToast.expirationDaysSaved', { days: n })),
+      title: String(t('settingsToast.savedTitle')),
+      message: String(t('settingsToast.expirationDaysSaved', { days: n })),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -367,25 +367,25 @@ async function onSaveExpirationDays() {
     const msg = e instanceof Error ? e.message : String(e)
 
     if (msg === 'Expiration days must be between 7 and 365') {
-      expirationErr.value = String(t('signed.expirationDaysRangeError'))
-      toast.error(String(t('signed.settingsToast.failedTitle')), String(t('signed.expirationDaysRangeError')))
+      expirationErr.value = String(t('expirationDaysRangeError'))
+      toast.error(String(t('settingsToast.failedTitle')), String(t('expirationDaysRangeError')))
       return
     }
 
     const body =
       msg === 'Unauthorized'
-        ? String(t('signed.errUnauthorized'))
+        ? String(t('errUnauthorized'))
         : msg === 'Server error' || msg === 'Request failed'
-          ? String(t('signed.settingsToast.serverError'))
+          ? String(t('settingsToast.serverError'))
           : msg === 'Not logged in'
-            ? String(t('signed.settingsToast.notLoggedIn'))
+            ? String(t('settingsToast.notLoggedIn'))
             : msg === 'Missing public key'
-              ? String(t('signed.expirationDaysUnlockHint'))
+              ? String(t('expirationDaysUnlockHint'))
               : msg === 'vault too large'
-                ? String(t('signed.settingsToast.vaultTooLarge'))
-                : String(t('signed.genericError'))
+                ? String(t('settingsToast.vaultTooLarge'))
+                : String(t('genericError'))
     expirationErr.value = body
-    toast.error(String(t('signed.settingsToast.failedTitle')), body)
+    toast.error(String(t('settingsToast.failedTitle')), body)
   } finally {
     expirationBusy.value = false
   }
@@ -410,7 +410,7 @@ function notificationStateLabel() {
       <div class="headergap"></div>
 
       <div class="settings-tech">
-        <div v-if="username">{{ t('signed.youSignedInAs') }} <strong>{{ username }}</strong></div>
+        <div v-if="username">{{ t('youSignedInAs') }} <strong>{{ username }}</strong></div>
       </div>
 
       <div class="settings-actions">
@@ -453,12 +453,12 @@ function notificationStateLabel() {
             type="checkbox"
             :checked="Boolean(hiddenMode)"
             @change="onToggleHiddenMode"
-            :aria-label="String(t('signed.hiddenMode'))"
+            :aria-label="String(t('hiddenMode'))"
           />
           <span>
             <div class="field-label-row">
-              <div style="font-weight: 600;">{{ t('signed.hiddenMode') }}</div>
-              <button class="help" type="button" :aria-label="String(t('signed.hiddenMode'))" @click.stop.prevent="toggleHelp('hiddenMode')">
+              <div style="font-weight: 600;">{{ t('hiddenMode') }}</div>
+              <button class="help" type="button" :aria-label="String(t('hiddenMode'))" @click.stop.prevent="toggleHelp('hiddenMode')">
                 ?
               </button>
             </div>
@@ -470,12 +470,12 @@ function notificationStateLabel() {
             type="checkbox"
             :checked="Boolean(introvertMode)"
             @change="onToggleIntrovertMode"
-            :aria-label="String(t('signed.introvertMode'))"
+            :aria-label="String(t('introvertMode'))"
           />
           <span>
             <div class="field-label-row">
-              <div style="font-weight: 600;">{{ t('signed.introvertMode') }}</div>
-              <button class="help" type="button" :aria-label="String(t('signed.introvertMode'))" @click.stop.prevent="toggleHelp('introvertMode')">
+              <div style="font-weight: 600;">{{ t('introvertMode') }}</div>
+              <button class="help" type="button" :aria-label="String(t('introvertMode'))" @click.stop.prevent="toggleHelp('introvertMode')">
                 ?
               </button>
             </div>
@@ -506,11 +506,11 @@ function notificationStateLabel() {
 
         <div class="card" style="margin-bottom: 0;">
           <div class="field-label-row">
-            <div style="font-weight: 600;">{{ t('signed.expirationDays') }}</div>
+            <div style="font-weight: 600;">{{ t('expirationDays') }}</div>
             <button
               class="help"
               type="button"
-              :aria-label="String(t('signed.expirationDays'))"
+              :aria-label="String(t('expirationDays'))"
               @click.stop.prevent="toggleHelp('expirationDays')"
             >
               ?
@@ -526,7 +526,7 @@ function notificationStateLabel() {
               max="365"
               :disabled="expirationBusy || !publicKeyJwk"
               style="max-width: 140px;"
-              :aria-label="String(t('signed.expirationDays'))"
+              :aria-label="String(t('expirationDays'))"
               @keydown.enter.prevent="onSaveExpirationDays"
             />
             <button class="secondary" type="button" :disabled="expirationBusy || !publicKeyJwk" @click="onSaveExpirationDays">
@@ -538,18 +538,18 @@ function notificationStateLabel() {
         </div>
 
         <button class="secondary" type="button" :disabled="logoutOthersBusy" @click="onLogoutOtherDevices">
-          {{ t('signed.logoutOtherDevices') }}
+          {{ t('logoutOtherDevices') }}
         </button>
 
         <button class="secondary" type="button" :disabled="logoutOthersBusy" @click="onLogoutAndRemoveKeyOtherDevices">
-          {{ t('signed.logoutAndRemoveKeyOtherDevices') }}
+          {{ t('logoutAndRemoveKeyOtherDevices') }}
         </button>
 
         <button class="secondary" type="button" :disabled="hardReloadBusy" @click="onHardReloadApp">
-          {{ t('signed.reloadAppNoCache') }}
+          {{ t('reloadAppNoCache') }}
         </button>
 
-        <button class="secondary danger" type="button" @click="onDeleteAccount">{{ t('signed.deleteAccount') }}</button>
+        <button class="secondary danger" type="button" @click="onDeleteAccount">{{ t('deleteAccount') }}</button>
 
       </div>
 
@@ -558,19 +558,19 @@ function notificationStateLabel() {
         class="modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="deleteAccountTitleSigned"
+        aria-labelledby="deleteAccountTitleAuth"
         @click="(e) => { if (e.target === e.currentTarget) closeDeleteAccount() }"
       >
         <div class="modal-card">
-          <div class="modal-title" id="deleteAccountTitleSigned">{{ t('signed.deleteAccount') }}</div>
+          <div class="modal-title" id="deleteAccountTitleAuth">{{ t('deleteAccount') }}</div>
 
-          <div class="muted" style="margin-top: 8px;">{{ t('signed.deleteAccountWarning') }}</div>
+          <div class="muted" style="margin-top: 8px;">{{ t('deleteAccountWarning') }}</div>
           <div v-if="deleteAccountErr" class="status" aria-live="polite" style="margin-top: 8px;">{{ deleteAccountErr }}</div>
 
           <div class="modal-actions">
             <button type="button" :disabled="deleteAccountBusy" @click="closeDeleteAccount">{{ t('common.cancel') }}</button>
             <button class="danger" type="button" :disabled="deleteAccountBusy" @click="onConfirmDeleteAccount">
-              {{ t('signed.deleteAccount') }}
+              {{ t('deleteAccount') }}
             </button>
           </div>
         </div>

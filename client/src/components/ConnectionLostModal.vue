@@ -1,27 +1,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useSignedStore } from '../stores/signed'
+import { useAuthStore } from '../stores/auth'
 import { hardReloadApp } from '../utils/hardReload'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
-const open = computed(() => Boolean((signed.wsPermanentlyFailed && signed.signedIn) || signed.serverUpdateModalOpen))
+const open = computed(() => Boolean((authStore.wsPermanentlyFailed && authStore.authIn) || authStore.serverUpdateModalOpen))
 
-const isServerUpdate = computed(() => Boolean(signed.serverUpdateModalOpen))
+const isServerUpdate = computed(() => Boolean(authStore.serverUpdateModalOpen))
 
 const updateBody = computed(() => {
-  const from = signed.serverUpdatedFrom || ''
-  const to = signed.serverUpdatedTo || ''
-  if (!from || !to) return String(t('signed.serverUpdate.bodyGeneric'))
-  return String(t('signed.serverUpdate.bodyFromTo', { from, to }))
+  const from = authStore.serverUpdatedFrom || ''
+  const to = authStore.serverUpdatedTo || ''
+  if (!from || !to) return String(t('serverUpdate.bodyGeneric'))
+  return String(t('serverUpdate.bodyFromTo', { from, to }))
 })
 
 const connectionLostBody = computed(() => {
-  const reason = String(signed.transportFatalReason || '').trim()
-  if (!reason) return String(t('signed.connectionLost.body'))
-  return `${String(t('signed.connectionLost.body'))}\n\n${reason}`
+  const reason = String(authStore.transportFatalReason || '').trim()
+  if (!reason) return String(t('connectionLost.body'))
+  return `${String(t('connectionLost.body'))}\n\n${reason}`
 })
 
 function onReload() {
@@ -30,7 +30,7 @@ function onReload() {
 
 function onClose() {
   try {
-    signed.dismissServerUpdateModal()
+    authStore.dismissServerUpdateModal()
   } catch {
     // ignore
   }
@@ -38,7 +38,7 @@ function onClose() {
 
 function onLogout() {
   try {
-    signed.logout(true)
+    authStore.logout(true)
   } catch {
     // ignore
   }
@@ -51,12 +51,12 @@ function onLogout() {
     class="modal"
     role="dialog"
     aria-modal="true"
-    :aria-label="isServerUpdate ? t('signed.serverUpdate.title') : t('signed.connectionLost.title')"
+    :aria-label="isServerUpdate ? t('serverUpdate.title') : t('connectionLost.title')"
   >
     <div class="modal-backdrop" />
 
     <div class="modal-card">
-      <div class="modal-title">{{ isServerUpdate ? t('signed.serverUpdate.title') : t('signed.connectionLost.title') }}</div>
+      <div class="modal-title">{{ isServerUpdate ? t('serverUpdate.title') : t('connectionLost.title') }}</div>
       <div class="modal-body">
         {{ isServerUpdate ? updateBody : connectionLostBody }}
       </div>
@@ -64,7 +64,7 @@ function onLogout() {
       <div class="modal-actions">
         <button v-if="!isServerUpdate" class="btn" @click="onLogout">{{ t('common.logout') }}</button>
         <button v-else class="btn" @click="onClose">{{ t('common.close') }}</button>
-        <button class="btn primary" @click="onReload">{{ t('signed.reloadAppNoCache') }}</button>
+        <button class="btn primary" @click="onReload">{{ t('reloadAppNoCache') }}</button>
       </div>
     </div>
   </div>

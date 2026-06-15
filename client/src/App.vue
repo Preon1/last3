@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useSignedStore } from './stores/signed'
-import SignedSetupScreen from './components/SignedSetupScreen.vue'
-import SignedAppShell from './components/SignedAppShell.vue'
+import { useAuthStore } from './stores/auth'
+import AuthSetupScreen from './components/AuthSetupScreen.vue'
+import AuthAppShell from './components/AuthAppShell.vue'
 import AboutModal from './components/AboutModal.vue'
 import ManageKeysModal from './components/ManageKeysModal.vue'
 import ShareLinkModal from './components/ShareLinkModal.vue'
@@ -14,13 +14,13 @@ import { useBeforeUnloadConfirm } from './utils/beforeUnloadConfirm'
 import { useToastStore } from './stores/toast'
 import { LocalEntity, localData } from './utils/localData'
 
-const signed = useSignedStore()
+const authStore = useAuthStore()
 const toast = useToastStore()
 
 // On every cold start, if stay-login is not enabled, wipe any persisted
 // session/stay artifacts (equivalent to a normal logout).
 try {
-  if (!localData.getSignedStayLoggedIn()) {
+  if (!localData.getAuthStayLoggedIn()) {
     void localData.cleanup('logout')
     // Device key is only used for stay-login auto-unlock.
     localData.remove(LocalEntity.StayDeviceKey)
@@ -29,12 +29,12 @@ try {
   // ignore
 }
 
-const signedIn = computed(() => signed.signedIn)
-const signedReady = computed(() => Boolean(signedIn.value && signed.privateKey))
-const restoring = computed(() => Boolean(signed.restoring))
+const authIn = computed(() => authStore.authIn)
+const authReady = computed(() => Boolean(authIn.value && authStore.privateKey))
+const restoring = computed(() => Boolean(authStore.restoring))
 
-const inAnyApp = computed(() => Boolean(signedReady.value))
-const shouldConfirmUnload = computed(() => Boolean(signedReady.value && !signed.stayLoggedIn))
+const inAnyApp = computed(() => Boolean(authReady.value))
+const shouldConfirmUnload = computed(() => Boolean(authReady.value && !authStore.stayLoggedIn))
 useWakeLock(inAnyApp)
 useBeforeUnloadConfirm(shouldConfirmUnload)
 
@@ -70,7 +70,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
               // Validate keys format: expect array of objects with encryptedUsername & encryptedPrivateKey
               if (Array.isArray(parsed) && parsed.every(k => k && typeof k.encryptedUsername === 'string' && typeof k.encryptedPrivateKey === 'string')) {
                 // Merge with existing keys
-                const existing = localData.getJson<any[]>(LocalEntity.SignedKeys) ?? []
+                const existing = localData.getJson<any[]>(LocalEntity.AuthKeys) ?? []
                 const merged = [...existing]
                 let added = 0
                 for (const k of parsed) {
@@ -79,7 +79,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
                     added++
                   }
                 }
-                localData.setJson(LocalEntity.SignedKeys, merged)
+                localData.setJson(LocalEntity.AuthKeys, merged)
                 if (added > 0) {
                   toast.push({ title: 'Keys Imported', message: `${added} new key(s) added.`, variant: 'info', timeoutMs: 6000 })
                 } else {
@@ -104,8 +104,8 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
     <div v-if="restoring" class="restoring">
       <div class="restoring-card">Restoring session…</div>
     </div>
-    <SignedSetupScreen v-else-if="!signedIn" />
-    <SignedAppShell v-else />
+    <AuthSetupScreen v-else-if="!authIn" />
+    <AuthAppShell v-else />
 
     <ToastHost />
 

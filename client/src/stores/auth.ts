@@ -32,9 +32,9 @@ import { LocalEntity, localData } from '../utils/localData'
 import { APP_VERSION as CLIENT_APP_VERSION } from '../appVersion'
 import { useToastStore } from './toast'
 import { voprfNameToken } from '../utils/voprfNames'
-import { SignedTransportClient } from '../utils/signedTransport'
+import { AuthTransportClient } from '../utils/authTransport'
 
-export type SignedChat = {
+export type AuthChat = {
   id: string
   type: 'personal' | 'group'
   name?: string
@@ -44,7 +44,7 @@ export type SignedChat = {
   otherPublicKey?: string
 }
 
-export type SignedLastMessageWire = {
+export type AuthLastMessageWire = {
   id: string
   chatId: string
   senderId: string
@@ -52,7 +52,7 @@ export type SignedLastMessageWire = {
   signature?: string
 }
 
-export type SignedLastMessagePreview = {
+export type AuthLastMessagePreview = {
   id: string
   chatId: string
   senderId: string
@@ -61,13 +61,13 @@ export type SignedLastMessagePreview = {
   text: string
 }
 
-export type SignedChatMember = {
+export type AuthChatMember = {
   userId: string
   username?: string
   publicKey: string
 }
 
-export type SignedMessage = {
+export type AuthMessage = {
   id: string
   chatId: string
   senderId: string
@@ -75,9 +75,9 @@ export type SignedMessage = {
   signature?: string
 }
 
-export type SignedMessageVerification = 'verified' | 'unverifiable'
+export type AuthMessageVerification = 'verified' | 'unverifiable'
 
-export type SignedDecryptedMessage = {
+export type AuthDecryptedMessage = {
   id: string
   chatId: string
   senderId: string
@@ -86,14 +86,14 @@ export type SignedDecryptedMessage = {
   fromUsername: string
   text: string
   replyToId?: string | null
-  verification: SignedMessageVerification
+  verification: AuthMessageVerification
 }
 
 function apiBase() {
   return ''
 }
 
-function transportSignedUrl(token: string) {
+function transportAuthUrl(token: string) {
   const configured = String(import.meta.env.VITE_WEBTRANSPORT_URL ?? '').trim()
 
   const base = configured ? new URL(configured, location.origin) : new URL(location.origin)
@@ -107,7 +107,7 @@ function transportSignedUrl(token: string) {
   }
 
   base.protocol = 'https:'
-  base.pathname = '/signed'
+  base.pathname = '/private'
   base.search = ''
   base.hash = ''
   base.searchParams.set('token', token)
@@ -172,7 +172,7 @@ type VaultPlain = {
   expirationDays: number
 }
 
-export const useSignedStore = defineStore('signed', () => {
+export const useAuthStore = defineStore('auth', () => {
   const toast = useToastStore()
   const token = ref<string | null>(null)
   const expiresAtMs = ref<number | null>(null)
@@ -208,7 +208,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   const stayLoggedIn = ref<boolean>(false)
-  stayLoggedIn.value = localData.getSignedStayLoggedIn()
+  stayLoggedIn.value = localData.getAuthStayLoggedIn()
 
   // Only show a restore/loading state when stay mode is enabled.
   restoring.value = stayLoggedIn.value
@@ -219,7 +219,7 @@ export const useSignedStore = defineStore('signed', () => {
 
       // Mirror session details.
       if (token.value && userId.value && username.value) {
-        await localData.mirrorSignedSessionToIdb({
+        await localData.mirrorAuthSessionToIdb({
           user: {
             userId: userId.value,
             username: username.value,
@@ -257,7 +257,7 @@ export const useSignedStore = defineStore('signed', () => {
 
   function setStayLoggedIn(next: boolean) {
     stayLoggedIn.value = Boolean(next)
-    localData.setSignedStayLoggedIn(stayLoggedIn.value)
+    localData.setAuthStayLoggedIn(stayLoggedIn.value)
 
     if (stayLoggedIn.value) {
       try {
@@ -278,7 +278,7 @@ export const useSignedStore = defineStore('signed', () => {
         // ignore
       }
 
-      // Variant B: if we already have key material in-memory (e.g. settings toggle while signed in),
+      // Variant B: if we already have key material in-memory (e.g. settings toggle while authenticated),
       // ensure the stay-unlock blob exists.
       void ensureStayUnlockBlobIfPossible()
 
@@ -312,7 +312,7 @@ export const useSignedStore = defineStore('signed', () => {
   const transportFatalReason = ref<string>('')
   let wsReconnectTimer: number | null = null
   let wsGeneration = 0
-  const transportClient = new SignedTransportClient()
+  const transportClient = new AuthTransportClient()
 
   // App version mismatch detection (server updates while client is open)
   const clientVersion = ref<string>(String(CLIENT_APP_VERSION))
@@ -330,15 +330,15 @@ export const useSignedStore = defineStore('signed', () => {
   const view = ref<'contacts' | 'chat' | 'settings'>('contacts')
   const activeChatId = ref<string | null>(null)
 
-  const chats = ref<SignedChat[]>([])
+  const chats = ref<AuthChat[]>([])
   const unreadByChatId = ref<Record<string, number>>({})
 
-  const lastMessageByChatId = ref<Record<string, SignedLastMessageWire | null>>({})
-  const lastMessagePreviewByChatId = ref<Record<string, SignedLastMessagePreview>>({})
+  const lastMessageByChatId = ref<Record<string, AuthLastMessageWire | null>>({})
+  const lastMessagePreviewByChatId = ref<Record<string, AuthLastMessagePreview>>({})
 
-  const membersByChatId = ref<Record<string, SignedChatMember[]>>({})
+  const membersByChatId = ref<Record<string, AuthChatMember[]>>({})
 
-  const messagesByChatId = ref<Record<string, SignedDecryptedMessage[]>>({})
+  const messagesByChatId = ref<Record<string, AuthDecryptedMessage[]>>({})
 
   const messagesOldestIdByChatId = ref<Record<string, string>>({})
   const messagesHasMoreByChatId = ref<Record<string, boolean>>({})
@@ -349,10 +349,10 @@ export const useSignedStore = defineStore('signed', () => {
   let presenceTimer: number | null = null
   const PRESENCE_HEARTBEAT_MS = 10000
 
-  const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
-  const locked = computed(() => Boolean(signedIn.value && !privateKey.value))
+  const authIn = computed(() => Boolean(token.value && userId.value && username.value))
+  const locked = computed(() => Boolean(authIn.value && !privateKey.value))
   const unlocking = ref(false)
-  const signedReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value && !wsPermanentlyFailed.value))
+  const authReadyForPresence = computed(() => Boolean(token.value && userId.value && username.value && privateKey.value && !wsPermanentlyFailed.value))
   async function syncAppStateToServiceWorker() {
     try {
       const foreground = typeof document !== 'undefined' && document.visibilityState === 'visible'
@@ -471,7 +471,7 @@ export const useSignedStore = defineStore('signed', () => {
   // Presence polling should not depend on WS open: if WS is delayed/blocked
   // we still want to query presence for known correspondents.
   watch(
-    () => signedReadyForPresence.value,
+    () => authReadyForPresence.value,
     (ready) => {
       if (ready) startPresenceHeartbeat()
       else clearPresenceTimer()
@@ -552,32 +552,32 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function storeVaultPlain(rawJson: string) {
-    localData.setString(LocalEntity.SignedVault, rawJson)
+    localData.setString(LocalEntity.AuthVault, rawJson)
     if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayVault, rawJson)
   }
 
   function loadVaultPlain(): VaultPlain | null {
-    const raw = String(localData.getString(LocalEntity.SignedVault) ?? '')
+    const raw = String(localData.getString(LocalEntity.AuthVault) ?? '')
     return raw ? parseVaultPlain(raw) : null
   }
 
   function clearVaultPlain() {
-    localData.remove(LocalEntity.SignedVault)
+    localData.remove(LocalEntity.AuthVault)
     if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayVault, null)
   }
 
   function storeRemoveDateIso(iso: string) {
-    localData.setString(LocalEntity.SignedRemoveDate, iso)
+    localData.setString(LocalEntity.AuthRemoveDate, iso)
     if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayRemoveDate, iso)
   }
 
   function loadRemoveDateIso(): string | null {
-    const raw = String(localData.getString(LocalEntity.SignedRemoveDate) ?? '').trim()
+    const raw = String(localData.getString(LocalEntity.AuthRemoveDate) ?? '').trim()
     return raw ? raw : null
   }
 
   function clearRemoveDateIso() {
-    localData.remove(LocalEntity.SignedRemoveDate)
+    localData.remove(LocalEntity.AuthRemoveDate)
     if (stayLoggedIn.value) void localData.idbSet(LocalEntity.IdbStayRemoveDate, null)
   }
 
@@ -587,7 +587,7 @@ export const useSignedStore = defineStore('signed', () => {
     removeDate?: string
     vault?: string
   }) {
-    await fetchJson('/api/signed/account/update', {
+    await fetchJson('/api/private/account/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(fields),
@@ -595,7 +595,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function bestEffortSyncRemoveDateNow() {
-    if (!signedIn.value) return
+    if (!authIn.value) return
     const exp = vaultPlain.value?.expirationDays
     if (!exp || !Number.isFinite(exp)) return
     const iso = computeRemoveDateIsoForNow(exp)
@@ -634,7 +634,7 @@ export const useSignedStore = defineStore('signed', () => {
     if (!token.value) return
 
     try {
-      const r = await fetch(`${apiBase()}/api/signed/session/refresh`, {
+      const r = await fetch(`${apiBase()}/api/private/session/refresh`, {
         method: 'POST',
         headers: { ...authHeaders() },
       })
@@ -682,7 +682,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     try {
       if (token.value) {
-        await fetchJson('/api/signed/push/disable', {
+        await fetchJson('/api/private/push/disable', {
           method: 'POST',
           headers: { ...authHeaders() },
         })
@@ -708,7 +708,7 @@ export const useSignedStore = defineStore('signed', () => {
     if (!subscription) return false
 
     try {
-      await fetchJson('/api/signed/push/subscribe', {
+      await fetchJson('/api/private/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ subscription }),
@@ -861,7 +861,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function loadKeyEntries(): StoredKeyV2[] {
-    const arr = localData.getJson<any[]>(LocalEntity.SignedKeys)
+    const arr = localData.getJson<any[]>(LocalEntity.AuthKeys)
     if (!Array.isArray(arr)) return []
     const out: StoredKeyV2[] = []
     for (const it of arr) {
@@ -873,12 +873,12 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function saveKeyEntries(next: StoredKeyV2[]) {
-    localData.setJson(LocalEntity.SignedKeys, next)
+    localData.setJson(LocalEntity.AuthKeys, next)
   }
 
 
   function clearAllKeyMaterial() {
-    localData.remove(LocalEntity.SignedKeys)
+    localData.remove(LocalEntity.AuthKeys)
   }
 
   async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string }) {
@@ -918,12 +918,12 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function storeSession(u: StoredUser, t: string, expiresAt?: number | null) {
-    localData.setSignedSession({ user: u, token: t, expiresAtMs: expiresAt })
-    if (stayLoggedIn.value) void localData.mirrorSignedSessionToIdb({ user: u, token: t, expiresAtMs: expiresAt })
+    localData.setAuthSession({ user: u, token: t, expiresAtMs: expiresAt })
+    if (stayLoggedIn.value) void localData.mirrorAuthSessionToIdb({ user: u, token: t, expiresAtMs: expiresAt })
   }
 
   function loadSession(): { u: StoredUser; t: string; e: number | null } | null {
-    const s = localData.getSignedSession()
+    const s = localData.getAuthSession()
     if (!s?.token || !s.user) return null
     const u = s.user as StoredUser
     if (!u?.userId || !u?.username) return null
@@ -931,7 +931,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function clearSession() {
-    localData.clearSignedSession()
+    localData.clearAuthSession()
     if (stayLoggedIn.value) void localData.clearIdbStaySession()
   }
 
@@ -962,7 +962,7 @@ export const useSignedStore = defineStore('signed', () => {
       // We cannot recover a private JWK from a non-extractable CryptoKey.
       // In this scenario, user must re-login with stay mode enabled.
       stayLoggedIn.value = false
-      localData.setSignedStayLoggedIn(false)
+      localData.setAuthStayLoggedIn(false)
       toast.push({
         title: 'Keep logged in disabled',
         message: 'Please log in again with "Keep logged in" enabled to allow auto-unlock.',
@@ -994,23 +994,23 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   function loadLastUsername(): string {
-    return String(localData.getString(LocalEntity.SignedUsername) ?? '').trim()
+    return String(localData.getString(LocalEntity.AuthUsername) ?? '').trim()
   }
 
   function storeLastUsername(u: string) {
     const v = (u ?? '').trim()
     lastUsername.value = v
-    localData.setString(LocalEntity.SignedUsername, v)
+    localData.setString(LocalEntity.AuthUsername, v)
   }
 
   function loadPendingAddUsername(): string {
-    return String(localData.getString(LocalEntity.SignedAddUsername) ?? '').trim()
+    return String(localData.getString(LocalEntity.AuthAddUsername) ?? '').trim()
   }
 
   function storePendingAddUsername(u: string) {
     const v = String(u ?? '').trim()
     pendingAddUsername.value = v
-    localData.setString(LocalEntity.SignedAddUsername, v)
+    localData.setString(LocalEntity.AuthAddUsername, v)
   }
 
   function capturePendingAddFromUrl() {
@@ -1258,7 +1258,7 @@ export const useSignedStore = defineStore('signed', () => {
             token.value,
             expiresAtMs.value,
           )
-          void localData.mirrorSignedSessionToIdb({
+          void localData.mirrorAuthSessionToIdb({
             user: { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
             token: token.value,
             expiresAtMs: expiresAtMs.value,
@@ -1384,7 +1384,7 @@ export const useSignedStore = defineStore('signed', () => {
     disconnectWs()
     wsTokenForConnection = currentToken
 
-    const sock = transportClient.connect(transportSignedUrl(currentToken), {
+    const sock = transportClient.connect(transportAuthUrl(currentToken), {
       onOpen: () => {
         if (gen !== wsGeneration) return
         wsReconnectAttempt.value = 0
@@ -1420,7 +1420,7 @@ export const useSignedStore = defineStore('signed', () => {
         }
         if (!obj || typeof obj.type !== 'string') return
 
-        if (obj.type === 'signedForceLogout') {
+        if (obj.type === 'authForceLogout') {
           const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
           if (msgId) sendReliableMessage({ type: 'ack', msgId })
 
@@ -1439,7 +1439,7 @@ export const useSignedStore = defineStore('signed', () => {
           return
         }
 
-        if (obj.type === 'signedAccountUpdated') {
+        if (obj.type === 'authAccountUpdated') {
           const nextHidden = typeof (obj as any)?.hiddenMode === 'boolean' ? Boolean((obj as any).hiddenMode) : null
           const nextIntrovert = typeof (obj as any)?.introvertMode === 'boolean' ? Boolean((obj as any).introvertMode) : null
 
@@ -1456,7 +1456,7 @@ export const useSignedStore = defineStore('signed', () => {
           return
         }
 
-        if (obj.type === 'signedMessage') {
+        if (obj.type === 'authMessage') {
           const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
           const id = typeof obj.id === 'string' ? obj.id : null
           const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
@@ -1479,7 +1479,7 @@ export const useSignedStore = defineStore('signed', () => {
             try {
               const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
               const displayName = await resolveDisplayNameInChat(chatId, senderId)
-              const msg: SignedDecryptedMessage = {
+              const msg: AuthDecryptedMessage = {
                 id,
                 chatId,
                 atIso: plain.atIso,
@@ -1538,7 +1538,7 @@ export const useSignedStore = defineStore('signed', () => {
           }
         }
 
-        if (obj.type === 'signedMessageDeleted') {
+        if (obj.type === 'authMessageDeleted') {
           const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
           const id = typeof obj.id === 'string' ? obj.id : null
           if (!chatId || !id) return
@@ -1550,7 +1550,7 @@ export const useSignedStore = defineStore('signed', () => {
           void refreshChats()
         }
 
-        if (obj.type === 'signedMessagesDeleted') {
+        if (obj.type === 'authMessagesDeleted') {
           const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
           const idsRaw = (obj as any).ids
           const ids = Array.isArray(idsRaw) ? idsRaw.map(String).filter(Boolean) : []
@@ -1567,7 +1567,7 @@ export const useSignedStore = defineStore('signed', () => {
           void refreshChats()
         }
 
-        if (obj.type === 'signedMessageUpdated') {
+        if (obj.type === 'authMessageUpdated') {
           const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
           const id = typeof obj.id === 'string' ? obj.id : null
           const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
@@ -1630,12 +1630,12 @@ export const useSignedStore = defineStore('signed', () => {
           }
         }
 
-        if (obj.type === 'signedChatDeleted') {
+        if (obj.type === 'authChatDeleted') {
           const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
           if (chatId) removeChatLocal(chatId)
         }
 
-        if (obj.type === 'signedChatsChanged') {
+        if (obj.type === 'authChatsChanged') {
           const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
           if (msgId) sendReliableMessage({ type: 'ack', msgId })
           void refreshChats()
@@ -1681,10 +1681,10 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function refreshChats() {
-    const j = await fetchJson('/api/signed/chats', { headers: { ...authHeaders() } })
+    const j = await fetchJson('/api/private/chats', { headers: { ...authHeaders() } })
 
     const wireChats: any[] = Array.isArray((j as any)?.chats) ? (j as any).chats : []
-    const nextChats: SignedChat[] = wireChats
+    const nextChats: AuthChat[] = wireChats
       .map((c: any) => {
         const id = typeof c?.id === 'string' ? String(c.id) : ''
         const type = (c?.type === 'personal' || c?.type === 'group') ? c.type : null
@@ -1702,9 +1702,9 @@ export const useSignedStore = defineStore('signed', () => {
           names,
           otherUserId,
           otherPublicKey,
-        } as SignedChat
+        } as AuthChat
       })
-      .filter((x): x is SignedChat => Boolean(x))
+      .filter((x): x is AuthChat => Boolean(x))
 
     chats.value = nextChats
 
@@ -1732,7 +1732,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
 
     // New server versions may include `lastMessage` on each chat.
-    const nextLast: Record<string, SignedLastMessageWire | null> = {}
+    const nextLast: Record<string, AuthLastMessageWire | null> = {}
     if (Array.isArray((j as any)?.chats)) {
       for (const c of (j as any).chats) {
         const chatId = typeof c?.id === 'string' ? String(c.id) : ''
@@ -1772,7 +1772,7 @@ export const useSignedStore = defineStore('signed', () => {
             const tsMs = uuidV7ToUnixMs(lm.id) ?? 0
             const text = typeof plain?.text === 'string' ? plain.text : ''
             const senderUsername = await resolveDisplayNameInChat(chatId, lm.senderId)
-            const preview: SignedLastMessagePreview = {
+            const preview: AuthLastMessagePreview = {
               id: lm.id,
               chatId,
               senderId: lm.senderId,
@@ -1787,7 +1787,7 @@ export const useSignedStore = defineStore('signed', () => {
         }),
       )
 
-      const nextPreview: Record<string, SignedLastMessagePreview> = {}
+      const nextPreview: Record<string, AuthLastMessagePreview> = {}
       for (const p of previews) {
         if (!p) continue
         nextPreview[p.chatId] = p.preview
@@ -1806,12 +1806,12 @@ export const useSignedStore = defineStore('signed', () => {
     unreadByChatId.value = unread
   }
 
-  function getChat(chatId: string): SignedChat | null {
+  function getChat(chatId: string): AuthChat | null {
     const c = chats.value.find((x) => x.id === chatId)
     return c ?? null
   }
 
-  function getChatLastMessagePreview(chatId: string): SignedLastMessagePreview | null {
+  function getChatLastMessagePreview(chatId: string): AuthLastMessagePreview | null {
     return lastMessagePreviewByChatId.value[chatId] ?? null
   }
 
@@ -1820,11 +1820,11 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function fetchChatMembers(chatId: string) {
-    const j = await fetchJson(`/api/signed/chats/members?chatId=${encodeURIComponent(chatId)}`, {
+    const j = await fetchJson(`/api/private/chats/members?chatId=${encodeURIComponent(chatId)}`, {
       headers: { ...authHeaders() },
     })
 
-    const list: SignedChatMember[] = Array.isArray(j.members)
+    const list: AuthChatMember[] = Array.isArray(j.members)
       ? j.members
           .filter((m: any) => m && typeof m.userId === 'string' && typeof m.publicKey === 'string')
           .map((m: any) => ({ userId: String(m.userId), publicKey: String(m.publicKey) }))
@@ -1880,7 +1880,7 @@ export const useSignedStore = defineStore('signed', () => {
   async function markChatRead(chatId: string) {
     if (!token.value) return
     try {
-      const j = await fetchJson('/api/signed/messages/mark-read', {
+      const j = await fetchJson('/api/private/messages/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ chatId }),
@@ -1900,7 +1900,7 @@ export const useSignedStore = defineStore('signed', () => {
     const ids = Array.isArray(messageIds) ? messageIds.map(String).filter(Boolean) : []
     if (!ids.length) return
     try {
-      const j = await fetchJson('/api/signed/messages/mark-read', {
+      const j = await fetchJson('/api/private/messages/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ chatId, messageIds: ids }),
@@ -1916,14 +1916,14 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function listUnreadMessageIds(chatId: string, limit = 500) {
-    const j = await fetchJson(`/api/signed/messages/unread?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(limit))}`, {
+    const j = await fetchJson(`/api/private/messages/unread?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(limit))}`, {
       headers: { ...authHeaders() },
     })
     return Array.isArray(j?.messageIds) ? j.messageIds.map(String) : []
   }
 
   async function deleteMessage(chatId: string, messageId: string) {
-    await fetchJson('/api/signed/messages/delete', {
+    await fetchJson('/api/private/messages/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, messageId }),
@@ -1942,7 +1942,7 @@ export const useSignedStore = defineStore('signed', () => {
       signature = ''
     }
 
-    await fetchJson('/api/signed/messages/update', {
+    await fetchJson('/api/private/messages/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, messageId, encryptedData, signature }),
@@ -1987,7 +1987,7 @@ export const useSignedStore = defineStore('signed', () => {
     await updateMessage(chatId, messageId, encryptedData)
 
     // Optimistic local patch (WS update is best-effort).
-    const next: SignedDecryptedMessage[] = cur.map((m): SignedDecryptedMessage =>
+    const next: AuthDecryptedMessage[] = cur.map((m): AuthDecryptedMessage =>
       m.id === messageId
         ? { ...m, senderId: userId.value as string, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId, verification: 'verified' }
         : m,
@@ -1996,7 +1996,7 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function deleteChat(chatId: string) {
-    await fetchJson('/api/signed/chats/delete', {
+    await fetchJson('/api/private/chats/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId }),
@@ -2029,12 +2029,12 @@ export const useSignedStore = defineStore('signed', () => {
     view.value = 'settings'
   }
 
-  async function lookupSignedUserByUsername(name: string): Promise<{ userId: string; publicKey: string }> {
+  async function lookupAuthUserByUsername(name: string): Promise<{ userId: string; publicKey: string }> {
     const u = String(name ?? '').trim()
     if (!u) throw new Error('Username required')
 
     const nameToken = await voprfNameToken({ kind: 'user', input: u })
-    const j = await fetchJson('/api/signed/users/lookup', {
+    const j = await fetchJson('/api/private/users/lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ nameToken }),
@@ -2161,7 +2161,7 @@ export const useSignedStore = defineStore('signed', () => {
     senderId: string
     encryptedData: string
     signature: string
-  }): Promise<SignedMessageVerification | 'invalid'> {
+  }): Promise<AuthMessageVerification | 'invalid'> {
     try {
       const ok = await verifyIncomingEnvelope(params)
       if (ok === false) return 'invalid'
@@ -2182,7 +2182,7 @@ export const useSignedStore = defineStore('signed', () => {
       throw new Error('self')
     }
 
-    const other = await lookupSignedUserByUsername(u)
+    const other = await lookupAuthUserByUsername(u)
 
     const recipients = [
       { userId: userId.value, publicKeyJwk: publicKeyJwk.value },
@@ -2197,7 +2197,7 @@ export const useSignedStore = defineStore('signed', () => {
       },
     })
 
-    const j = await fetchJson('/api/signed/chats/create-personal', {
+    const j = await fetchJson('/api/private/chats/create-personal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ otherUserId: other.userId, names }),
@@ -2221,7 +2221,7 @@ export const useSignedStore = defineStore('signed', () => {
     const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
     const names = await buildNamesJson({ recipients, namesPlainByUserId: { [userId.value]: username.value } })
 
-    const j = await fetchJson('/api/signed/chats/create-group', {
+    const j = await fetchJson('/api/private/chats/create-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatNameEnc, names }),
@@ -2240,7 +2240,7 @@ export const useSignedStore = defineStore('signed', () => {
     const chat = getChat(chatId)
     if (!chat || chat.type !== 'group') throw new Error('not_group')
 
-    const other = await lookupSignedUserByUsername(u)
+    const other = await lookupAuthUserByUsername(u)
 
     const curMembers = await ensureChatMembers(chatId)
     const recipients: Array<{ userId: string; publicKeyJwk: string }> = [
@@ -2266,7 +2266,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     const names = await buildNamesJson({ recipients, namesPlainByUserId })
 
-    const j = await fetchJson('/api/signed/chats/add-member', {
+    const j = await fetchJson('/api/private/chats/add-member', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, otherUserId: other.userId, chatNameEnc, names }),
@@ -2303,7 +2303,7 @@ export const useSignedStore = defineStore('signed', () => {
     const recipients = members.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey }))
     const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
 
-    const j = await fetchJson('/api/signed/chats/rename-group', {
+    const j = await fetchJson('/api/private/chats/rename-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId: cid, chatNameEnc }),
@@ -2320,22 +2320,22 @@ export const useSignedStore = defineStore('signed', () => {
   async function loadMessages(chatId: string, limit = 50) {
     const lim = Math.max(1, Math.min(200, Number(limit) || 50))
 
-    const j = await fetchJson(`/api/signed/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}`, {
+    const j = await fetchJson(`/api/private/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}`, {
       headers: { ...authHeaders() },
     })
 
     const wire: any[] = Array.isArray(j.messages) ? j.messages : []
-    const list: SignedMessage[] = wire
+    const list: AuthMessage[] = wire
       .map((m: any) => {
         const id = typeof m?.id === 'string' ? String(m.id) : ''
         const senderId = typeof m?.senderId === 'string' ? String(m.senderId) : ''
         const encryptedData = typeof m?.encryptedData === 'string' ? String(m.encryptedData) : ''
         const signature = typeof m?.signature === 'string' ? String(m.signature) : ''
         if (!id || !senderId || !encryptedData) return null
-        const out: SignedMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
+        const out: AuthMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
         return out
       })
-      .filter((x): x is SignedMessage => x !== null)
+      .filter((x): x is AuthMessage => x !== null)
 
     if (!privateKey.value || !userId.value) {
       messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [] }
@@ -2345,7 +2345,7 @@ export const useSignedStore = defineStore('signed', () => {
       return { count: 0, hasMore: false, oldestId: null as string | null }
     }
 
-    const out: SignedDecryptedMessage[] = []
+    const out: AuthDecryptedMessage[] = []
     let blocked = 0
     for (const m of list) {
       try {
@@ -2424,24 +2424,24 @@ export const useSignedStore = defineStore('signed', () => {
     messagesLoadingMoreByChatId.value = { ...messagesLoadingMoreByChatId.value, [chatId]: true }
     try {
       const j = await fetchJson(
-        `/api/signed/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}&before=${encodeURIComponent(before)}`,
+        `/api/private/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}&before=${encodeURIComponent(before)}`,
         { headers: { ...authHeaders() } },
       )
 
       const wire: any[] = Array.isArray(j.messages) ? j.messages : []
-      const list: SignedMessage[] = wire
+      const list: AuthMessage[] = wire
         .map((m: any) => {
           const id = typeof m?.id === 'string' ? String(m.id) : ''
           const senderId = typeof m?.senderId === 'string' ? String(m.senderId) : ''
           const encryptedData = typeof m?.encryptedData === 'string' ? String(m.encryptedData) : ''
           const signature = typeof m?.signature === 'string' ? String(m.signature) : ''
           if (!id || !senderId || !encryptedData) return null
-          const out: SignedMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
+          const out: AuthMessage = { id, chatId, senderId, encryptedData, signature: signature || undefined }
           return out
         })
-        .filter((x): x is SignedMessage => x !== null)
+        .filter((x): x is AuthMessage => x !== null)
 
-      const decoded: SignedDecryptedMessage[] = []
+      const decoded: AuthDecryptedMessage[] = []
       let blocked = 0
       for (const m of list) {
         try {
@@ -2544,7 +2544,7 @@ export const useSignedStore = defineStore('signed', () => {
 
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
-    const j = await fetchJson('/api/signed/messages/send', {
+    const j = await fetchJson('/api/private/messages/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, encryptedData, signature }),
@@ -2598,7 +2598,7 @@ export const useSignedStore = defineStore('signed', () => {
     lastPrivateJwkJsonForStay = privateJwk
 
     // Import private key before setting token/userId so App.vue doesn't interpret
-    // the session as "signed in but locked" mid-register and auto-logout.
+    // the session as "authenticated but locked" mid-register and auto-logout.
     const importedPrivateKey = await importRsaPrivateKeyJwk(privateJwk)
     const importedSigningKey = await importRsaPssPrivateKeyJwk(privateJwk)
 
@@ -2849,7 +2849,7 @@ export const useSignedStore = defineStore('signed', () => {
       if (currentToken && exp && Number.isFinite(exp)) {
         const iso = computeRemoveDateIsoForNow(exp)
         const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` }
-        void fetch('/api/signed/account/update', { method: 'POST', headers, body: JSON.stringify({ removeDate: iso }) }).catch(() => {})
+        void fetch('/api/private/account/update', { method: 'POST', headers, body: JSON.stringify({ removeDate: iso }) }).catch(() => {})
       }
     } catch {
       // ignore
@@ -2891,7 +2891,7 @@ export const useSignedStore = defineStore('signed', () => {
       void localData.cleanup('logout_wipe')
 
       stayLoggedIn.value = false
-      localData.setSignedStayLoggedIn(false)
+      localData.setAuthStayLoggedIn(false)
     } else {
       clearSession()
     }
@@ -2901,16 +2901,16 @@ export const useSignedStore = defineStore('signed', () => {
   }
 
   async function deleteAccount() {
-    // Requires an active signed session.
+    // Requires an active auth session.
     if (!token.value) throw new Error('Not logged in')
 
-    await fetchJson('/api/signed/account/delete', {
+    await fetchJson('/api/private/account/delete', {
       method: 'POST',
       headers: { ...authHeaders() },
     })
 
-    // Clear all local traces for this signed identity.
-    // Without a stable plaintext identifier, prefer privacy: remove all stored signed keys.
+    // Clear all local traces for this auth identity.
+    // Without a stable plaintext identifier, prefer privacy: remove all stored auth keys.
     clearAllKeyMaterial()
     storeLastUsername('')
     logout(true)
@@ -2918,7 +2918,7 @@ export const useSignedStore = defineStore('signed', () => {
 
   async function logoutOtherDevices() {
     if (!token.value) throw new Error('Not logged in')
-    await fetchJson('/api/signed/session/logout-other-devices', {
+    await fetchJson('/api/private/session/logout-other-devices', {
       method: 'POST',
       headers: { ...authHeaders() },
     })
@@ -2926,7 +2926,7 @@ export const useSignedStore = defineStore('signed', () => {
 
   async function logoutAndRemoveKeyOtherDevices() {
     if (!token.value) throw new Error('Not logged in')
-    await fetchJson('/api/signed/session/logout-and-remove-key-other-devices', {
+    await fetchJson('/api/private/session/logout-and-remove-key-other-devices', {
       method: 'POST',
       headers: { ...authHeaders() },
     })
@@ -3008,7 +3008,7 @@ export const useSignedStore = defineStore('signed', () => {
 
       await tryRestoreStayUnlockBlob()
 
-      // Variant B requirement: stay mode must never leave us in a signed-but-locked state.
+      // Variant B requirement: stay mode must never leave us in a auth-but-locked state.
       if (token.value && userId.value && username.value && !privateKey.value) {
         try {
           // Do not wipe local artifacts here; restore failures can be transient.
@@ -3146,7 +3146,7 @@ export const useSignedStore = defineStore('signed', () => {
       applyServerVersion,
       dismissServerUpdateModal,
     turnConfig,
-    signedIn,
+    authIn,
     lastUsername,
     view,
     activeChatId,
