@@ -3,6 +3,11 @@
   log {
     output discard
   }
+
+  # Explicitly keep HTTP/3 enabled for edge TLS.
+  servers {
+    protocols h1 h2 h3
+  }
 }
 
 # Public site (set LRCOM_DOMAIN in your .env). The default keeps the file
@@ -199,7 +204,9 @@ https://{$LRCOM_DOMAIN:localhost} {
       }
     }
 
-    # Proxy everything (HTTP + WebSocket) to the app running HTTPS inside the network.
+    # Proxy API/SPA HTTPS traffic to the app.
+    # WebTransport uses a direct UDP endpoint on WEBTRANSPORT_PORT (default 8444),
+    # not this reverse_proxy hop.
     reverse_proxy https://lrcom:8443 {
       transport http {
         # The app uses an internal/self-signed cert by default.

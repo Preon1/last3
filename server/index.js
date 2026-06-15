@@ -48,6 +48,11 @@ import {
 
 const PORT = Number(process.env.PORT ?? 8443);
 const HOST = process.env.HOST ?? '0.0.0.0';
+const WEBTRANSPORT_ENABLED = (process.env.WEBTRANSPORT_ENABLED ?? '1') !== '0';
+const WEBTRANSPORT_HOST = process.env.WEBTRANSPORT_HOST ?? HOST;
+const WEBTRANSPORT_PORT = Number(process.env.WEBTRANSPORT_PORT ?? (PORT + 1));
+const WEBTRANSPORT_PATH = String(process.env.WEBTRANSPORT_PATH ?? '/wt') || '/wt';
+const WEBTRANSPORT_SECRET = String(process.env.WEBTRANSPORT_SECRET ?? '').trim();
 
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(path.join(SERVER_DIR, '..', 'client', 'dist'));
@@ -334,7 +339,7 @@ app.post('/api/signed/session/logout-other-devices', requireSignedAuth, (req, re
     for (const s of revoked) {
       if (!s?.sessionId) continue;
       const ws = getSignedSocketForSession(userId, s.sessionId);
-      if (ws && ws.readyState === 1) {
+      if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
         sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_other_devices', wipeLocalKeys: false });
         setTimeout(() => {
           try { ws.close(); } catch { /* ignore */ }
@@ -357,7 +362,7 @@ app.post('/api/signed/session/logout-and-remove-key-other-devices', requireSigne
     for (const s of revoked) {
       if (!s?.sessionId) continue;
       const ws = getSignedSocketForSession(userId, s.sessionId);
-      if (ws && ws.readyState === 1) {
+      if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
         sendReliable(ws, { type: 'signedForceLogout', reason: 'logout_remove_key_other_devices', wipeLocalKeys: true });
         setTimeout(() => {
           try { ws.close(); } catch { /* ignore */ }
@@ -443,7 +448,7 @@ app.post('/api/auth/register', async (req, res) => {
       for (const s of evicted) {
         if (!s?.sessionId) continue;
         const ws = getSignedSocketForSession(String(user.id), s.sessionId);
-        if (ws && ws.readyState === 1) {
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
           sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
           setTimeout(() => {
             try { ws.close(); } catch { /* ignore */ }
@@ -540,7 +545,7 @@ app.post('/api/auth/login-final', async (req, res) => {
       for (const s of evicted) {
         if (!s?.sessionId) continue;
         const ws = getSignedSocketForSession(userId, s.sessionId);
-        if (ws && ws.readyState === 1) {
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
           sendReliable(ws, { type: 'signedForceLogout', reason: 'session_evicted', wipeLocalKeys: false });
           setTimeout(() => {
             try { ws.close(); } catch { /* ignore */ }
@@ -702,73 +707,82 @@ app.post('/api/signed/chats/last-messages', requireSignedAuth, async (req, res) 
   }
 });
 
+const MAX_PRESENCE_IDS = 25;
+
+async function buildPresenceSnapshotForUser(userId, idsInput) {
+  const me = String(userId ?? '');
+  if (!me) {
+    return {
+      onlineUserIds: [],
+      busyUserIds: [],
+      serverVersion: String(SERVER_APP_VERSION),
+    };
+  }
+
+  const idsRaw = Array.isArray(idsInput) ? idsInput.map(String).filter(Boolean) : [];
+  const idsLimited = idsRaw.slice(0, MAX_PRESENCE_IDS);
+
+  const allowed = new Set();
+  if (idsLimited.length) {
+    try {
+      const r = await query(
+        `SELECT DISTINCT other.user_id::text AS other_user_id
+         FROM chats c
+         INNER JOIN chat_members me_cm ON me_cm.chat_id = c.id AND me_cm.user_id::text = $1
+         INNER JOIN chat_members other ON other.chat_id = c.id AND other.user_id::text <> $1
+         WHERE c.chat_type = 'personal'`,
+        [me],
+      );
+      for (const row of r?.rows ?? []) {
+        const id = String(row.other_user_id ?? '');
+        if (id) allowed.add(id);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const ids = idsLimited.filter((id) => id && id !== me && allowed.has(id));
+
+  const hidden = new Set();
+  if (ids.length) {
+    try {
+      const r = await query(
+        'SELECT id::text AS id FROM users WHERE id = ANY($1::uuid[]) AND hidden_mode = true',
+        [ids],
+      );
+      for (const row of r?.rows ?? []) {
+        if (row?.id) hidden.add(String(row.id));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const online = [];
+  const busy = [];
+  for (const id of ids) {
+    if (hidden.has(id)) continue;
+    if (anySignedSocketOpen(id)) online.push(id);
+    const su = signedUsers.get(id);
+    if (su && su.roomId) busy.push(id);
+  }
+
+  return {
+    onlineUserIds: online,
+    busyUserIds: busy,
+    serverVersion: String(SERVER_APP_VERSION),
+  };
+}
+
 // Signed presence (privacy-preserving): caller provides a list of userIds; response
 // only indicates which of those are currently connected to signed WS.
 app.post('/api/signed/presence', requireSignedAuth, async (req, res) => {
   try {
-    const me = String(req._signedUserId);
-
+    const userId = String(req._signedUserId);
     const raw = req.body?.userIds;
-    const idsRaw = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
-
-    // Hard limit to reduce load and abuse potential.
-    const MAX_PRESENCE_IDS = 25;
-    const idsLimited = idsRaw.slice(0, MAX_PRESENCE_IDS);
-
-    // Permission model: caller may only request presence for users they share
-    // a personal chat with (a "private chats list").
-    const allowed = new Set();
-    if (idsLimited.length) {
-      try {
-        const r = await query(
-          `SELECT DISTINCT other.user_id::text AS other_user_id
-           FROM chats c
-           INNER JOIN chat_members me_cm ON me_cm.chat_id = c.id AND me_cm.user_id::text = $1
-           INNER JOIN chat_members other ON other.chat_id = c.id AND other.user_id::text <> $1
-           WHERE c.chat_type = 'personal'`,
-          [me],
-        );
-        for (const row of r?.rows ?? []) {
-          const id = String(row.other_user_id ?? '');
-          if (id) allowed.add(id);
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    const ids = idsLimited.filter((id) => id && id !== me && allowed.has(id));
-
-    // Hidden-mode users should not appear online/busy to others.
-    const hidden = new Set();
-    if (ids.length) {
-      try {
-        const r = await query(
-          'SELECT id::text AS id FROM users WHERE id = ANY($1::uuid[]) AND hidden_mode = true',
-          [ids],
-        );
-        for (const row of r?.rows ?? []) {
-          if (row?.id) hidden.add(String(row.id));
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    const online = [];
-    const busy = [];
-    for (const id of ids) {
-      if (hidden.has(id)) continue;
-      if (anySignedSocketOpen(id)) online.push(id);
-      const su = signedUsers.get(id);
-      if (su && su.roomId) busy.push(id);
-    }
-    res.json({
-      success: true,
-      onlineUserIds: online,
-      busyUserIds: busy,
-      serverVersion: String(SERVER_APP_VERSION),
-    });
+    const snapshot = await buildPresenceSnapshotForUser(userId, raw);
+    res.json({ success: true, ...snapshot });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -802,7 +816,7 @@ app.post('/api/signed/chats/create-personal', requireSignedAuth, async (req, res
         const payload = { type: 'signedChatsChanged' };
         for (const uid of [userId, otherUserId]) {
           forEachSignedSocket(String(uid), (ws) => {
-            if (ws && ws.readyState === 1) sendReliable(ws, payload);
+            if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
           });
         }
       }
@@ -899,7 +913,7 @@ app.post('/api/signed/chats/add-member', requireSignedAuth, async (req, res) => 
       const payload = { type: 'signedChatsChanged' };
       for (const uid of targets) {
         forEachSignedSocket(String(uid), (ws) => {
-          if (ws && ws.readyState === 1) sendReliable(ws, payload);
+          if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
         });
       }
     } catch {
@@ -930,7 +944,7 @@ app.post('/api/signed/chats/rename-group', requireSignedAuth, async (req, res) =
       const payload = { type: 'signedChatsChanged' };
       for (const uid of result.memberIds || []) {
         forEachSignedSocket(String(uid), (ws) => {
-          if (ws && ws.readyState === 1) sendReliable(ws, payload);
+          if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, payload);
         });
       }
     } catch {
@@ -1004,7 +1018,7 @@ app.post('/api/signed/messages/send', requireSignedAuth, async (req, res) => {
     };
     for (const uid of memberIds) {
       forEachSignedSocket(uid, (ws) => {
-        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
 
@@ -1045,7 +1059,7 @@ app.post('/api/signed/messages/delete', requireSignedAuth, async (req, res) => {
     const payload = { type: 'signedMessageDeleted', chatId, id: messageId };
     for (const uid of r.memberIds) {
       forEachSignedSocket(uid, (ws) => {
-        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
 
@@ -1081,7 +1095,7 @@ app.post('/api/signed/messages/update', requireSignedAuth, async (req, res) => {
     const payload = { type: 'signedMessageUpdated', chatId, id: messageId, senderId: userId, encryptedData, signature };
     for (const uid of r.memberIds) {
       forEachSignedSocket(uid, (ws) => {
-        if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
       });
     }
 
@@ -1124,7 +1138,7 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
       const payload = { type: 'signedChatDeleted', chatId };
       for (const uid of del.memberIds) {
         forEachSignedSocket(uid, (ws) => {
-          if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+          if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
         });
       }
     } else {
@@ -1135,7 +1149,7 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
           const payload = { type: 'signedChatsChanged', chatId, reason: left.chatDeleted ? 'group_deleted' : 'member_left' };
           for (const uid of left.remainingMemberIds || []) {
             forEachSignedSocket(String(uid), (ws) => {
-              if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+              if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
             });
           }
         } catch {
@@ -1153,7 +1167,7 @@ app.post('/api/signed/chats/delete', requireSignedAuth, async (req, res) => {
               const payload = { type: 'signedMessagesDeleted', chatId, ids: part };
               for (const uid of left.remainingMemberIds || []) {
                 forEachSignedSocket(String(uid), (ws) => {
-                  if (ws && ws.readyState === 1) sendBestEffort(ws, payload);
+                  if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, payload);
                 });
               }
             }
@@ -1178,7 +1192,7 @@ app.post('/api/signed/account/delete', requireSignedAuth, async (req, res) => {
     // Best-effort: force logout all sessions (online only).
     try {
       forEachSignedSocket(userId, (ws) => {
-        if (ws && ws.readyState === 1) sendReliable(ws, { type: 'signedForceLogout', reason: 'account_deleted', wipeLocalKeys: false });
+        if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendReliable(ws, { type: 'signedForceLogout', reason: 'account_deleted', wipeLocalKeys: false });
       });
     } catch {
       // ignore
@@ -1277,10 +1291,11 @@ const server = https.createServer(
 );
 
 const wss = new WebSocketServer({ server });
+const WS_FALLBACK_ENABLED = false;
 
-// Signed-mode: in-memory sockets keyed by authenticated userId + sessionId.
-// Supports multi-device logins.
-const signedSockets = new Map(); // userId -> Map(sessionId -> ws)
+// Signed-mode transport sessions keyed by authenticated userId + sessionId.
+// Current transport connection is WS; this registry is transport-agnostic.
+const signedTransportSessions = new Map(); // userId -> Map(sessionId -> transportConn)
 
 // Signed-mode: in-memory user state (presence + call state). Kept RAM-only.
 const signedUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
@@ -1296,97 +1311,237 @@ const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 30000);
 // Reliable WS notifications (signed mode) for small control-plane events.
 // We retry until the client ACKs, but only while the WS is open.
 const WS_NOTIFY_RETRY_MS = Number(process.env.WS_NOTIFY_RETRY_MS ?? 5000);
+const TRANSPORT_MAX_CTRL_PAYLOAD_BYTES = Number(process.env.TRANSPORT_MAX_CTRL_PAYLOAD_BYTES ?? 64 * 1024);
+const TRANSPORT_MAX_DGRAM_PAYLOAD_BYTES = Number(process.env.TRANSPORT_MAX_DGRAM_PAYLOAD_BYTES ?? 1200);
+
+function toTransportMessage(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const hasEnvelopePayload = raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload);
+  const envelopeType = typeof raw.type === 'string' ? String(raw.type) : '';
+
+  let msg = null;
+
+  if (hasEnvelopePayload) {
+    msg = { ...raw.payload };
+    if (typeof msg.type !== 'string') msg.type = envelopeType;
+  } else {
+    msg = { ...raw };
+  }
+
+  if (typeof msg?.type !== 'string' || !msg.type) return null;
+
+  if (typeof raw.cMsgId === 'string' && raw.cMsgId) msg.cMsgId = raw.cMsgId;
+  else if (typeof msg.cMsgId !== 'string') delete msg.cMsgId;
+
+  if (typeof raw.msgId === 'string' && raw.msgId) msg.msgId = raw.msgId;
+  else if (typeof msg.msgId !== 'string') delete msg.msgId;
+
+  const chanRaw = typeof raw.chan === 'string' ? raw.chan : (typeof msg.chan === 'string' ? msg.chan : 'ctrl');
+  const chan = chanRaw === 'dgram' ? 'dgram' : 'ctrl';
+  msg.chan = chan;
+
+  return msg;
+}
+
+function parseIncomingControlMessage(data) {
+  let text = '';
+  try {
+    text = Buffer.isBuffer(data) ? data.toString('utf8') : String(data ?? '');
+  } catch {
+    return null;
+  }
+
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > TRANSPORT_MAX_CTRL_PAYLOAD_BYTES) return null;
+
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  const msg = toTransportMessage(raw);
+  if (!msg) return null;
+
+  if (msg.chan === 'dgram' && bytes > TRANSPORT_MAX_DGRAM_PAYLOAD_BYTES) return null;
+  return msg;
+}
+
+function getTransportRequestPathAndToken(transportSession) {
+  let rawPath = '';
+
+  const header = transportSession?.header ?? transportSession?.headers ?? null;
+  if (header && typeof header === 'object') {
+    if (typeof header.get === 'function') {
+      rawPath = String(header.get(':path') ?? header.get('path') ?? '');
+    } else {
+      rawPath = String(header[':path'] ?? header.path ?? '');
+    }
+  }
+
+  if (!rawPath && typeof transportSession?.path === 'string') rawPath = transportSession.path;
+  if (!rawPath && typeof transportSession?.url === 'string') rawPath = transportSession.url;
+  if (!rawPath) rawPath = WEBTRANSPORT_PATH;
+
+  let pathname = WEBTRANSPORT_PATH;
+  let token = '';
+  try {
+    const u = new URL(rawPath, 'https://localhost');
+    pathname = String(u.pathname || WEBTRANSPORT_PATH);
+    token = String(u.searchParams.get('token') ?? '');
+  } catch {
+    pathname = WEBTRANSPORT_PATH;
+    token = '';
+  }
+
+  return { pathname, token };
+}
 
 function sendBestEffort(ws, obj) {
-  if (!ws || ws.readyState !== 1) return;
+  if (!ws || typeof ws.sendJson !== 'function') return;
   try {
-    ws.send(JSON.stringify(obj));
+    ws.sendJson(obj);
   } catch {
     // ignore
   }
 }
 
-function getUserSocketMap(userId) {
+function createWebTransportSessionConn(params) {
+  const sendControl = typeof params?.sendControl === 'function' ? params.sendControl : null;
+  const closeConn = typeof params?.close === 'function' ? params.close : null;
+  const isOpen = typeof params?.isOpen === 'function' ? params.isOpen : null;
+
+  return {
+    kind: 'webtransport',
+    sessionId: typeof params?.sessionId === 'string' ? params.sessionId : '',
+    userId: typeof params?.userId === 'string' ? params.userId : '',
+    sendJson(obj) {
+      if (!sendControl) return;
+      sendControl(obj);
+    },
+    close() {
+      if (!closeConn) return;
+      closeConn();
+    },
+    isOpen() {
+      if (!isOpen) return false;
+      return Boolean(isOpen());
+    },
+  };
+}
+
+function getUserTransportSessionMap(userId) {
   const uid = String(userId ?? '');
   if (!uid) return null;
-  let m = signedSockets.get(uid);
+  let m = signedTransportSessions.get(uid);
   if (!m) {
     m = new Map();
-    signedSockets.set(uid, m);
+    signedTransportSessions.set(uid, m);
   }
   return m;
 }
 
-function addSignedSocket(userId, sessionId, ws) {
+function addTransportSession(userId, sessionId, transportConn) {
   const uid = String(userId ?? '');
   const sid = String(sessionId ?? '');
-  if (!uid || !sid || !ws) return;
-  const m = getUserSocketMap(uid);
+  if (!uid || !sid || !transportConn) return;
+  const m = getUserTransportSessionMap(uid);
   if (!m) return;
-  m.set(sid, ws);
+  m.set(sid, transportConn);
 }
 
-function removeSignedSocket(userId, sessionId, ws) {
+function removeTransportSession(userId, sessionId, transportConn) {
   const uid = String(userId ?? '');
   const sid = String(sessionId ?? '');
   if (!uid || !sid) return;
-  const m = signedSockets.get(uid);
+  const m = signedTransportSessions.get(uid);
   if (!m) return;
   const cur = m.get(sid);
-  // Only remove if it matches this instance.
-  if (cur && ws && cur !== ws) return;
+  if (cur && transportConn && cur !== transportConn) return;
   m.delete(sid);
-  if (m.size === 0) signedSockets.delete(uid);
+  if (m.size === 0) signedTransportSessions.delete(uid);
 }
 
-function forEachSignedSocket(userId, fn) {
+function forEachTransportSession(userId, fn) {
   const uid = String(userId ?? '');
   if (!uid) return;
-  const m = signedSockets.get(uid);
+  const m = signedTransportSessions.get(uid);
   if (!m) return;
-  for (const ws of m.values()) {
+  for (const transportConn of m.values()) {
     try {
-      fn(ws);
+      fn(transportConn);
     } catch {
       // ignore
     }
   }
+}
+
+function getTransportSessionForSessionId(userId, sessionId) {
+  const uid = String(userId ?? '');
+  const sid = String(sessionId ?? '');
+  if (!uid || !sid) return null;
+  const m = signedTransportSessions.get(uid);
+  return m ? m.get(sid) ?? null : null;
+}
+
+function closeAllTransportSessions(userId) {
+  const uid = String(userId ?? '');
+  if (!uid) return;
+  const m = signedTransportSessions.get(uid);
+  if (!m) return;
+  for (const transportConn of m.values()) {
+    try {
+      transportConn.close();
+    } catch {
+      // ignore
+    }
+  }
+  signedTransportSessions.delete(uid);
+}
+
+function hasAnyTransportSessions(userId) {
+  const uid = String(userId ?? '');
+  if (!uid) return false;
+  return signedTransportSessions.has(uid);
+}
+
+function getUserSocketMap(userId) {
+  return getUserTransportSessionMap(userId);
+}
+
+function addSignedSocket(userId, sessionId, ws) {
+  addTransportSession(userId, sessionId, ws);
+}
+
+function removeSignedSocket(userId, sessionId, ws) {
+  removeTransportSession(userId, sessionId, ws);
+}
+
+function forEachSignedSocket(userId, fn) {
+  forEachTransportSession(userId, fn);
 }
 
 function anySignedSocketOpen(userId) {
   let open = false;
   forEachSignedSocket(userId, (ws) => {
-    if (ws && ws.readyState === 1) open = true;
+    if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) open = true;
   });
   return open;
 }
 
 function closeAllSignedSockets(userId) {
-  const uid = String(userId ?? '');
-  if (!uid) return;
-  const m = signedSockets.get(uid);
-  if (!m) return;
-  for (const ws of m.values()) {
-    try {
-      ws.close();
-    } catch {
-      // ignore
-    }
-  }
-  signedSockets.delete(uid);
+  closeAllTransportSessions(userId);
 }
 
 function getSignedSocketForSession(userId, sessionId) {
-  const uid = String(userId ?? '');
-  const sid = String(sessionId ?? '');
-  if (!uid || !sid) return null;
-  const m = signedSockets.get(uid);
-  return m ? m.get(sid) ?? null : null;
+  return getTransportSessionForSessionId(userId, sessionId);
 }
 
 function sendToUserAll(userId, obj) {
   forEachSignedSocket(userId, (ws) => {
-    if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+    if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, obj);
   });
 }
 
@@ -1394,17 +1549,17 @@ function sendToUserAllExceptSession(userId, exceptSessionId, obj) {
   const uid = String(userId ?? '');
   const sid = String(exceptSessionId ?? '');
   if (!uid) return;
-  const m = signedSockets.get(uid);
+  const m = signedTransportSessions.get(uid);
   if (!m) return;
   for (const [s, ws] of m.entries()) {
     if (sid && s === sid) continue;
-    if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+    if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, obj);
   }
 }
 
 function sendToUserSession(userId, sessionId, obj) {
   const ws = getSignedSocketForSession(userId, sessionId);
-  if (ws && ws.readyState === 1) sendBestEffort(ws, obj);
+  if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) sendBestEffort(ws, obj);
 }
 
 function sendToUserCallSession(userId, obj) {
@@ -1414,7 +1569,7 @@ function sendToUserCallSession(userId, obj) {
   const preferredSid = typeof u?.controllingSessionId === 'string' ? u.controllingSessionId : null;
   if (preferredSid) {
     const ws = getSignedSocketForSession(uid, preferredSid);
-    if (ws && ws.readyState === 1) {
+    if (ws && typeof ws.isOpen === 'function' && ws.isOpen()) {
       sendBestEffort(ws, obj);
       return;
     }
@@ -1449,7 +1604,7 @@ function ensureWsNotifyRetryTimer(ws) {
 
   ws._lrcomNotifyRetryTimer = setInterval(() => {
     try {
-      if (!ws || ws.readyState !== 1) {
+      if (!ws || typeof ws.isOpen !== 'function' || !ws.isOpen()) {
         stopWsNotifyRetryTimerIfIdle(ws);
         return;
       }
@@ -1468,7 +1623,7 @@ function ensureWsNotifyRetryTimer(ws) {
 }
 
 function sendReliable(ws, obj) {
-  if (!ws || ws.readyState !== 1) return null;
+  if (!ws || typeof ws.isOpen !== 'function' || !ws.isOpen()) return null;
   const pending = ensureWsPendingNotifies(ws);
   if (!pending) return null;
 
@@ -1671,7 +1826,705 @@ function getTurnHostLabel() {
   return `${host}:${port}`;
 }
 
+async function handleSignedControlMessage(transportConn, signedUser, sid, msg) {
+  if (msg.type === 'ack') {
+    const msgId = typeof msg.msgId === 'string' ? msg.msgId : null;
+    if (msgId) ackReliable(transportConn, msgId);
+    return;
+  }
+
+  const cMsgId = typeof msg.cMsgId === 'string' && msg.cMsgId ? msg.cMsgId : null;
+  if (cMsgId) {
+    const prev = getClientReceipt(signedUser, cMsgId);
+    if (prev) {
+      sendBestEffort(transportConn, prev);
+      return;
+    }
+  }
+
+  if (msg.type === 'ping') {
+    sendBestEffort(transportConn, { type: 'pong' });
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'presenceHeartbeat') {
+    const raw = Array.isArray(msg.userIds) ? msg.userIds : [];
+    const snapshot = await buildPresenceSnapshotForUser(signedUser.id, raw);
+    sendBestEffort(transportConn, { type: 'presenceSnapshot', ...snapshot });
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callStart') {
+    const to = typeof msg.to === 'string' ? msg.to : null;
+    if (!to) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'BAD_TO');
+      return;
+    }
+    const callee = signedUsers.get(to);
+    if (!callee || !anySignedSocketOpen(to)) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'offline' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    if (signedUser.roomId) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'busy' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    let authRow = null;
+    try {
+      const auth = await query(
+        `SELECT
+            COALESCE((SELECT introvert_mode FROM users WHERE id::text = $2), FALSE) AS introvert,
+            EXISTS(
+              SELECT 1
+              FROM chat_members cm1
+              INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
+              WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
+              LIMIT 1
+            ) AS has_any,
+            EXISTS(
+              SELECT 1
+              FROM chats c
+              INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
+              INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
+              WHERE c.chat_type = 'personal'
+              LIMIT 1
+            ) AS has_personal`,
+        [signedUser.id, String(to)],
+      );
+      authRow = auth?.rows?.[0] ?? null;
+    } catch (err) {
+      const msgText = typeof err?.message === 'string' ? err.message : '';
+      const mayBeMissingIntrovertColumn = msgText.includes('introvert_mode');
+
+      if (mayBeMissingIntrovertColumn) {
+        try {
+          const auth = await query(
+            `SELECT
+                EXISTS(
+                  SELECT 1
+                  FROM chat_members cm1
+                  INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
+                  WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
+                  LIMIT 1
+                ) AS has_any,
+                EXISTS(
+                  SELECT 1
+                  FROM chats c
+                  INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
+                  INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
+                  WHERE c.chat_type = 'personal'
+                  LIMIT 1
+                ) AS has_personal`,
+            [signedUser.id, String(to)],
+          );
+          const row = auth?.rows?.[0] ?? null;
+          authRow = row ? { ...row, introvert: false } : null;
+        } catch (err2) {
+          debugError('[signed callStart] auth query failed (fallback)', {
+            from: signedUser?.id,
+            to,
+            err: err2,
+          });
+          sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
+          if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+          return;
+        }
+      } else {
+        debugError('[signed callStart] auth query failed', {
+          from: signedUser?.id,
+          to,
+          err,
+        });
+        sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
+        if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+        return;
+      }
+    }
+
+    if (!authRow) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'server' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    const hasAny = Boolean(authRow?.has_any);
+    const hasPersonal = Boolean(authRow?.has_personal);
+    const introvert = Boolean(authRow?.introvert);
+
+    if (!hasAny) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    if (introvert && !hasPersonal) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'introvert' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    if (callee.roomId) {
+      sendBestEffort(transportConn, { type: 'callStartResult', ok: false, reason: 'busy' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    const rid = makeId();
+    const room = ensureSignedRoom(rid);
+    room.members.add(signedUser.id);
+    room.members.add(callee.id);
+    room.ownerId = signedUser.id;
+    signedUser.roomId = rid;
+    signedUser.controllingSessionId = String(sid);
+    callee.roomId = rid;
+    callee.controllingSessionId = null;
+
+    sendBestEffort(transportConn, { type: 'callStartResult', ok: true, roomId: rid });
+    sendToUserAll(callee.id, { type: 'incomingCall', from: signedUser.id, fromName: signedUser.name, roomId: rid });
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callAccept') {
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      sendBestEffort(transportConn, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'accepted_elsewhere' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const from = typeof msg.from === 'string' ? msg.from : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
+    const caller = from ? signedUsers.get(from) : null;
+    if (!caller) {
+      signedUser.roomId = null;
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'NOT_FOUND');
+      return;
+    }
+
+    if (!rid || caller.roomId !== rid || signedUser.roomId !== rid) {
+      signedUser.roomId = null;
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'ROOM_MISMATCH');
+      return;
+    }
+
+    const room = getSignedRoom(rid);
+    if (!room) {
+      signedUser.roomId = null;
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'ROOM_MISSING');
+      return;
+    }
+
+    signedUser.controllingSessionId = String(sid);
+    sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'accepted_elsewhere' });
+
+    const peer = { id: signedUser.id, name: signedUser.name };
+    for (const memberId of room.members) {
+      if (memberId === signedUser.id) continue;
+      sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
+    }
+
+    const peers = Array.from(room.members)
+      .filter((id) => id !== signedUser.id)
+      .map((id) => {
+        const u2 = signedUsers.get(id);
+        return u2 ? { id: u2.id, name: u2.name } : null;
+      })
+      .filter(Boolean);
+
+    sendBestEffort(transportConn, { type: 'roomPeers', roomId: rid, peers });
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callReject') {
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      sendBestEffort(transportConn, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'rejected_elsewhere' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const from = typeof msg.from === 'string' ? msg.from : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
+    const caller = from ? signedUsers.get(from) : null;
+    if (caller) sendToUserCallSession(caller.id, { type: 'callRejected', reason: 'rejected' });
+    if (rid) {
+      sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'rejected' });
+
+      const room = getSignedRoom(rid);
+      if (room && room.members.size === 2) {
+        for (const memberId of room.members) {
+          const u = signedUsers.get(memberId);
+          if (u && u.roomId === rid) {
+            u.roomId = null;
+            u.controllingSessionId = null;
+          }
+        }
+
+        if (Array.isArray(room.joinQueue)) {
+          for (const jid of room.joinQueue) {
+            const u = signedUsers.get(jid);
+            const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+            if (u) {
+              u.joinPendingRoomId = null;
+              u.joinPendingSessionId = null;
+            }
+            if (joinSid) sendToUserSession(jid, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+            else sendToUserAll(jid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+          }
+        }
+        if (room.joinActive) {
+          const u = signedUsers.get(room.joinActive);
+          const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
+          if (u) {
+            u.joinPendingRoomId = null;
+            u.joinPendingSessionId = null;
+          }
+          if (joinSid) sendToUserSession(room.joinActive, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
+          else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
+        }
+
+        signedRooms.delete(rid);
+      }
+    }
+
+    signedUser.roomId = null;
+    signedUser.controllingSessionId = null;
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callHangup') {
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    const rid = signedUser.roomId;
+    const room = rid ? getSignedRoom(rid) : null;
+    if (rid && room && room.members.size === 2) {
+      const otherId = Array.from(room.members).find((id) => id !== signedUser.id) ?? null;
+      const other = otherId ? signedUsers.get(otherId) : null;
+      const otherAccepted = Boolean(other?.controllingSessionId);
+      if (otherId && !otherAccepted) {
+        sendToUserAll(otherId, { type: 'incomingCallCancelled', roomId: rid, reason: 'hangup' });
+        for (const memberId of room.members) {
+          const u = signedUsers.get(memberId);
+          if (u && u.roomId === rid) {
+            u.roomId = null;
+            u.controllingSessionId = null;
+          }
+        }
+        signedRooms.delete(rid);
+        if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+        return;
+      }
+    }
+
+    signedLeaveRoom(signedUser);
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callJoinRequest') {
+    const to = typeof msg.to === 'string' ? msg.to : null;
+    const target = to ? signedUsers.get(to) : null;
+    if (!target || !target.roomId) {
+      sendBestEffort(transportConn, { type: 'callJoinResult', ok: false, reason: 'not_in_call' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const room = getSignedRoom(target.roomId);
+    if (!room) {
+      sendBestEffort(transportConn, { type: 'callJoinResult', ok: false, reason: 'ended' });
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    signedUser.joinPendingRoomId = room.id;
+    signedUser.joinPendingSessionId = String(sid);
+    if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
+    room.joinQueue.push(signedUser.id);
+    sendBestEffort(transportConn, { type: 'callJoinPending', roomId: room.id, toName: target.name });
+    signedPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callJoinCancel') {
+    if (signedUser.joinPendingSessionId && String(signedUser.joinPendingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const rid = signedUser.joinPendingRoomId;
+    if (rid) {
+      const room = getSignedRoom(rid);
+      if (room) signedRemoveJoinRequestFromRoom(room, signedUser.id);
+      signedPumpJoinQueue(room);
+    }
+    signedUser.joinPendingRoomId = null;
+    signedUser.joinPendingSessionId = null;
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callJoinReject') {
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const from = typeof msg.from === 'string' ? msg.from : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
+    const requester = from ? signedUsers.get(from) : null;
+    const room = rid ? getSignedRoom(rid) : null;
+    const joinSid = typeof requester?.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : null;
+    if (requester) {
+      requester.joinPendingRoomId = null;
+      requester.joinPendingSessionId = null;
+    }
+    if (room) signedRemoveJoinRequestFromRoom(room, from);
+    if (from) {
+      if (joinSid) sendToUserSession(from, joinSid, { type: 'callJoinResult', ok: false, reason: 'rejected' });
+      else sendToUserAll(from, { type: 'callJoinResult', ok: false, reason: 'rejected' });
+    }
+    signedPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'callJoinAccept') {
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    const from = typeof msg.from === 'string' ? msg.from : null;
+    const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
+    const requester = from ? signedUsers.get(from) : null;
+    const room = rid ? getSignedRoom(rid) : null;
+    if (!requester || !room) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    if (room.joinActive !== requester.id) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+
+    room.members.add(requester.id);
+    requester.roomId = rid;
+    requester.joinPendingRoomId = null;
+    requester.controllingSessionId = typeof requester.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : requester.controllingSessionId;
+    requester.joinPendingSessionId = null;
+
+    const peer = { id: requester.id, name: requester.name };
+    for (const memberId of room.members) {
+      if (memberId === requester.id) continue;
+      sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
+    }
+
+    const peers = Array.from(room.members)
+      .filter((id) => id !== requester.id)
+      .map((id) => {
+        const u2 = signedUsers.get(id);
+        return u2 ? { id: u2.id, name: u2.name } : null;
+      })
+      .filter(Boolean);
+
+    sendToUserCallSession(requester.id, { type: 'roomPeers', roomId: rid, peers });
+    sendToUserCallSession(requester.id, { type: 'callJoinResult', ok: true });
+
+    room.joinActive = null;
+    signedPumpJoinQueue(room);
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (msg.type === 'signal') {
+    const to = typeof msg.to === 'string' ? msg.to : null;
+    const payload = msg.payload;
+    if (!to) return;
+    const peer = signedUsers.get(to);
+    if (!peer) return;
+    if (!signedUser.roomId || signedUser.roomId !== peer.roomId) return;
+    if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
+      if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+      return;
+    }
+    sendToUserCallSession(peer.id, { type: 'signal', from: signedUser.id, fromName: signedUser.name, payload });
+    if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, true);
+    return;
+  }
+
+  if (cMsgId) sendClientReceipt(signedUser, transportConn, cMsgId, false, 'UNKNOWN_TYPE');
+}
+
+function handleSignedSessionClose(uid, sid, transportConn) {
+  removeSignedSocket(uid, sid, transportConn);
+
+  const curUser = signedUsers.get(uid);
+
+  if (curUser?.controllingSessionId && String(curUser.controllingSessionId) === String(sid)) {
+    if (curUser.roomId) signedLeaveRoom(curUser);
+    curUser.controllingSessionId = null;
+  }
+
+  if (curUser?.joinPendingSessionId && String(curUser.joinPendingSessionId) === String(sid)) {
+    const rid = curUser.joinPendingRoomId;
+    if (rid) {
+      const room = getSignedRoom(rid);
+      if (room) {
+        signedRemoveJoinRequestFromRoom(room, curUser.id);
+        signedPumpJoinQueue(room);
+      }
+    }
+    curUser.joinPendingRoomId = null;
+    curUser.joinPendingSessionId = null;
+  }
+
+  const stillHasSockets = hasAnyTransportSessions(String(uid));
+  if (!stillHasSockets) {
+    if (curUser?.roomId) signedLeaveRoom(curUser);
+    signedUsers.delete(uid);
+  }
+}
+
+function ensureSignedUserState(uid, signedName = '') {
+  const prev = signedUsers.get(uid);
+  const signedUser = prev ?? {
+    id: uid,
+    name: signedName,
+    lastMsgAt: Date.now(),
+    roomId: null,
+    controllingSessionId: null,
+    joinPendingRoomId: null,
+    joinPendingSessionId: null,
+    _clientReceipts: null,
+    _clientReceiptQueue: null,
+  };
+
+  signedUser.name = signedName || signedUser.name;
+  signedUser.lastMsgAt = Date.now();
+  signedUsers.set(uid, signedUser);
+  return signedUser;
+}
+
+async function streamToTransportMessages(readable, onMessage) {
+  if (!readable || typeof readable.getReader !== 'function') return;
+  const reader = readable.getReader();
+  const decoder = new TextDecoder();
+  let acc = '';
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunkText = decoder.decode(value, { stream: true });
+      acc += chunkText;
+
+      while (true) {
+        const idx = acc.indexOf('\n');
+        if (idx < 0) break;
+        const line = acc.slice(0, idx).trim();
+        acc = acc.slice(idx + 1);
+        if (!line) continue;
+        const msg = parseIncomingControlMessage(line);
+        if (!msg) continue;
+        await onMessage(msg);
+      }
+    }
+
+    const tail = acc.trim();
+    if (tail) {
+      const msg = parseIncomingControlMessage(tail);
+      if (msg) await onMessage(msg);
+    }
+  } catch {
+    // ignore
+  } finally {
+    try { reader.releaseLock(); } catch { /* ignore */ }
+  }
+}
+
+async function streamWebTransportSessions(sessionReadable) {
+  if (!sessionReadable || typeof sessionReadable.getReader !== 'function') return;
+  const reader = sessionReadable.getReader();
+  while (true) {
+    let step;
+    try {
+      step = await reader.read();
+    } catch {
+      break;
+    }
+    if (!step || step.done) break;
+    const session = step.value;
+    if (!session) continue;
+    void handleWebTransportSession(session);
+  }
+}
+
+async function handleWebTransportSession(session) {
+  const req = getTransportRequestPathAndToken(session);
+  if (!req?.token || req.pathname !== WEBTRANSPORT_PATH) {
+    try { await session.close?.(); } catch { /* ignore */ }
+    return;
+  }
+
+  const sess = getSessionForToken(req.token);
+  if (!sess?.userId || !sess?.sessionId) {
+    try { await session.close?.(); } catch { /* ignore */ }
+    return;
+  }
+
+  const uid = String(sess.userId);
+  const sid = String(sess.sessionId);
+  const signedUser = ensureSignedUserState(uid, '');
+
+  let sessionOpen = true;
+  let sessionClosedHandled = false;
+  let controlWriter = null;
+  let writerPumping = false;
+  const queuedFrames = [];
+
+  const cleanup = () => {
+    if (sessionClosedHandled) return;
+    sessionClosedHandled = true;
+    sessionOpen = false;
+    handleSignedSessionClose(uid, sid, transportConn);
+  };
+
+  const pumpWriter = () => {
+    if (!sessionOpen || !controlWriter || writerPumping) return;
+    writerPumping = true;
+    void (async () => {
+      try {
+        while (sessionOpen && controlWriter && queuedFrames.length) {
+          const frame = queuedFrames.shift();
+          if (!frame) continue;
+          await controlWriter.write(Buffer.from(frame, 'utf8'));
+        }
+      } catch {
+        sessionOpen = false;
+      } finally {
+        writerPumping = false;
+      }
+    })();
+  };
+
+  const transportConn = createWebTransportSessionConn({
+    sessionId: sid,
+    userId: uid,
+    sendControl(obj) {
+      if (!sessionOpen) return;
+      let frame = '';
+      try {
+        frame = `${JSON.stringify(obj)}\n`;
+      } catch {
+        return;
+      }
+      if (Buffer.byteLength(frame, 'utf8') > TRANSPORT_MAX_CTRL_PAYLOAD_BYTES) return;
+      queuedFrames.push(frame);
+      if (queuedFrames.length > 1024) queuedFrames.shift();
+      pumpWriter();
+    },
+    close() {
+      sessionOpen = false;
+      try { controlWriter?.close?.(); } catch { /* ignore */ }
+      try { session.close?.(); } catch { /* ignore */ }
+    },
+    isOpen() {
+      return sessionOpen;
+    },
+  });
+
+  addTransportSession(uid, sid, transportConn);
+  sendBestEffort(transportConn, { type: 'signedHello', userId: uid });
+
+  void Promise.resolve(session.closed)
+    .catch(() => null)
+    .then(() => {
+      cleanup();
+    });
+
+  try {
+    const bidi = session.incomingBidirectionalStreams;
+    if (!bidi || typeof bidi.getReader !== 'function') {
+      transportConn.close();
+      cleanup();
+      return;
+    }
+
+    const bidiReader = bidi.getReader();
+    const first = await bidiReader.read();
+    if (!first || first.done || !first.value) {
+      transportConn.close();
+      cleanup();
+      return;
+    }
+
+    const controlStream = first.value;
+    if (controlStream?.writable && typeof controlStream.writable.getWriter === 'function') {
+      controlWriter = controlStream.writable.getWriter();
+      pumpWriter();
+    }
+
+    if (session?.datagrams?.readable) {
+      void streamToTransportMessages(session.datagrams.readable, async (msg) => {
+        if (!msg) return;
+        signedUser.lastMsgAt = Date.now();
+        await handleSignedControlMessage(transportConn, signedUser, sid, msg);
+      });
+    }
+
+    await streamToTransportMessages(controlStream?.readable, async (msg) => {
+      if (!msg) return;
+      signedUser.lastMsgAt = Date.now();
+      await handleSignedControlMessage(transportConn, signedUser, sid, msg);
+    });
+
+    sessionOpen = false;
+    cleanup();
+  } catch {
+    sessionOpen = false;
+    cleanup();
+  }
+}
+
+async function startWebTransportServer() {
+  if (!WEBTRANSPORT_ENABLED) return null;
+
+  const mod = await import('@fails-components/webtransport');
+  const Http3Server = mod?.Http3Server;
+  if (typeof Http3Server !== 'function') {
+    throw new Error('WebTransport runtime unavailable');
+  }
+
+  const wtServer = new Http3Server({
+    host: WEBTRANSPORT_HOST,
+    port: WEBTRANSPORT_PORT,
+    cert: fs.readFileSync(TLS_CERT_PATH),
+    privKey: fs.readFileSync(TLS_KEY_PATH),
+    secret: WEBTRANSPORT_SECRET || crypto.randomBytes(16).toString('hex'),
+  });
+
+  if (typeof wtServer.startServer === 'function') {
+    await wtServer.startServer();
+  }
+
+  const sessions = wtServer.sessionStream(WEBTRANSPORT_PATH);
+  void streamWebTransportSessions(sessions);
+  return wtServer;
+}
+
 wss.on('connection', async (ws, req) => {
+  if (!WS_FALLBACK_ENABLED) {
+    try { ws.close(); } catch { /* ignore */ }
+    return;
+  }
+
   // Signed-mode WS: separate world; requires token in querystring.
   try {
     const rawUrl = typeof req?.url === 'string' ? req.url : '/';
@@ -1723,484 +2576,13 @@ wss.on('connection', async (ws, req) => {
 
       ws.on('message', async (data) => {
         signedUser.lastMsgAt = Date.now();
-        let msg;
-        try {
-          msg = JSON.parse(String(data));
-        } catch {
-          return;
-        }
-        if (!msg || typeof msg.type !== 'string') return;
-
-        if (msg.type === 'ack') {
-          const msgId = typeof msg.msgId === 'string' ? msg.msgId : null;
-          if (msgId) ackReliable(ws, msgId);
-          // No receipt for ACK messages: they are idempotent and best-effort.
-          return;
-        }
-
-        const cMsgId = typeof msg.cMsgId === 'string' && msg.cMsgId ? msg.cMsgId : null;
-        if (cMsgId) {
-          const prev = getClientReceipt(signedUser, cMsgId);
-          if (prev) {
-            sendBestEffort(ws, prev);
-            return;
-          }
-        }
-
-        if (msg.type === 'ping') {
-          sendBestEffort(ws, { type: 'pong' });
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callStart') {
-          const to = typeof msg.to === 'string' ? msg.to : null;
-          if (!to) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, false, 'BAD_TO');
-            return;
-          }
-          const callee = signedUsers.get(to);
-          if (!callee || !anySignedSocketOpen(to)) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'offline' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          // Prevent starting a parallel call from another session.
-          if (signedUser.roomId) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'busy' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          // Authorization: only allow calling users who share a signed chat.
-          // Introvert mode: only allow calls if the users share a *personal* chat.
-          let authRow = null;
-          try {
-            const auth = await query(
-              `SELECT
-                 COALESCE((SELECT introvert_mode FROM users WHERE id::text = $2), FALSE) AS introvert,
-                 EXISTS(
-                   SELECT 1
-                   FROM chat_members cm1
-                   INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
-                   WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
-                   LIMIT 1
-                 ) AS has_any,
-                 EXISTS(
-                   SELECT 1
-                   FROM chats c
-                   INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
-                   INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
-                   WHERE c.chat_type = 'personal'
-                   LIMIT 1
-                 ) AS has_personal`,
-              [signedUser.id, String(to)],
-            );
-            authRow = auth?.rows?.[0] ?? null;
-          } catch (err) {
-            const msgText = typeof err?.message === 'string' ? err.message : '';
-            const mayBeMissingIntrovertColumn = msgText.includes('introvert_mode');
-
-            if (mayBeMissingIntrovertColumn) {
-              // Backward-compatible fallback: if the DB schema doesn't have introvert_mode yet,
-              // skip introvert enforcement (feature not available) but still enforce shared-chat auth.
-              try {
-                const auth = await query(
-                  `SELECT
-                     EXISTS(
-                       SELECT 1
-                       FROM chat_members cm1
-                       INNER JOIN chat_members cm2 ON cm1.chat_id = cm2.chat_id
-                       WHERE cm1.user_id::text = $1 AND cm2.user_id::text = $2
-                       LIMIT 1
-                     ) AS has_any,
-                     EXISTS(
-                       SELECT 1
-                       FROM chats c
-                       INNER JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id::text = $1
-                       INNER JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id::text = $2
-                       WHERE c.chat_type = 'personal'
-                       LIMIT 1
-                     ) AS has_personal`,
-                  [signedUser.id, String(to)],
-                );
-                const row = auth?.rows?.[0] ?? null;
-                authRow = row ? { ...row, introvert: false } : null;
-              } catch (err2) {
-                debugError('[signed callStart] auth query failed (fallback)', {
-                  from: signedUser?.id,
-                  to,
-                  err: err2,
-                });
-                sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
-                if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-                return;
-              }
-            } else {
-              debugError('[signed callStart] auth query failed', {
-                from: signedUser?.id,
-                to,
-                err,
-              });
-              sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
-              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-              return;
-            }
-          }
-
-          if (!authRow) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'server' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          const hasAny = Boolean(authRow?.has_any);
-          const hasPersonal = Boolean(authRow?.has_personal);
-          const introvert = Boolean(authRow?.introvert);
-
-          if (!hasAny) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'not_allowed' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          if (introvert && !hasPersonal) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'introvert' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          // Busy => allow join flow.
-          if (callee.roomId) {
-            sendBestEffort(ws, { type: 'callStartResult', ok: false, reason: 'busy' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          const rid = makeId();
-          const room = ensureSignedRoom(rid);
-          room.members.add(signedUser.id);
-          room.members.add(callee.id);
-          room.ownerId = signedUser.id;
-          signedUser.roomId = rid;
-          signedUser.controllingSessionId = String(sid);
-          callee.roomId = rid;
-          callee.controllingSessionId = null;
-
-          sendBestEffort(ws, { type: 'callStartResult', ok: true, roomId: rid });
-          sendToUserAll(callee.id, { type: 'incomingCall', from: signedUser.id, fromName: signedUser.name, roomId: rid });
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callAccept') {
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            sendBestEffort(ws, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'accepted_elsewhere' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const from = typeof msg.from === 'string' ? msg.from : null;
-          const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
-          const caller = from ? signedUsers.get(from) : null;
-          if (!caller) {
-            signedUser.roomId = null;
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, false, 'NOT_FOUND');
-            return;
-          }
-
-          if (!rid || caller.roomId !== rid || signedUser.roomId !== rid) {
-            signedUser.roomId = null;
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, false, 'ROOM_MISMATCH');
-            return;
-          }
-
-          const room = getSignedRoom(rid);
-          if (!room) {
-            signedUser.roomId = null;
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, false, 'ROOM_MISSING');
-            return;
-          }
-
-          // This session becomes the call-controlling session for the callee.
-          signedUser.controllingSessionId = String(sid);
-          sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'accepted_elsewhere' });
-
-          const peer = { id: signedUser.id, name: signedUser.name };
-          for (const memberId of room.members) {
-            if (memberId === signedUser.id) continue;
-            sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
-          }
-
-          const peers = Array.from(room.members)
-            .filter((id) => id !== signedUser.id)
-            .map((id) => {
-              const u2 = signedUsers.get(id);
-              return u2 ? { id: u2.id, name: u2.name } : null;
-            })
-            .filter(Boolean);
-
-          sendBestEffort(ws, { type: 'roomPeers', roomId: rid, peers });
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callReject') {
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            sendBestEffort(ws, { type: 'incomingCallCancelled', roomId: typeof msg.roomId === 'string' ? msg.roomId : null, reason: 'rejected_elsewhere' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const from = typeof msg.from === 'string' ? msg.from : null;
-          const rid = typeof msg.roomId === 'string' ? msg.roomId : signedUser.roomId;
-          const caller = from ? signedUsers.get(from) : null;
-          if (caller) sendToUserCallSession(caller.id, { type: 'callRejected', reason: 'rejected' });
-          if (rid) {
-            // Clear incoming call UI on other sessions.
-            sendToUserAllExceptSession(signedUser.id, sid, { type: 'incomingCallCancelled', roomId: rid, reason: 'rejected' });
-
-            // If the call wasn't accepted yet, end the room without emitting callEnded.
-            const room = getSignedRoom(rid);
-            if (room && room.members.size === 2) {
-              for (const memberId of room.members) {
-                const u = signedUsers.get(memberId);
-                if (u && u.roomId === rid) {
-                  u.roomId = null;
-                  u.controllingSessionId = null;
-                }
-              }
-
-              // Reject any pending joiners.
-              if (Array.isArray(room.joinQueue)) {
-                for (const jid of room.joinQueue) {
-                  const u = signedUsers.get(jid);
-                  const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
-                  if (u) {
-                    u.joinPendingRoomId = null;
-                    u.joinPendingSessionId = null;
-                  }
-                  if (joinSid) sendToUserSession(jid, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
-                  else sendToUserAll(jid, { type: 'callJoinResult', ok: false, reason: 'ended' });
-                }
-              }
-              if (room.joinActive) {
-                const u = signedUsers.get(room.joinActive);
-                const joinSid = typeof u?.joinPendingSessionId === 'string' ? u.joinPendingSessionId : null;
-                if (u) {
-                  u.joinPendingRoomId = null;
-                  u.joinPendingSessionId = null;
-                }
-                if (joinSid) sendToUserSession(room.joinActive, joinSid, { type: 'callJoinResult', ok: false, reason: 'ended' });
-                else sendToUserAll(room.joinActive, { type: 'callJoinResult', ok: false, reason: 'ended' });
-              }
-
-              signedRooms.delete(rid);
-            }
-          }
-
-          signedUser.roomId = null;
-          signedUser.controllingSessionId = null;
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callHangup') {
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          const rid = signedUser.roomId;
-          const room = rid ? getSignedRoom(rid) : null;
-          if (rid && room && room.members.size === 2) {
-            const otherId = Array.from(room.members).find((id) => id !== signedUser.id) ?? null;
-            const other = otherId ? signedUsers.get(otherId) : null;
-            const otherAccepted = Boolean(other?.controllingSessionId);
-            if (otherId && !otherAccepted) {
-              // Caller cancelled before callee accepted.
-              sendToUserAll(otherId, { type: 'incomingCallCancelled', roomId: rid, reason: 'hangup' });
-              for (const memberId of room.members) {
-                const u = signedUsers.get(memberId);
-                if (u && u.roomId === rid) {
-                  u.roomId = null;
-                  u.controllingSessionId = null;
-                }
-              }
-              signedRooms.delete(rid);
-              if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-              return;
-            }
-          }
-
-          signedLeaveRoom(signedUser);
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callJoinRequest') {
-          const to = typeof msg.to === 'string' ? msg.to : null;
-          const target = to ? signedUsers.get(to) : null;
-          if (!target || !target.roomId) {
-            sendBestEffort(ws, { type: 'callJoinResult', ok: false, reason: 'not_in_call' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const room = getSignedRoom(target.roomId);
-          if (!room) {
-            sendBestEffort(ws, { type: 'callJoinResult', ok: false, reason: 'ended' });
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          signedUser.joinPendingRoomId = room.id;
-          signedUser.joinPendingSessionId = String(sid);
-          if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
-          room.joinQueue.push(signedUser.id);
-          sendBestEffort(ws, { type: 'callJoinPending', roomId: room.id, toName: target.name });
-          signedPumpJoinQueue(room);
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callJoinCancel') {
-          if (signedUser.joinPendingSessionId && String(signedUser.joinPendingSessionId) !== String(sid)) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const rid = signedUser.joinPendingRoomId;
-          if (rid) {
-            const room = getSignedRoom(rid);
-            if (room) signedRemoveJoinRequestFromRoom(room, signedUser.id);
-            signedPumpJoinQueue(room);
-          }
-          signedUser.joinPendingRoomId = null;
-          signedUser.joinPendingSessionId = null;
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callJoinReject') {
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const from = typeof msg.from === 'string' ? msg.from : null;
-          const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
-          const requester = from ? signedUsers.get(from) : null;
-          const room = rid ? getSignedRoom(rid) : null;
-          const joinSid = typeof requester?.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : null;
-          if (requester) {
-            requester.joinPendingRoomId = null;
-            requester.joinPendingSessionId = null;
-          }
-          if (room) signedRemoveJoinRequestFromRoom(room, from);
-          if (from) {
-            if (joinSid) sendToUserSession(from, joinSid, { type: 'callJoinResult', ok: false, reason: 'rejected' });
-            else sendToUserAll(from, { type: 'callJoinResult', ok: false, reason: 'rejected' });
-          }
-          signedPumpJoinQueue(room);
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'callJoinAccept') {
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          const from = typeof msg.from === 'string' ? msg.from : null;
-          const rid = typeof msg.roomId === 'string' ? msg.roomId : null;
-          const requester = from ? signedUsers.get(from) : null;
-          const room = rid ? getSignedRoom(rid) : null;
-          if (!requester || !room) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          if (room.joinActive !== requester.id) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-
-          room.members.add(requester.id);
-          requester.roomId = rid;
-          requester.joinPendingRoomId = null;
-          requester.controllingSessionId = typeof requester.joinPendingSessionId === 'string' ? requester.joinPendingSessionId : requester.controllingSessionId;
-          requester.joinPendingSessionId = null;
-
-          const peer = { id: requester.id, name: requester.name };
-          for (const memberId of room.members) {
-            if (memberId === requester.id) continue;
-            sendToUserCallSession(memberId, { type: 'roomPeerJoined', roomId: rid, peer });
-          }
-
-          const peers = Array.from(room.members)
-            .filter((id) => id !== requester.id)
-            .map((id) => {
-              const u2 = signedUsers.get(id);
-              return u2 ? { id: u2.id, name: u2.name } : null;
-            })
-            .filter(Boolean);
-
-          sendToUserCallSession(requester.id, { type: 'roomPeers', roomId: rid, peers });
-          sendToUserCallSession(requester.id, { type: 'callJoinResult', ok: true });
-
-          room.joinActive = null;
-          signedPumpJoinQueue(room);
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (msg.type === 'signal') {
-          const to = typeof msg.to === 'string' ? msg.to : null;
-          const payload = msg.payload;
-          if (!to) return;
-          const peer = signedUsers.get(to);
-          if (!peer) return;
-          if (!signedUser.roomId || signedUser.roomId !== peer.roomId) return;
-          if (signedUser.controllingSessionId && String(signedUser.controllingSessionId) !== String(sid)) {
-            if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-            return;
-          }
-          sendToUserCallSession(peer.id, { type: 'signal', from: signedUser.id, fromName: signedUser.name, payload });
-          if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, true);
-          return;
-        }
-
-        if (cMsgId) sendClientReceipt(signedUser, ws, cMsgId, false, 'UNKNOWN_TYPE');
+        const msg = parseIncomingControlMessage(data);
+        if (!msg) return;
+        await handleSignedControlMessage(ws, signedUser, sid, msg);
       });
 
       ws.on('close', () => {
-        removeSignedSocket(uid, sid, ws);
-
-        const curUser = signedUsers.get(uid);
-
-        // If the controlling call session for this user disappeared, treat as leaving the call.
-        if (curUser?.controllingSessionId && String(curUser.controllingSessionId) === String(sid)) {
-          if (curUser.roomId) signedLeaveRoom(curUser);
-          curUser.controllingSessionId = null;
-        }
-
-        // If a pending join request session disappeared, cancel the join request.
-        if (curUser?.joinPendingSessionId && String(curUser.joinPendingSessionId) === String(sid)) {
-          const rid = curUser.joinPendingRoomId;
-          if (rid) {
-            const room = getSignedRoom(rid);
-            if (room) {
-              signedRemoveJoinRequestFromRoom(room, curUser.id);
-              signedPumpJoinQueue(room);
-            }
-          }
-          curUser.joinPendingRoomId = null;
-          curUser.joinPendingSessionId = null;
-        }
-
-        // If this was the last live session for the user, clear RAM-only state.
-        const stillHasSockets = signedSockets.has(String(uid));
-        if (!stillHasSockets) {
-          if (curUser?.roomId) signedLeaveRoom(curUser);
-          signedUsers.delete(uid);
-        }
+        handleSignedSessionClose(uid, sid, ws);
       });
 
       ws.on('error', () => {
@@ -2220,24 +2602,26 @@ wss.on('connection', async (ws, req) => {
 
 // Terminate dead signed sockets (e.g. laptop sleep / mobile drop) using server
 // ping/pong heartbeat. This avoids disconnecting healthy-but-idle clients.
-setInterval(() => {
-  for (const m of signedSockets.values()) {
-    for (const ws of m.values()) {
-      try {
-        if (!ws || ws.readyState !== 1) continue;
-        if (ws.isAlive === false) {
-          if (typeof ws.terminate === 'function') ws.terminate();
-          else ws.close();
-          continue;
+if (WS_FALLBACK_ENABLED) {
+  setInterval(() => {
+    for (const m of signedTransportSessions.values()) {
+      for (const ws of m.values()) {
+        try {
+          if (!ws || ws.readyState !== 1) continue;
+          if (ws.isAlive === false) {
+            if (typeof ws.terminate === 'function') ws.terminate();
+            else ws.close();
+            continue;
+          }
+          ws.isAlive = false;
+          if (typeof ws.ping === 'function') ws.ping();
+        } catch {
+          // ignore
         }
-        ws.isAlive = false;
-        if (typeof ws.ping === 'function') ws.ping();
-      } catch {
-        // ignore
       }
     }
-  }
-}, Math.max(5000, WS_HEARTBEAT_MS));
+  }, Math.max(5000, WS_HEARTBEAT_MS));
+}
 
 // Initialize database connection
 async function start() {
@@ -2318,6 +2702,17 @@ async function start() {
         void run();
       }, interval);
     }, initialDelay);
+  }
+
+  try {
+    const wtServer = await startWebTransportServer();
+    if (!wtServer) {
+      process.exit(1);
+      return;
+    }
+  } catch {
+    process.exit(1);
+    return;
   }
 
   server.listen(PORT, HOST, () => {

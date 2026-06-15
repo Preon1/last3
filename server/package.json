@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@cloudflare/voprf-ts": "^1.0.0",
+    "@fails-components/webtransport": "^1.6.3",
+    "@fails-components/webtransport-transport-http3-quiche": "^1.6.3",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "pg": "^8.13.1",

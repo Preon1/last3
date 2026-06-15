@@ -43,16 +43,6 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-
-      // The backend WebSocket server listens on the root path ('/').
-      // In dev we expose it as '/ws' so Vite can proxy it cleanly.
-      '/ws': {
-        target: (process.env.VITE_BACKEND_TARGET ?? 'https://localhost:8443').replace(/^http/, 'ws'),
-        ws: true,
-        changeOrigin: true,
-        secure: false,
-        rewrite: (p) => p.replace(/^\/ws/, ''),
-      },
     },
   },
 })

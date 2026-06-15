@@ -2,9 +2,9 @@
 
 ## 1) Project Purpose
 
-Last (previously LRCom Last Resort Communication) is a privacy-first, HTTPS-only communication app with:
-- Signed text chat (end-to-end encrypted payloads, client-managed keys).
-- Browser voice calls over WebRTC.
+Last (previously LRCom Last Resort Communication) is a privacy-first, communication app with:
+- Text chat (end-to-end encrypted payloads, client-managed keys).
+- Voice calls over WebRTC.
 - Optional Web Push for offline message notifications.
 
 Core privacy model:
@@ -16,13 +16,15 @@ Core privacy model:
 
 Monorepo structure:
 - client/: Vue 3 + TypeScript + Vite + Pinia SPA.
-- server/: Node.js (ESM) + Express + ws + PostgreSQL.
+- server/: Node.js (ESM) + Express + WebTransport (HTTP/3) + PostgreSQL.
 - docker-compose.yml: app + Postgres + coturn.
 - docker-compose.prod.yml + Caddyfile: production reverse proxy with TLS termination and rate limits.
 
 Important implementation points:
 - App serves over HTTPS only (microphone/WebRTC requirement).
 - SPA build is produced in client/dist and served by the Node server.
+- Signed realtime is hard-cut to WebTransport (no WebSocket fallback).
+- Default WebTransport endpoint path is /wt.
 - Caddy is optional for production edge TLS and request rate-limiting.
 
 ## 3) Main Functional Areas
@@ -46,10 +48,10 @@ Important implementation points:
 	- chat listing, creation, rename, membership changes
 	- message send/update/delete/read/unread
 	- account settings and account deletion
-- Server sends realtime events over signed WebSocket for chat/message updates.
+- Server sends realtime events over WebTransport (reliable control stream + datagram lane).
 
 ### 3.4 Voice Calling
-- WebRTC media is P2P; server handles signaling via ws.
+- WebRTC media is P2P; server handles signaling via WebTransport reliable control messages.
 - In-memory signed call rooms with:
 	- call start/accept/reject/hangup
 	- join request queue for busy calls
@@ -81,9 +83,9 @@ Important implementation points:
 - Use strict security headers and tight CSP.
 
 ### 4.2 Realtime Reliability Pattern
-- Two WS send modes:
-	- best-effort for non-critical events.
-	- reliable (msgId + ack + retry loop) for control-plane events like forced logout.
+- Two transport send modes:
+	- datagram best-effort for heartbeat/presence events.
+	- reliable control stream (msgId + ack + retry loop) for control-plane events like forced logout.
 - Client message id receipts are cached for idempotency/replay-safe handling.
 
 ### 4.3 Explicit Input Validation
@@ -92,7 +94,7 @@ Important implementation points:
 - Return explicit HTTP statuses for forbidden/not_found/bad_request cases.
 
 ### 4.4 Clear Separation of Responsibilities
-- server/index.js orchestrates API + WS flows.
+- server/index.js orchestrates API + WebTransport flows.
 - server/signedDb.js contains signed chat/message data logic.
 - server/signedSession.js owns in-memory token/session handling.
 - client/stores/signed.ts is the central signed app state coordinator.
@@ -106,6 +108,8 @@ Important implementation points:
 ## 5) Coding Rules for Future AI Agents
 
 Follow these project rules when changing code.
+
+0. Do not bother with DB migrations, project is under development. Just update the initial DB structure.
 
 1. Preserve privacy policy behavior.
 - Do not add verbose logging, analytics, or tracking.
@@ -128,8 +132,8 @@ Follow these project rules when changing code.
 - Use existing error-shape conventions ({ error: '...' } / { success: true, ... }).
 
 6. Keep realtime semantics backward-compatible.
-- New WS message types should be additive.
-- Preserve existing ack/msgId/receipt behaviors.
+- New realtime message types should be additive.
+- Preserve existing ack/msgId/receipt behaviors across reliable stream messaging.
 - Be careful with multi-session control paths.
 
 7. Enforce authorization at data boundaries.
@@ -156,11 +160,13 @@ Follow these project rules when changing code.
 - Do not break existing endpoint contracts without coordinated client updates.
 - For DB changes, add migration scripts and keep old data readable.
 
+13. Do not use "signed" word in any naming unless absolutely nessesary, like it means some sort of crypto signature. Its a legacy word in a project, since it wasn't utilizing user registration before.
+
 ## 6) Quick Agent Onboarding Checklist
 
 Before coding:
 - Read server/index.js, server/signedDb.js, client/src/stores/signed.ts, client/src/stores/call.ts.
-- Confirm if change touches security/privacy, auth/session, ws signaling, or DB schema.
+- Confirm if change touches security/privacy, auth/session, WebTransport signaling, or DB schema.
 
 During coding:
 - Keep modifications minimal and scoped.
@@ -169,13 +175,29 @@ During coding:
 
 Before finishing:
 - Build client: npm run build (client/).
-- Ensure changed endpoints and WS message flows still match client usage.
+- Ensure changed endpoints and realtime message flows still match client usage.
 - Re-check for accidental logs or plaintext-sensitive data exposure.
 
 ## 7) High-Risk Areas (Handle Carefully)
 
-- WebSocket call signaling state machine and multi-session control.
+- WebTransport call signaling state machine and multi-session control.
 - Session rotation/eviction/forced logout flows.
 - Message visibility/read/unread semantics and member boundaries.
 - Account deletion and encrypted envelope scrubbing logic.
 - Push queue behavior and stale subscription cleanup.
+
+## 8) Current Transport/Env Defaults
+
+- WebTransport path: /wt
+- Local default endpoint: https://localhost:8444/wt
+- Runtime defaults in app container:
+	- WEBTRANSPORT_ENABLED=1
+	- WEBTRANSPORT_HOST=0.0.0.0
+	- WEBTRANSPORT_PORT=8444
+	- WEBTRANSPORT_PATH=/wt
+- Local compose publishes:
+	- 8443/tcp (app HTTPS)
+	- 8444/udp (WebTransport)
+- Prod compose also publishes:
+	- 443/udp (HTTP/3 edge on Caddy)
+	- 8444/udp (direct WebTransport endpoint)

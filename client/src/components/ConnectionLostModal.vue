@@ -18,6 +18,12 @@ const updateBody = computed(() => {
   return String(t('signed.serverUpdate.bodyFromTo', { from, to }))
 })
 
+const connectionLostBody = computed(() => {
+  const reason = String(signed.transportFatalReason || '').trim()
+  if (!reason) return String(t('signed.connectionLost.body'))
+  return `${String(t('signed.connectionLost.body'))}\n\n${reason}`
+})
+
 function onReload() {
   void hardReloadApp()
 }
@@ -52,7 +58,7 @@ function onLogout() {
     <div class="modal-card">
       <div class="modal-title">{{ isServerUpdate ? t('signed.serverUpdate.title') : t('signed.connectionLost.title') }}</div>
       <div class="modal-body">
-        {{ isServerUpdate ? updateBody : t('signed.connectionLost.body') }}
+        {{ isServerUpdate ? updateBody : connectionLostBody }}
       </div>
 
       <div class="modal-actions">

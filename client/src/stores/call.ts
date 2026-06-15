@@ -65,7 +65,7 @@ export const useCallStore = defineStore('call', () => {
   }
 
   function send(obj: unknown) {
-    if (isSignedActive()) signed.sendWs(obj)
+    if (isSignedActive()) signed.sendReliableMessage(obj)
   }
 
   const roomId = ref<string | null>(null)

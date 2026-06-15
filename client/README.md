@@ -16,13 +16,14 @@ This folder contains the new client-side SPA that will replace `server/public` o
 ### Backend proxy
 
 - HTTP endpoints (`/api/*`, `/turn`, `/healthz`) are proxied to the backend.
-- WebSocket signaling is proxied via `/ws` in dev.
-	- The backend WS endpoint is `/`.
-	- In dev, the client connects to `ws(s)://<vite-host>/ws` and Vite rewrites/proxies it.
+- Signed realtime uses browser WebTransport directly (not via Vite proxy).
+	- Default endpoint: `https://localhost:8444/wt`
+	- Override via `VITE_WEBTRANSPORT_URL`.
 
 If your backend is not on `https://localhost:8443`, override in `client/.env.development`:
 
 - `VITE_BACKEND_TARGET=https://your-host:8443`
+- `VITE_WEBTRANSPORT_URL=https://your-host:8444/wt`
 
 ## Build
 

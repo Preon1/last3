@@ -11,6 +11,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
     environment:
       # Set these in your .env on the server.
       - LRCOM_DOMAIN=${LRCOM_DOMAIN}
@@ -24,10 +25,16 @@ services:
 
   # App: keep it internal; Caddy exposes it publicly.
   lrcom:
+    build:
+      args:
+        - VITE_WEBTRANSPORT_URL=${VITE_WEBTRANSPORT_URL:-https://${LRCOM_DOMAIN}:8444/wt}
+        - VITE_REQUIRE_WEBTRANSPORT=${VITE_REQUIRE_WEBTRANSPORT:-1}
     restart: unless-stopped
-    ports: []
+    ports:
+      - "${WEBTRANSPORT_PORT:-8444}:${WEBTRANSPORT_PORT:-8444}/udp"
     expose:
       - "8443"
+      - "${WEBTRANSPORT_PORT:-8444}/udp"
 
   # TURN: still needs to be reachable by clients.
   coturn:

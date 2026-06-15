@@ -1,10 +1,15 @@
 services:
   lrcom:
-    build: .
-    logging:
-      driver: none
+    build:
+      context: .
+      args:
+        - VITE_WEBTRANSPORT_URL=${VITE_WEBTRANSPORT_URL:-https://localhost:8444/wt}
+        - VITE_REQUIRE_WEBTRANSPORT=${VITE_REQUIRE_WEBTRANSPORT:-1}
+    # logging:
+    #   driver: none
     ports:
       - "8443:8443"
+      - "${WEBTRANSPORT_PORT:-8444}:${WEBTRANSPORT_PORT:-8444}/udp"
     environment:
       # Visual app name (changes header + setup title only)
       - APP_NAME=${LRCOM_APP_NAME:-Last}
@@ -13,6 +18,11 @@ services:
       # If you mount certs, set TLS_KEY_PATH/TLS_CERT_PATH accordingly.
       - HOST=0.0.0.0
       - PORT=8443
+      - WEBTRANSPORT_ENABLED=${WEBTRANSPORT_ENABLED:-1}
+      - WEBTRANSPORT_HOST=0.0.0.0
+      - WEBTRANSPORT_PORT=${WEBTRANSPORT_PORT:-8444}
+      - WEBTRANSPORT_PATH=/wt
+      - WEBTRANSPORT_SECRET=${WEBTRANSPORT_SECRET:-}
 
       # HTTPS: auto-generate a self-signed certificate in the container.
       # Add your LAN IP to TLS_SANS so browsers accept it for that address.
@@ -63,8 +73,10 @@ services:
   postgres:
     image: postgres:18.1-alpine
     restart: unless-stopped
-    logging:
-      driver: none
+    ports:
+      - "5432:5432"
+    # logging:
+    #   driver: none
     command:
       - postgres
       - -c
@@ -99,8 +111,8 @@ services:
   coturn:
     image: coturn/coturn:4.6.2
     restart: unless-stopped
-    logging:
-      driver: none
+    # logging:
+    #   driver: none
     environment:
       - LRCOM_TURN_EXTERNAL_IP=${LRCOM_TURN_EXTERNAL_IP:-}
     command:

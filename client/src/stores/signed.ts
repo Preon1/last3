@@ -32,6 +32,7 @@ import { LocalEntity, localData } from '../utils/localData'
 import { APP_VERSION as CLIENT_APP_VERSION } from '../appVersion'
 import { useToastStore } from './toast'
 import { voprfNameToken } from '../utils/voprfNames'
+import { SignedTransportClient } from '../utils/signedTransport'
 
 export type SignedChat = {
   id: string
@@ -92,9 +93,25 @@ function apiBase() {
   return ''
 }
 
-function wsSignedUrl(token: string) {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/signed?token=${encodeURIComponent(token)}`
+function transportSignedUrl(token: string) {
+  const configured = String(import.meta.env.VITE_WEBTRANSPORT_URL ?? '').trim()
+
+  const base = configured ? new URL(configured, location.origin) : new URL(location.origin)
+
+  if (!configured) {
+    if (location.protocol === 'https:') {
+      const p = Number(location.port || 443)
+      if (Number.isFinite(p) && p > 0) base.port = String(p + 1)
+      else base.port = '8444'
+    }
+  }
+
+  base.protocol = 'https:'
+  base.pathname = '/signed'
+  base.search = ''
+  base.hash = ''
+  base.searchParams.set('token', token)
+  return base.toString()
 }
 
 // NOTE: All locally persisted entities must be accessed via LocalData.
@@ -288,12 +305,14 @@ export const useSignedStore = defineStore('signed', () => {
 
   const pendingAddUsername = ref<string>('')
 
-  const ws = ref<WebSocket | null>(null)
+  const ws = ref<{ readyState: number } | null>(null)
   const wsShouldReconnect = ref(false)
   const wsReconnectAttempt = ref(0)
   const wsPermanentlyFailed = ref(false)
+  const transportFatalReason = ref<string>('')
   let wsReconnectTimer: number | null = null
   let wsGeneration = 0
+  const transportClient = new SignedTransportClient()
 
   // App version mismatch detection (server updates while client is open)
   const clientVersion = ref<string>(String(CLIENT_APP_VERSION))
@@ -328,6 +347,7 @@ export const useSignedStore = defineStore('signed', () => {
   const onlineByUserId = ref<Record<string, boolean>>({})
   const busyByUserId = ref<Record<string, boolean>>({})
   let presenceTimer: number | null = null
+  const PRESENCE_HEARTBEAT_MS = 10000
 
   const signedIn = computed(() => Boolean(token.value && userId.value && username.value))
   const locked = computed(() => Boolean(signedIn.value && !privateKey.value))
@@ -359,6 +379,10 @@ export const useSignedStore = defineStore('signed', () => {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         void syncAppStateToServiceWorker()
+        if (document.visibilityState === 'visible') sendPresenceHeartbeat()
+      })
+      window.addEventListener('focus', () => {
+        sendPresenceHeartbeat()
       })
     }
   } catch {
@@ -449,7 +473,7 @@ export const useSignedStore = defineStore('signed', () => {
   watch(
     () => signedReadyForPresence.value,
     (ready) => {
-      if (ready) startPresencePolling()
+      if (ready) startPresenceHeartbeat()
       else clearPresenceTimer()
     },
     { immediate: true },
@@ -706,12 +730,7 @@ export const useSignedStore = defineStore('signed', () => {
     }
   }
 
-  async function refreshPresence() {
-
-    if (!token.value || !userId.value) return
-
-    // Always send a presence request, even if there are no contacts.
-    // If there are no contacts, send an empty list to act as a keepalive.
+  function getPresenceProbeList() {
     const list: string[] = []
 
     if (view.value === 'chat' && activeChatId.value) {
@@ -727,43 +746,22 @@ export const useSignedStore = defineStore('signed', () => {
       list.push(...Array.from(ids))
     }
 
-    // Always send the request, even if list is empty.
-
-    try {
-      const j = await fetchJson('/api/signed/presence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ userIds: list }),
-      })
-
-      // Server version should be present on every response.
-      applyServerVersion((j as any)?.serverVersion)
-
-      const online = new Set<string>(Array.isArray(j?.onlineUserIds) ? j.onlineUserIds.map(String) : [])
-      const busy = new Set<string>(Array.isArray(j?.busyUserIds) ? j.busyUserIds.map(String) : [])
-      const next: Record<string, boolean> = {}
-      const nextBusy: Record<string, boolean> = {}
-      for (const id of list) next[id] = online.has(id)
-      for (const id of list) nextBusy[id] = busy.has(id)
-      onlineByUserId.value = next
-      busyByUserId.value = nextBusy
-    } catch {
-      // ignore
-    }
-    // If list is empty, still update state to empty objects (no one online/busy)
-    if (!list.length) {
-      onlineByUserId.value = {}
-      busyByUserId.value = {}
-    }
+    return list
   }
 
-  function startPresencePolling() {
+  function sendPresenceHeartbeat() {
+    if (!token.value || !userId.value) return
+    const list = getPresenceProbeList()
+    sendDatagram({ type: 'presenceHeartbeat', userIds: list })
+  }
+
+  function startPresenceHeartbeat() {
     clearPresenceTimer()
-    // Polling keeps this simple and avoids leaking global online lists.
+    // Best-effort heartbeat for presence snapshots.
     presenceTimer = window.setInterval(() => {
-      void refreshPresence()
-    }, 10000)
-    void refreshPresence()
+      sendPresenceHeartbeat()
+    }, PRESENCE_HEARTBEAT_MS)
+    sendPresenceHeartbeat()
   }
 
   function getChatOnlineState(chatId: string): 'online' | 'offline' | 'busy' | null {
@@ -1130,7 +1128,7 @@ export const useSignedStore = defineStore('signed', () => {
       }
 
       try {
-        void refreshPresence()
+        sendPresenceHeartbeat()
       } catch {
         // ignore
       }
@@ -1323,13 +1321,16 @@ export const useSignedStore = defineStore('signed', () => {
     disconnectHandlers.push(handler)
   }
 
+  function sendReliableMessage(obj: unknown) {
+    transportClient.sendJson(obj)
+  }
+
+  function sendDatagram(obj: unknown) {
+    transportClient.sendDatagramJson(obj)
+  }
+
   function sendWs(obj: unknown) {
-    try {
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return
-      ws.value.send(JSON.stringify(obj))
-    } catch {
-      // ignore
-    }
+    sendReliableMessage(obj)
   }
 
   let wsTokenForConnection: string | null = null
@@ -1350,9 +1351,20 @@ export const useSignedStore = defineStore('signed', () => {
     const currentToken = token.value
     if (!currentToken) return
 
+    const requireWebTransport = String(import.meta.env.VITE_REQUIRE_WEBTRANSPORT ?? '1') !== '0'
+    const hasWebTransport = typeof window !== 'undefined' && typeof (window as any).WebTransport === 'function'
+    if (requireWebTransport && !hasWebTransport) {
+      wsShouldReconnect.value = false
+      wsPermanentlyFailed.value = true
+      transportFatalReason.value = 'WebTransport is not supported in this browser/environment.'
+      clearWsReconnectTimer()
+      clearPresenceTimer()
+      return
+    }
+
     // Idempotency: avoid tearing down a healthy socket on focus/visibility events.
     // Reconnect is still triggered when token changes (e.g. refresh) or when the socket is closed.
-    const cur = ws.value
+    const cur = transportClient.getSocket()
     if (
       cur &&
       (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING) &&
@@ -1367,249 +1379,144 @@ export const useSignedStore = defineStore('signed', () => {
 
     wsShouldReconnect.value = true
     wsPermanentlyFailed.value = false
+    transportFatalReason.value = ''
     clearWsReconnectTimer()
     disconnectWs()
     wsTokenForConnection = currentToken
 
-    const sock = new WebSocket(wsSignedUrl(currentToken))
-    ws.value = sock
-
-    sock.addEventListener('open', () => {
-      if (gen !== wsGeneration) return
-      wsReconnectAttempt.value = 0
-      // Presence polling is disabled after permanent WS failure.
-      if (!wsPermanentlyFailed.value) startPresencePolling()
-      void syncAfterConnect()
-      void trySyncPushSubscription()
-    })
-
-    sock.addEventListener('close', () => {
-      if (gen !== wsGeneration) return
-      ws.value = null
-      clearPresenceTimer()
-      for (const h of disconnectHandlers) {
-        try {
-          h()
-        } catch {
-          // ignore
-        }
-      }
-      scheduleWsReconnect()
-    })
-
-    sock.addEventListener('error', () => {
-      if (gen !== wsGeneration) return
-      // Some browsers fire error without a close; force close and let the close handler schedule reconnect.
-      try {
-        sock.close()
-      } catch {
-        // ignore
-      }
-    })
-
-    sock.addEventListener('message', async (ev) => {
-      let obj: any
-      try {
-        obj = JSON.parse(String(ev.data))
-      } catch {
-        return
-      }
-      if (!obj || typeof obj.type !== 'string') return
-
-      if (obj.type === 'signedForceLogout') {
-        const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
-        if (msgId) sendWs({ type: 'ack', msgId })
-
-        const wipeLocalKeys = Boolean((obj as any)?.wipeLocalKeys)
-        try {
-          if (wipeLocalKeys) {
-            clearAllKeyMaterial()
-            storeLastUsername('')
-            logout(true)
-          } else {
-            logout(false)
+    const sock = transportClient.connect(transportSignedUrl(currentToken), {
+      onOpen: () => {
+        if (gen !== wsGeneration) return
+        wsReconnectAttempt.value = 0
+        // Presence heartbeats are disabled after permanent realtime failure.
+        if (!wsPermanentlyFailed.value) startPresenceHeartbeat()
+        void syncAfterConnect()
+        void trySyncPushSubscription()
+      },
+      onClose: () => {
+        if (gen !== wsGeneration) return
+        ws.value = null
+        clearPresenceTimer()
+        for (const h of disconnectHandlers) {
+          try {
+            h()
+          } catch {
+            // ignore
           }
+        }
+        scheduleWsReconnect()
+      },
+      onError: () => {
+        if (gen !== wsGeneration) return
+        // Some browsers fire error without a close; force close and let the close handler schedule reconnect.
+        transportClient.disconnect(true)
+      },
+      onMessage: async (raw) => {
+        let obj: any
+        try {
+          obj = JSON.parse(String(raw))
         } catch {
-          // ignore
-        }
-        return
-      }
-
-      if (obj.type === 'signedAccountUpdated') {
-        const nextHidden = typeof (obj as any)?.hiddenMode === 'boolean' ? Boolean((obj as any).hiddenMode) : null
-        const nextIntrovert = typeof (obj as any)?.introvertMode === 'boolean' ? Boolean((obj as any).introvertMode) : null
-
-        if (nextHidden != null) hiddenMode.value = nextHidden
-        if (nextIntrovert != null) introvertMode.value = nextIntrovert
-
-        if (token.value && userId.value && username.value) {
-          storeSession(
-            { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
-            token.value,
-            expiresAtMs.value,
-          )
-        }
-        return
-      }
-
-      if (obj.type === 'signedMessage') {
-        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
-        const id = typeof obj.id === 'string' ? obj.id : null
-        const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
-        const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
-        const signature = typeof obj.signature === 'string' ? obj.signature : ''
-        if (!chatId || !id || !senderId || !encryptedData) return
-
-        const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
-        if (verification === 'invalid') {
-          toast.push({
-            title: 'Unverified message',
-            message: 'Blocked a message with an invalid signature.',
-            variant: 'error',
-            timeoutMs: 8000,
-          })
           return
         }
+        if (!obj || typeof obj.type !== 'string') return
 
-        if (privateKey.value && userId.value) {
+        if (obj.type === 'signedForceLogout') {
+          const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
+          if (msgId) sendReliableMessage({ type: 'ack', msgId })
+
+          const wipeLocalKeys = Boolean((obj as any)?.wipeLocalKeys)
           try {
-            const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
-            const displayName = await resolveDisplayNameInChat(chatId, senderId)
-            const msg: SignedDecryptedMessage = {
-              id,
-              chatId,
-              atIso: plain.atIso,
-              modifiedAtIso: plain.modifiedAtIso,
-              senderId,
-              fromUsername: displayName,
-              text: plain.text,
-              replyToId: plain.replyToId,
-              verification,
-            }
-
-            const cur = messagesByChatId.value[chatId] ?? []
-            if (cur.some((m) => m.id === id)) return
-            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [...cur, msg] }
-
-            // Unread bump if not currently viewing this chat.
-            if (!(view.value === 'chat' && activeChatId.value === chatId)) {
-              unreadByChatId.value = {
-                ...unreadByChatId.value,
-                [chatId]: (unreadByChatId.value[chatId] ?? 0) + 1,
-              }
-
-              try {
-                const shouldNotify = typeof document !== 'undefined' && document.visibilityState !== 'visible'
-                if (shouldNotify) {
-                  notify('Last', displayName ? `New message from ${displayName}` : 'New message', {
-                    tag: `lrcom-chat-${String(chatId)}`,
-                  })
-                }
-              } catch {
-                // ignore
-              }
-            }
-
-            // If the user is actively viewing this chat and the message is from someone else,
-            // mark it as read immediately (fallback for environments where the intersection
-            // observer doesn't reliably report visibility).
-            if (view.value === 'chat' && activeChatId.value === chatId && userId.value && String(senderId) !== String(userId.value)) {
-              void markMessagesRead(chatId, [id])
-            }
-
-            // Best-effort: keep chat list previews fresh.
-            lastMessageByChatId.value = {
-              ...lastMessageByChatId.value,
-              [chatId]: { id, chatId, senderId, encryptedData, signature },
-            }
-            lastMessagePreviewByChatId.value = {
-              ...lastMessagePreviewByChatId.value,
-              [chatId]: {
-                id,
-                chatId,
-                senderId,
-                senderUsername: displayName,
-                tsMs: uuidV7ToUnixMs(id) ?? 0,
-                text: plain.text,
-              },
+            if (wipeLocalKeys) {
+              clearAllKeyMaterial()
+              storeLastUsername('')
+              logout(true)
+            } else {
+              logout(false)
             }
           } catch {
-            // ignore decrypt failures
+            // ignore
           }
-        }
-      }
-
-      if (obj.type === 'signedMessageDeleted') {
-        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
-        const id = typeof obj.id === 'string' ? obj.id : null
-        if (!chatId || !id) return
-
-        const cur = messagesByChatId.value[chatId] ?? []
-        if (cur.length) {
-          messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => m.id !== id) }
-        }
-        // Best-effort refresh counts; deletion may clear unread for others via cascade.
-        void refreshChats()
-      }
-
-      if (obj.type === 'signedMessagesDeleted') {
-        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
-        const idsRaw = (obj as any).ids
-        const ids = Array.isArray(idsRaw) ? idsRaw.map(String).filter(Boolean) : []
-        if (!chatId || !ids.length) return
-
-        const cur = messagesByChatId.value[chatId] ?? []
-        if (cur.length) {
-          const s = new Set(ids)
-          const hasAny = cur.some((m) => s.has(m.id))
-          if (hasAny) {
-            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => !s.has(m.id)) }
-          }
-        }
-        void refreshChats()
-      }
-
-      if (obj.type === 'signedMessageUpdated') {
-        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
-        const id = typeof obj.id === 'string' ? obj.id : null
-        const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
-        const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
-        const signature = typeof obj.signature === 'string' ? obj.signature : ''
-        if (!chatId || !id || !senderId || !encryptedData) return
-
-        const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
-        if (verification === 'invalid') {
-          toast.push({
-            title: 'Unverified edit',
-            message: 'Blocked an edited message with an invalid signature.',
-            variant: 'error',
-            timeoutMs: 8000,
-          })
           return
         }
 
-        if (privateKey.value && userId.value) {
-          try {
-            const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
-            const displayName = await resolveDisplayNameInChat(chatId, senderId)
-            const cur = messagesByChatId.value[chatId] ?? []
-            const next = cur.map((m) =>
-              m.id === id
-                ? {
-                    ...m,
-                    atIso: plain.atIso,
-                    modifiedAtIso: plain.modifiedAtIso,
-                    senderId,
-                    fromUsername: displayName,
-                    text: plain.text,
-                    replyToId: plain.replyToId,
-                    verification,
-                  }
-                : m,
-            )
-            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
+        if (obj.type === 'signedAccountUpdated') {
+          const nextHidden = typeof (obj as any)?.hiddenMode === 'boolean' ? Boolean((obj as any).hiddenMode) : null
+          const nextIntrovert = typeof (obj as any)?.introvertMode === 'boolean' ? Boolean((obj as any).introvertMode) : null
 
-            if (lastMessageByChatId.value[chatId]?.id === id) {
+          if (nextHidden != null) hiddenMode.value = nextHidden
+          if (nextIntrovert != null) introvertMode.value = nextIntrovert
+
+          if (token.value && userId.value && username.value) {
+            storeSession(
+              { userId: userId.value, username: username.value, hiddenMode: hiddenMode.value, introvertMode: introvertMode.value },
+              token.value,
+              expiresAtMs.value,
+            )
+          }
+          return
+        }
+
+        if (obj.type === 'signedMessage') {
+          const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+          const id = typeof obj.id === 'string' ? obj.id : null
+          const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+          const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+          const signature = typeof obj.signature === 'string' ? obj.signature : ''
+          if (!chatId || !id || !senderId || !encryptedData) return
+
+          const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
+          if (verification === 'invalid') {
+            toast.push({
+              title: 'Unverified message',
+              message: 'Blocked a message with an invalid signature.',
+              variant: 'error',
+              timeoutMs: 8000,
+            })
+            return
+          }
+
+          if (privateKey.value && userId.value) {
+            try {
+              const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+              const displayName = await resolveDisplayNameInChat(chatId, senderId)
+              const msg: SignedDecryptedMessage = {
+                id,
+                chatId,
+                atIso: plain.atIso,
+                modifiedAtIso: plain.modifiedAtIso,
+                senderId,
+                fromUsername: displayName,
+                text: plain.text,
+                replyToId: plain.replyToId,
+                verification,
+              }
+
+              const cur = messagesByChatId.value[chatId] ?? []
+              if (cur.some((m) => m.id === id)) return
+              messagesByChatId.value = { ...messagesByChatId.value, [chatId]: [...cur, msg] }
+
+              if (!(view.value === 'chat' && activeChatId.value === chatId)) {
+                unreadByChatId.value = {
+                  ...unreadByChatId.value,
+                  [chatId]: (unreadByChatId.value[chatId] ?? 0) + 1,
+                }
+
+                try {
+                  const shouldNotify = typeof document !== 'undefined' && document.visibilityState !== 'visible'
+                  if (shouldNotify) {
+                    notify('Last', displayName ? `New message from ${displayName}` : 'New message', {
+                      tag: `lrcom-chat-${String(chatId)}`,
+                    })
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+
+              if (view.value === 'chat' && activeChatId.value === chatId && userId.value && String(senderId) !== String(userId.value)) {
+                void markMessagesRead(chatId, [id])
+              }
+
               lastMessageByChatId.value = {
                 ...lastMessageByChatId.value,
                 [chatId]: { id, chatId, senderId, encryptedData, signature },
@@ -1625,44 +1532,143 @@ export const useSignedStore = defineStore('signed', () => {
                   text: plain.text,
                 },
               }
+            } catch {
+              // ignore decrypt failures
             }
+          }
+        }
+
+        if (obj.type === 'signedMessageDeleted') {
+          const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+          const id = typeof obj.id === 'string' ? obj.id : null
+          if (!chatId || !id) return
+
+          const cur = messagesByChatId.value[chatId] ?? []
+          if (cur.length) {
+            messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => m.id !== id) }
+          }
+          void refreshChats()
+        }
+
+        if (obj.type === 'signedMessagesDeleted') {
+          const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+          const idsRaw = (obj as any).ids
+          const ids = Array.isArray(idsRaw) ? idsRaw.map(String).filter(Boolean) : []
+          if (!chatId || !ids.length) return
+
+          const cur = messagesByChatId.value[chatId] ?? []
+          if (cur.length) {
+            const s = new Set(ids)
+            const hasAny = cur.some((m) => s.has(m.id))
+            if (hasAny) {
+              messagesByChatId.value = { ...messagesByChatId.value, [chatId]: cur.filter((m) => !s.has(m.id)) }
+            }
+          }
+          void refreshChats()
+        }
+
+        if (obj.type === 'signedMessageUpdated') {
+          const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+          const id = typeof obj.id === 'string' ? obj.id : null
+          const senderId = typeof obj.senderId === 'string' ? obj.senderId : null
+          const encryptedData = typeof obj.encryptedData === 'string' ? obj.encryptedData : null
+          const signature = typeof obj.signature === 'string' ? obj.signature : ''
+          if (!chatId || !id || !senderId || !encryptedData) return
+
+          const verification = await getIncomingEnvelopeVerification({ chatId, senderId, encryptedData, signature })
+          if (verification === 'invalid') {
+            toast.push({
+              title: 'Unverified edit',
+              message: 'Blocked an edited message with an invalid signature.',
+              variant: 'error',
+              timeoutMs: 8000,
+            })
+            return
+          }
+
+          if (privateKey.value && userId.value) {
+            try {
+              const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+              const displayName = await resolveDisplayNameInChat(chatId, senderId)
+              const cur = messagesByChatId.value[chatId] ?? []
+              const next = cur.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      atIso: plain.atIso,
+                      modifiedAtIso: plain.modifiedAtIso,
+                      senderId,
+                      fromUsername: displayName,
+                      text: plain.text,
+                      replyToId: plain.replyToId,
+                      verification,
+                    }
+                  : m,
+              )
+              messagesByChatId.value = { ...messagesByChatId.value, [chatId]: next }
+
+              if (lastMessageByChatId.value[chatId]?.id === id) {
+                lastMessageByChatId.value = {
+                  ...lastMessageByChatId.value,
+                  [chatId]: { id, chatId, senderId, encryptedData, signature },
+                }
+                lastMessagePreviewByChatId.value = {
+                  ...lastMessagePreviewByChatId.value,
+                  [chatId]: {
+                    id,
+                    chatId,
+                    senderId,
+                    senderUsername: displayName,
+                    tsMs: uuidV7ToUnixMs(id) ?? 0,
+                    text: plain.text,
+                  },
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        if (obj.type === 'signedChatDeleted') {
+          const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
+          if (chatId) removeChatLocal(chatId)
+        }
+
+        if (obj.type === 'signedChatsChanged') {
+          const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
+          if (msgId) sendReliableMessage({ type: 'ack', msgId })
+          void refreshChats()
+        }
+
+        if (obj.type === 'presenceSnapshot') {
+          const ids = getPresenceProbeList()
+          const online = new Set<string>(Array.isArray((obj as any)?.onlineUserIds) ? (obj as any).onlineUserIds.map(String) : [])
+          const busy = new Set<string>(Array.isArray((obj as any)?.busyUserIds) ? (obj as any).busyUserIds.map(String) : [])
+          const next: Record<string, boolean> = {}
+          const nextBusy: Record<string, boolean> = {}
+          for (const id of ids) next[id] = online.has(id)
+          for (const id of ids) nextBusy[id] = busy.has(id)
+          onlineByUserId.value = next
+          busyByUserId.value = nextBusy
+          applyServerVersion((obj as any)?.serverVersion)
+        }
+
+        for (const h of inboundHandlers) {
+          try {
+            h(String(obj.type), obj as Record<string, unknown>)
           } catch {
             // ignore
           }
         }
-      }
-
-      if (obj.type === 'signedChatDeleted') {
-        const chatId = typeof obj.chatId === 'string' ? obj.chatId : null
-        if (chatId) removeChatLocal(chatId)
-      }
-
-      if (obj.type === 'signedChatsChanged') {
-        // Best-effort: refresh the chat list when membership changes or a new
-        // chat is created on the other side.
-        const msgId = typeof (obj as any)?.msgId === 'string' ? String((obj as any).msgId) : ''
-        if (msgId) sendWs({ type: 'ack', msgId })
-        void refreshChats()
-      }
-
-      // Forward all inbound messages to registered handlers (e.g. voice calls).
-      for (const h of inboundHandlers) {
-        try {
-          h(String(obj.type), obj as Record<string, unknown>)
-        } catch {
-          // ignore
-        }
-      }
+      },
     })
+    ws.value = sock
   }
 
   function disconnectWs() {
     // Callers can disable reconnect by setting wsShouldReconnect=false before disconnect.
-    try {
-      ws.value?.close()
-    } catch {
-      // ignore
-    }
+    transportClient.disconnect(false)
     ws.value = null
     clearPresenceTimer()
     for (const h of disconnectHandlers) {
@@ -2011,12 +2017,12 @@ export const useSignedStore = defineStore('signed', () => {
       activeChatId.value = null
       view.value = 'contacts'
     }
-    void refreshPresence()
+    sendPresenceHeartbeat()
   }
 
   function goHome() {
     view.value = 'contacts'
-    void refreshPresence()
+    sendPresenceHeartbeat()
   }
 
   function openSettings() {
@@ -3131,6 +3137,7 @@ export const useSignedStore = defineStore('signed', () => {
     unlocking,
     ws,
     wsPermanentlyFailed,
+    transportFatalReason,
       clientVersion,
       serverVersion,
       serverUpdateModalOpen,
@@ -3184,11 +3191,13 @@ export const useSignedStore = defineStore('signed', () => {
     updateMessage,
     updateMessageText,
     deleteChat,
-    refreshPresence,
+    sendPresenceHeartbeat,
     getChatOnlineState,
     getChatLastMessagePreview,
     getChatLastMessageTsMs,
     ensureTurnConfig,
+    sendReliableMessage,
+    sendDatagram,
     sendWs,
     registerInboundHandler,
     registerDisconnectHandler,

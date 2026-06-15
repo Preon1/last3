@@ -35,7 +35,14 @@ Then open:
 
 - Local machine: `https://localhost:8443`
 
-Only one port is used: `8443`.
+Realtime WebTransport (QUIC/UDP) defaults to:
+
+- `https://localhost:8444/signed`
+
+Default local ports:
+
+- `8443/tcp` app HTTPS
+- `8444/udp` WebTransport
 
 ## Production install (Ubuntu 24 + rootless Docker + domain + Let's Encrypt RSA-4096)
 
@@ -58,6 +65,8 @@ On your server/firewall/router/cloud rules, allow:
 
 - `80/tcp` (Let's Encrypt HTTP-01 + redirect)
 - `443/tcp` (HTTPS)
+- `443/udp` (HTTP/3)
+- `8444/udp` (direct WebTransport endpoint)
 - `3478/tcp` and `3478/udp` (TURN)
 - `49160-49200/udp` (TURN relay range; configurable)
 
@@ -92,6 +101,11 @@ Copy `.env.example` to `.env` and set at least:
 
 - `LRCOM_DOMAIN=your.domain.com` (required for Caddy)
 - `ACME_EMAIL=you@your.domain.com` (recommended for Let's Encrypt)
+
+WebTransport defaults:
+
+- `WEBTRANSPORT_PORT=8444`
+- `VITE_WEBTRANSPORT_URL=https://your.domain.com:8444/wt`
 
 TURN must be reachable by browsers:
 
