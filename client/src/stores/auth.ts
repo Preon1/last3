@@ -587,7 +587,7 @@ export const useAuthStore = defineStore('auth', () => {
     removeDate?: string
     vault?: string
   }) {
-    await fetchJson('/api/private/account/update', {
+    await fetchJson('/api/account/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(fields),
@@ -634,7 +634,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!token.value) return
 
     try {
-      const r = await fetch(`${apiBase()}/api/private/session/refresh`, {
+      const r = await fetch(`${apiBase()}/api/session/refresh`, {
         method: 'POST',
         headers: { ...authHeaders() },
       })
@@ -682,7 +682,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       if (token.value) {
-        await fetchJson('/api/private/push/disable', {
+        await fetchJson('/api/push/disable', {
           method: 'POST',
           headers: { ...authHeaders() },
         })
@@ -708,7 +708,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!subscription) return false
 
     try {
-      await fetchJson('/api/private/push/subscribe', {
+      await fetchJson('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ subscription }),
@@ -1681,7 +1681,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refreshChats() {
-    const j = await fetchJson('/api/private/chats', { headers: { ...authHeaders() } })
+    const j = await fetchJson('/api/chats', { headers: { ...authHeaders() } })
 
     const wireChats: any[] = Array.isArray((j as any)?.chats) ? (j as any).chats : []
     const nextChats: AuthChat[] = wireChats
@@ -1820,7 +1820,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function fetchChatMembers(chatId: string) {
-    const j = await fetchJson(`/api/private/chats/members?chatId=${encodeURIComponent(chatId)}`, {
+    const j = await fetchJson(`/api/chats/members?chatId=${encodeURIComponent(chatId)}`, {
       headers: { ...authHeaders() },
     })
 
@@ -1880,7 +1880,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function markChatRead(chatId: string) {
     if (!token.value) return
     try {
-      const j = await fetchJson('/api/private/messages/mark-read', {
+      const j = await fetchJson('/api/messages/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ chatId }),
@@ -1900,7 +1900,7 @@ export const useAuthStore = defineStore('auth', () => {
     const ids = Array.isArray(messageIds) ? messageIds.map(String).filter(Boolean) : []
     if (!ids.length) return
     try {
-      const j = await fetchJson('/api/private/messages/mark-read', {
+      const j = await fetchJson('/api/messages/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ chatId, messageIds: ids }),
@@ -1916,14 +1916,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function listUnreadMessageIds(chatId: string, limit = 500) {
-    const j = await fetchJson(`/api/private/messages/unread?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(limit))}`, {
+    const j = await fetchJson(`/api/messages/unread?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(limit))}`, {
       headers: { ...authHeaders() },
     })
     return Array.isArray(j?.messageIds) ? j.messageIds.map(String) : []
   }
 
   async function deleteMessage(chatId: string, messageId: string) {
-    await fetchJson('/api/private/messages/delete', {
+    await fetchJson('/api/messages/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, messageId }),
@@ -1942,7 +1942,7 @@ export const useAuthStore = defineStore('auth', () => {
       signature = ''
     }
 
-    await fetchJson('/api/private/messages/update', {
+    await fetchJson('/api/messages/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, messageId, encryptedData, signature }),
@@ -1996,7 +1996,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function deleteChat(chatId: string) {
-    await fetchJson('/api/private/chats/delete', {
+    await fetchJson('/api/chats/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId }),
@@ -2034,7 +2034,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!u) throw new Error('Username required')
 
     const nameToken = await voprfNameToken({ kind: 'user', input: u })
-    const j = await fetchJson('/api/private/users/lookup', {
+    const j = await fetchJson('/api/users/lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ nameToken }),
@@ -2197,7 +2197,7 @@ export const useAuthStore = defineStore('auth', () => {
       },
     })
 
-    const j = await fetchJson('/api/private/chats/create-personal', {
+    const j = await fetchJson('/api/chats/create-personal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ otherUserId: other.userId, names }),
@@ -2221,7 +2221,7 @@ export const useAuthStore = defineStore('auth', () => {
     const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
     const names = await buildNamesJson({ recipients, namesPlainByUserId: { [userId.value]: username.value } })
 
-    const j = await fetchJson('/api/private/chats/create-group', {
+    const j = await fetchJson('/api/chats/create-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatNameEnc, names }),
@@ -2266,7 +2266,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     const names = await buildNamesJson({ recipients, namesPlainByUserId })
 
-    const j = await fetchJson('/api/private/chats/add-member', {
+    const j = await fetchJson('/api/chats/add-member', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, otherUserId: other.userId, chatNameEnc, names }),
@@ -2303,7 +2303,7 @@ export const useAuthStore = defineStore('auth', () => {
     const recipients = members.map((m) => ({ userId: m.userId, publicKeyJwk: m.publicKey }))
     const chatNameEnc = await encryptChatTextToRecipients({ text: n, recipients })
 
-    const j = await fetchJson('/api/private/chats/rename-group', {
+    const j = await fetchJson('/api/chats/rename-group', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId: cid, chatNameEnc }),
@@ -2320,7 +2320,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function loadMessages(chatId: string, limit = 50) {
     const lim = Math.max(1, Math.min(200, Number(limit) || 50))
 
-    const j = await fetchJson(`/api/private/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}`, {
+    const j = await fetchJson(`/api/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}`, {
       headers: { ...authHeaders() },
     })
 
@@ -2424,7 +2424,7 @@ export const useAuthStore = defineStore('auth', () => {
     messagesLoadingMoreByChatId.value = { ...messagesLoadingMoreByChatId.value, [chatId]: true }
     try {
       const j = await fetchJson(
-        `/api/private/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}&before=${encodeURIComponent(before)}`,
+        `/api/messages?chatId=${encodeURIComponent(chatId)}&limit=${encodeURIComponent(String(lim))}&before=${encodeURIComponent(before)}`,
         { headers: { ...authHeaders() } },
       )
 
@@ -2544,7 +2544,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
-    const j = await fetchJson('/api/private/messages/send', {
+    const j = await fetchJson('/api/messages/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ chatId, encryptedData, signature }),
@@ -2849,7 +2849,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (currentToken && exp && Number.isFinite(exp)) {
         const iso = computeRemoveDateIsoForNow(exp)
         const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` }
-        void fetch('/api/private/account/update', { method: 'POST', headers, body: JSON.stringify({ removeDate: iso }) }).catch(() => {})
+        void fetch('/api/account/update', { method: 'POST', headers, body: JSON.stringify({ removeDate: iso }) }).catch(() => {})
       }
     } catch {
       // ignore
@@ -2904,7 +2904,7 @@ export const useAuthStore = defineStore('auth', () => {
     // Requires an active auth session.
     if (!token.value) throw new Error('Not logged in')
 
-    await fetchJson('/api/private/account/delete', {
+    await fetchJson('/api/account/delete', {
       method: 'POST',
       headers: { ...authHeaders() },
     })
@@ -2918,7 +2918,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logoutOtherDevices() {
     if (!token.value) throw new Error('Not logged in')
-    await fetchJson('/api/private/session/logout-other-devices', {
+    await fetchJson('/api/session/logout-other-devices', {
       method: 'POST',
       headers: { ...authHeaders() },
     })
@@ -2926,7 +2926,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logoutAndRemoveKeyOtherDevices() {
     if (!token.value) throw new Error('Not logged in')
-    await fetchJson('/api/private/session/logout-and-remove-key-other-devices', {
+    await fetchJson('/api/session/logout-and-remove-key-other-devices', {
       method: 'POST',
       headers: { ...authHeaders() },
     })

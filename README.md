@@ -17,7 +17,45 @@ Browsers only allow `getUserMedia()` (microphone) in a **secure context**:
 
 This repo is now **HTTPS-only** (no HTTP mode).
 
-## Run (prod-like, single supported mode)
+## Local Development
+
+The recommended way to develop and test locally uses Caddy with self-signed certificates, full logging, and relaxed rate limits.
+
+### 1) Generate self-signed certificates
+
+# Bash (Linux/macOS)
+bash scripts/generate-local-certs.sh
+```
+
+This creates `certs/cert.pem` and `certs/key.pem` for `localhost` / `127.0.0.1`.
+
+### 2) Start the local stack
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+Then open:
+
+- App: `https://localhost` (Caddy on port 443)
+- Direct app (bypass Caddy): `https://localhost:8443`
+- WebTransport: `https://localhost:8444/wt`
+
+### 3) Trust the certificate
+
+On first visit, your browser will show a certificate warning. Accept it to trust the self-signed cert for this session.
+
+### Local vs Production configs
+
+| Config | Local (`docker-compose.local.yml`) | Production (`docker-compose.prod.yml`) |
+|---|---|---|
+| Caddy config | `Caddyfile.local` | `Caddyfile.prod` |
+| TLS | Self-signed (generated) | Let's Encrypt (RSA 4096) |
+| Logging | Full (DEBUG level, DB logs on) | Minimal (logs discarded) |
+| Rate limits | Relaxed for testing | Strict production defaults |
+| Caddy port | 443 (HTTPS + HTTP/3) | 443 (HTTPS + HTTP/3) |
+
+## Run (standalone, no Caddy)
 
 From this folder:
 
@@ -27,17 +65,13 @@ From this folder:
 
 2) Start (builds the client and serves it from the Node server over HTTPS):
 
-```bash
-docker compose up --build
-```
-
 Then open:
 
 - Local machine: `https://localhost:8443`
 
 Realtime WebTransport (QUIC/UDP) defaults to:
 
-- `https://localhost:8444/signed`
+- `https://localhost:8444/wt`
 
 Default local ports:
 
@@ -49,7 +83,7 @@ Default local ports:
 This repo includes a production reverse proxy setup using:
 
 - [docker-compose.prod.yml](docker-compose.prod.yml) (Caddy reverse proxy)
-- [Caddyfile](Caddyfile) (automatic Let's Encrypt TLS with RSA 4096)
+- [Caddyfile.prod](Caddyfile.prod) (automatic Let's Encrypt TLS with RSA 4096)
 
 The app container still serves HTTPS internally on `8443`. Caddy terminates public HTTPS on `443` and proxies to the app.
 
@@ -118,7 +152,7 @@ TURN must be reachable by browsers:
 Run the production stack (base compose + prod override):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Open:
@@ -128,7 +162,7 @@ Open:
 ### Notes
 
 - Certificates auto-renew via Caddy.
-- TLS key type is configured as **RSA 4096** in [Caddyfile](Caddyfile).
+- TLS key type is configured as **RSA 4096** in [Caddyfile.prod](Caddyfile.prod).
 - The app is proxied over internal HTTPS; Caddy is configured to skip TLS verification for that internal hop because the app uses a self-signed cert by default.
 
 ## HTTPS (default)

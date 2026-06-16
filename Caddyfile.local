@@ -1,0 +1,192 @@
+# Local development Caddyfile
+# Full logging enabled for debugging
+# Uses self-signed certificates for local HTTPS + HTTP/3 + WebTransport testing
+
+{
+  # Enable debug logging for local development
+  log {
+    level DEBUG
+    output stdout
+  }
+
+  # Explicitly keep HTTP/3 enabled for edge TLS.
+  servers {
+    protocols h1 h2 h3
+  }
+}
+
+# Local dev site - always points to localhost
+http://localhost {
+  redir https://localhost{uri} permanent
+}
+
+https://localhost {
+  # Use self-signed cert mounted from host
+  tls /etc/caddy/cert.pem /etc/caddy/key.pem
+
+  # Enable request logging for debugging
+  log {
+    level DEBUG
+    output stdout
+  }
+
+  route {
+    # HSTS for local dev (safe to remove if causes issues)
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    # Cache static files
+    @service_worker {
+      path /sw.js
+    }
+    header @service_worker Cache-Control "no-cache"
+
+    @public_static {
+      path \
+        /apple-touch-icon.png \
+        /calling.wav \
+        /call_interrupted.wav \
+        /favicon-96x96.png \
+        /favicon.ico \
+        /favicon.svg \
+        /icons.svg \
+        /incoming_call.wav \
+        /incoming_message.wav \
+        /lrcom_logo.png \
+        /site.webmanifest \
+        /web-app-manifest-192x192.png \
+        /web-app-manifest-512x512.png
+    }
+
+    # Per-endpoint rate limiting (relaxed limits for local dev)
+    rate_limit {
+      zone api_global {
+        match {
+          path /api/*
+        }
+        key    {remote_host}
+        events 600
+        window 1m
+      }
+
+      zone turn_unauth {
+        match {
+          path /turn
+          method GET
+        }
+        key    {remote_host}
+        events 120
+        window 1m
+      }
+
+      zone login {
+        match {
+          path /api/auth/login /api/auth/login-init /api/auth/login-final
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone register {
+        match {
+          path /api/auth/register
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone message_send {
+        match {
+          path /api/messages/send
+          method POST
+        }
+        key    {remote_host}
+        events 300
+        window 1m
+      }
+
+      zone message_update {
+        match {
+          path /api/messages/update
+          method POST
+        }
+        key    {remote_host}
+        events 300
+        window 1m
+      }
+
+      zone message_delete {
+        match {
+          path /api/messages/delete
+          method POST
+        }
+        key    {remote_host}
+        events 300
+        window 1m
+      }
+
+      zone create_chat {
+        match {
+          path /api/chats/create-personal /api/chats/create-group
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone group_admin {
+        match {
+          path /api/chats/add-member /api/chats/rename-group
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone account_delete {
+        match {
+          path /api/account/delete
+          method POST
+        }
+        key    {remote_host}
+        events 60
+        window 1m
+      }
+
+      zone account_update {
+        match {
+          path /api/account/update
+          method POST
+        }
+        key    {remote_host}
+        events 300
+        window 1m
+      }
+
+      zone session_refresh {
+        match {
+          path /api/session/refresh
+          method POST
+        }
+        key    {remote_host}
+        events 10
+        window 1m
+      }
+    }
+
+    # Proxy API/SPA HTTPS traffic to the app.
+    # WebTransport uses a direct UDP endpoint on WEBTRANSPORT_PORT (default 8444),
+    # not this reverse_proxy hop.
+    reverse_proxy https://lrcom:8443 {
+      transport http {
+        # The app uses an internal/self-signed cert by default.
+        tls_insecure_skip_verify
+      }
+    }
+  }
+}

@@ -17,29 +17,174 @@ services:
       - LRCOM_DOMAIN=${LRCOM_DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - lrcom
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
   # App: keep it internal; Caddy exposes it publicly.
   lrcom:
     build:
+      context: .
       args:
         - VITE_WEBTRANSPORT_URL=${VITE_WEBTRANSPORT_URL:-https://${LRCOM_DOMAIN}:8444/wt}
         - VITE_REQUIRE_WEBTRANSPORT=${VITE_REQUIRE_WEBTRANSPORT:-1}
+      logging:
+        driver: none
     restart: unless-stopped
     ports:
       - "${WEBTRANSPORT_PORT:-8444}:${WEBTRANSPORT_PORT:-8444}/udp"
-    expose:
-      - "8443"
-      - "${WEBTRANSPORT_PORT:-8444}/udp"
+    environment:
+      # Visual app name (changes header + setup title only)
+      - APP_NAME=${LRCOM_APP_NAME:-Last}
+
+      # For real microphone access remotely, serve over HTTPS (or use a reverse proxy).
+      # If you mount certs, set TLS_KEY_PATH/TLS_CERT_PATH accordingly.
+      - HOST=0.0.0.0
+      - PORT=8443
+      - WEBTRANSPORT_ENABLED=${WEBTRANSPORT_ENABLED:-1}
+      - WEBTRANSPORT_HOST=0.0.0.0
+      - WEBTRANSPORT_PORT=${WEBTRANSPORT_PORT:-8444}
+      - WEBTRANSPORT_PATH=/wt
+      - WEBTRANSPORT_SECRET=${WEBTRANSPORT_SECRET:-}
+
+      # HTTPS: auto-generate a self-signed certificate in the container.
+      # Add your LAN IP to TLS_SANS so browsers accept it for that address.
+      - AUTO_TLS=1
+      - TLS_SANS=${LRCOM_TLS_SANS:-DNS:localhost,IP:127.0.0.1}
+
+      # TURN (optional): generated time-limited credentials based on shared secret.
+      # IMPORTANT: the TURN host must be reachable by browsers.
+      # For local testing, localhost works. For LAN/Internet use, set LRCOM_TURN_HOST.
+      - TURN_URLS=turn:${LRCOM_TURN_HOST:-localhost}:3478?transport=udp,turn:${LRCOM_TURN_HOST:-localhost}:3478?transport=tcp
+      - TURN_SECRET=${LRCOM_TURN_SECRET:-change-me}
+      - TURN_USERNAME_TTL_SECONDS=3600
+
+      # TURN relay port range (used for capacity display)
+      - TURN_RELAY_MIN_PORT=${LRCOM_TURN_MIN_PORT:-49160}
+      - TURN_RELAY_MAX_PORT=${LRCOM_TURN_MAX_PORT:-49169}
+
+      # Optional startup log
+      - STARTUP_LOG=0
+
+      # Optional debug logs (true/false). When false, lrcom stays silent.
+      - DEBUG=${DEBUG:-false}
+
+      # Optional Web Push (background notifications). If unset, LRcom still
+      # supports in-tab notifications when the page is open.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@localhost}
+
+      # Signed-mode cleanup: delete expired users (and cascading data) periodically.
+      - SIGNED_CLEANUP_ENABLED=${SIGNED_CLEANUP_ENABLED:-1}
+      - SIGNED_CLEANUP_INTERVAL_MS=${SIGNED_CLEANUP_INTERVAL_MS:-600000}
+      - SIGNED_CLEANUP_INITIAL_DELAY_MS=${SIGNED_CLEANUP_INITIAL_DELAY_MS:-30000}
+
+      # PostgreSQL connection
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-lrcom}
+      - POSTGRES_USER=${POSTGRES_USER:-lrcom}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      coturn:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  postgres:
+    image: postgres:18.1-alpine
+    restart: unless-stopped
+    logging:
+      driver: none
+    command:
+      - postgres
+      - -c
+      - logging_collector=off
+      - -c
+      - log_destination=stderr
+      - -c
+      - log_statement=none
+      - -c
+      - log_duration=off
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - log_min_error_statement=fatal
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-lrcom}
+      - POSTGRES_USER=${POSTGRES_USER:-lrcom}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lrcom} -d ${POSTGRES_DB:-lrcom}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
 
   # TURN: still needs to be reachable by clients.
   coturn:
+    image: coturn/coturn:4.6.2
     restart: unless-stopped
+    logging:
+      driver: none
+    environment:
+      - LRCOM_TURN_EXTERNAL_IP=${LRCOM_TURN_EXTERNAL_IP:-}
+    command:
+      - sh
+      - -c
+      - |
+        turnserver -n \
+          --log-file=/dev/null \
+          --no-stdout-log \
+          --use-auth-secret \
+          --static-auth-secret=${LRCOM_TURN_SECRET:-change-me} \
+          --realm=lrcom \
+          --no-cli \
+          --no-tls \
+          --no-dtls \
+          --listening-ip=0.0.0.0 \
+          ${LRCOM_TURN_EXTERNAL_IP:+--external-ip=$LRCOM_TURN_EXTERNAL_IP} \
+          --min-port=${LRCOM_TURN_MIN_PORT:-49160} \
+          --max-port=${LRCOM_TURN_MAX_PORT:-49169}
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "${LRCOM_TURN_MIN_PORT:-49160}-${LRCOM_TURN_MAX_PORT:-49169}:${LRCOM_TURN_MIN_PORT:-49160}-${LRCOM_TURN_MAX_PORT:-49169}/udp"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
 volumes:
   caddy_data:
   caddy_config:
+  postgres_data:
+
+networks:
+  default:
+    driver: bridge

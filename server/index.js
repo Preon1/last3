@@ -329,7 +329,7 @@ app.post('/api/session/refresh', requireAuthSession, (req, res) => {
   }
 });
 
-app.post('/api/private/session/logout-other-devices', requireAuthSession, (req, res) => {
+app.post('/api/session/logout-other-devices', requireAuthSession, (req, res) => {
   try {
     const userId = String(req._authUserId);
     const keepSessionId = String(req._authSessionId);
@@ -352,7 +352,7 @@ app.post('/api/private/session/logout-other-devices', requireAuthSession, (req, 
   }
 });
 
-app.post('/api/private/session/logout-and-remove-key-other-devices', requireAuthSession, (req, res) => {
+app.post('/api/session/logout-and-remove-key-other-devices', requireAuthSession, (req, res) => {
   try {
     const userId = String(req._authUserId);
     const keepSessionId = String(req._authSessionId);
@@ -376,7 +376,7 @@ app.post('/api/private/session/logout-and-remove-key-other-devices', requireAuth
 });
 
 // Auth push subscription registration (DB-persisted, privacy-minimal).
-app.post('/api/private/push/subscribe', requireAuthSession, (req, res) => {
+app.post('/api/push/subscribe', requireAuthSession, (req, res) => {
   (async () => {
     if (!PUSH_ENABLED) return res.status(503).json({ error: 'Push disabled' });
     const userId = String(req._authUserId);
@@ -390,7 +390,7 @@ app.post('/api/private/push/subscribe', requireAuthSession, (req, res) => {
 });
 
 // Auth push disable: wipe subscriptions and queue.
-app.post('/api/private/push/disable', requireAuthSession, (req, res) => {
+app.post('/api/push/disable', requireAuthSession, (req, res) => {
   (async () => {
     const userId = String(req._authUserId);
     await deletePushStateForUser(userId);
@@ -633,7 +633,7 @@ app.post('/api/account/update', requireAuthSession, async (req, res) => {
 });
 
 // Backwards-compatible endpoints (legacy clients)
-app.post('/api/private/account/hidden-mode', requireAuthSession, async (req, res) => {
+app.post('/api/account/hidden-mode', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const sessionId = String(req._authSessionId);
@@ -647,7 +647,7 @@ app.post('/api/private/account/hidden-mode', requireAuthSession, async (req, res
   }
 });
 
-app.post('/api/private/account/introvert-mode', requireAuthSession, async (req, res) => {
+app.post('/api/account/introvert-mode', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const sessionId = String(req._authSessionId);
@@ -680,7 +680,7 @@ app.post('/api/auth/check-name-token', async (req, res) => {
 });
 
 // Auth-mode API (token auth; no cookies)
-app.get('/api/private/chats', requireAuthSession, async (req, res) => {
+app.get('/api/chats', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chats = await authListChatsWithLastMessage(userId);
@@ -691,7 +691,7 @@ app.get('/api/private/chats', requireAuthSession, async (req, res) => {
   }
 });
 
-app.post('/api/private/chats/last-messages', requireAuthSession, async (req, res) => {
+app.post('/api/chats/last-messages', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatIdsRaw = req.body?.chatIds;
@@ -830,7 +830,7 @@ app.post('/api/chats/create-group', requireAuthSession, async (req, res) => {
 });
 
 // Auth user lookup by nameToken (VOPRF output). Returns userId+publicKey.
-app.post('/api/private/users/lookup', requireAuthSession, async (req, res) => {
+app.post('/api/users/lookup', requireAuthSession, async (req, res) => {
   try {
     const nameToken = typeof req.body?.nameToken === 'string' ? req.body.nameToken : '';
     if (!nameToken) return res.status(400).json({ error: 'nameToken required' });
@@ -854,7 +854,7 @@ app.post('/api/private/users/lookup', requireAuthSession, async (req, res) => {
   }
 });
 
-app.get('/api/private/chats/members', requireAuthSession, async (req, res) => {
+app.get('/api/chats/members', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
@@ -944,7 +944,7 @@ app.post('/api/chats/rename-group', requireAuthSession, async (req, res) => {
   }
 });
 
-app.get('/api/private/messages', requireAuthSession, async (req, res) => {
+app.get('/api/messages', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
@@ -962,7 +962,7 @@ app.get('/api/private/messages', requireAuthSession, async (req, res) => {
 });
 
 // List unread message UUIDs for a chat (spec requirement).
-app.get('/api/private/messages/unread', requireAuthSession, async (req, res) => {
+app.get('/api/messages/unread', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.query?.chatId === 'string' ? req.query.chatId : '';
@@ -1092,7 +1092,7 @@ app.post('/api/messages/update', requireAuthSession, async (req, res) => {
   }
 });
 
-app.post('/api/private/messages/mark-read', requireAuthSession, async (req, res) => {
+app.post('/api/messages/mark-read', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -1111,7 +1111,7 @@ app.post('/api/private/messages/mark-read', requireAuthSession, async (req, res)
   }
 });
 
-app.post('/api/private/chats/delete', requireAuthSession, async (req, res) => {
+app.post('/api/chats/delete', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
