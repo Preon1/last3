@@ -13,6 +13,9 @@ export const LOCAL_KEY_PRIVATE_KEY_ITERATIONS = 612_345
 const LOCAL_USERNAME_PAD_TOTAL_LEN = 75
 const LOCAL_USERNAME_PAD_PREFIX = 'LP'
 const LOCAL_USERNAME_PAD_LEN_HEX_WIDTH = 4
+const SIGNED_TEXT_PAD_PREFIX = 'STP'
+const SIGNED_TEXT_PAD_LEN_HEX_WIDTH = 4
+const SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN = 4096
 
 const LOCAL_USERNAME_PAD_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
@@ -59,6 +62,15 @@ function randomStringFromAlphabet(len: number, alphabet: string) {
   let out = ''
   for (let i = 0; i < u8.length; i++) out += a[u8[i]! % a.length]
   return out
+}
+
+function randomIntInclusive(min: number, max: number) {
+  const lo = Math.min(min, max)
+  const hi = Math.max(min, max)
+  const span = hi - lo + 1
+  if (span <= 1) return lo
+  const u32 = crypto.getRandomValues(new Uint32Array(1))
+  return lo + ((u32[0] ?? 0) % span)
 }
 
 function padUsernameForLocalKey(username: string) {
@@ -197,6 +209,57 @@ export async function decryptLocalUsername(params: { encrypted: string; password
   return unpadUsernameFromLocalKey(padded)
 }
 
+function normalizeTextPadBounds(minPadChars: number, maxPadChars: number) {
+  const min = Number.isFinite(minPadChars) ? Math.max(0, Math.floor(minPadChars)) : NaN
+  const max = Number.isFinite(maxPadChars) ? Math.max(0, Math.floor(maxPadChars)) : NaN
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+    throw new Error('Invalid signed text padding range')
+  }
+  if (max > SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN) {
+    throw new Error('Signed text padding range too large')
+  }
+  return { min, max }
+}
+
+function padEnvelopeText(rawText: string, minPadChars: number, maxPadChars: number) {
+  const bounds = normalizeTextPadBounds(minPadChars, maxPadChars)
+  const text = String(rawText ?? '')
+  const lenHex = text.length.toString(16).padStart(SIGNED_TEXT_PAD_LEN_HEX_WIDTH, '0')
+  if (lenHex.length !== SIGNED_TEXT_PAD_LEN_HEX_WIDTH || !/^[0-9a-fA-F]{4}$/.test(lenHex)) {
+    throw new Error('Signed text too long to pad')
+  }
+
+  const randomLen = randomIntInclusive(bounds.min, bounds.max)
+  const tail = randomStringFromAlphabet(randomLen, LOCAL_USERNAME_PAD_ALPHABET)
+  return `${SIGNED_TEXT_PAD_PREFIX}${lenHex}${text}${tail}`
+}
+
+function unpadEnvelopeText(padded: string, minPadChars: number, maxPadChars: number) {
+  const bounds = normalizeTextPadBounds(minPadChars, maxPadChars)
+  const s = String(padded ?? '')
+  if (!s.startsWith(SIGNED_TEXT_PAD_PREFIX)) throw new Error('Unsupported signed text format')
+
+  const lenStart = SIGNED_TEXT_PAD_PREFIX.length
+  const lenEnd = lenStart + SIGNED_TEXT_PAD_LEN_HEX_WIDTH
+  if (s.length < lenEnd) throw new Error('Unsupported signed text format')
+
+  const lenHex = s.slice(lenStart, lenEnd)
+  if (!/^[0-9a-fA-F]{4}$/.test(lenHex)) throw new Error('Unsupported signed text format')
+
+  const n = Number.parseInt(lenHex, 16)
+  if (!Number.isFinite(n) || n < 0) throw new Error('Unsupported signed text format')
+
+  const textStart = lenEnd
+  const textEnd = textStart + n
+  if (textEnd > s.length) throw new Error('Unsupported signed text format')
+
+  const tail = s.slice(textEnd)
+  if (tail.length < bounds.min || tail.length > bounds.max) throw new Error('Unsupported signed text format')
+  if (!isStringFromAlphabet(tail, LOCAL_USERNAME_PAD_ALPHABET_SET)) throw new Error('Unsupported signed text format')
+
+  return s.slice(textStart, textEnd)
+}
+
 export function publicJwkFromPrivateJwk(privateJwkJson: string) {
   const jwk = JSON.parse(privateJwkJson)
   const kty = typeof jwk?.kty === 'string' ? jwk.kty : null
@@ -262,7 +325,7 @@ export async function importRsaPssPrivateKeyJwk(jwkJson: string) {
   )
 }
 
-export async function signSignedEnvelope(params: { signingKey: CryptoKey; senderId: string; chatId: string; encryptedData: string }) {
+export async function signEnvelope(params: { signingKey: CryptoKey; senderId: string; chatId: string; encryptedData: string }) {
   const payload = JSON.stringify({
     v: 1,
     senderId: String(params.senderId),
@@ -278,7 +341,7 @@ export async function signSignedEnvelope(params: { signingKey: CryptoKey; sender
   return b64(sig)
 }
 
-export async function verifySignedEnvelope(params: {
+export async function verifyEnvelope(params: {
   verifyKey: CryptoKey
   signatureB64: string
   senderId: string
@@ -329,7 +392,7 @@ export async function decryptSmallStringWithPrivateKey(params: {
   return decUtf8(pt)
 }
 
-export async function encryptSignedMessage(params: {
+export async function encryptMessageEnvelope(params: {
   plaintext: {
     text: string
     atIso: string
@@ -337,11 +400,18 @@ export async function encryptSignedMessage(params: {
     modifiedAtIso?: string | null
   }
   recipients: Array<{ userId: string; publicKeyJwk: string }>
+  textPadMinChars: number
+  textPadMaxChars: number
 }) {
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
   const iv = crypto.getRandomValues(new Uint8Array(12))
 
-  const pt = JSON.stringify(params.plaintext)
+  const paddedText = padEnvelopeText(
+    String(params.plaintext?.text ?? ''),
+    params.textPadMinChars,
+    params.textPadMaxChars,
+  )
+  const pt = JSON.stringify({ ...params.plaintext, text: paddedText })
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encUtf8(pt))
 
   const rawKey = await crypto.subtle.exportKey('raw', aesKey)
@@ -356,10 +426,12 @@ export async function encryptSignedMessage(params: {
   return JSON.stringify({ v: 1, alg: 'A256GCM+RSA-OAEP-256', ivB64: b64(iv), ctB64: b64(ct), keys })
 }
 
-export async function decryptSignedMessage(params: {
+export async function decryptMessageEnvelope(params: {
   encryptedData: string
   myUserId: string
   myPrivateKey: CryptoKey
+  textPadMinChars: number
+  textPadMaxChars: number
 }) {
   const obj = JSON.parse(params.encryptedData) as {
     v: number
@@ -388,8 +460,11 @@ export async function decryptSignedMessage(params: {
     modifiedAtIso?: unknown
   }
 
+  const rawText = typeof parsed?.text === 'string' ? parsed.text : ''
+  const text = unpadEnvelopeText(rawText, params.textPadMinChars, params.textPadMaxChars)
+
   return {
-    text: typeof parsed?.text === 'string' ? parsed.text : '',
+    text,
     atIso: typeof parsed?.atIso === 'string' ? parsed.atIso : new Date().toISOString(),
     replyToId: typeof parsed?.replyToId === 'string' ? parsed.replyToId : null,
     modifiedAtIso: typeof parsed?.modifiedAtIso === 'string' ? parsed.modifiedAtIso : null,

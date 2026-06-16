@@ -12,21 +12,21 @@ import {
   setPushNotificationsEnabled,
 } from '../utils/notificationPrefs'
 import {
+  decryptMessageEnvelope,
   decryptLocalUsername,
   decryptPrivateKeyJwk,
   decryptSmallStringWithPrivateKey,
-  decryptSignedMessage,
+  encryptMessageEnvelope,
   encryptLocalUsername,
   encryptPrivateKeyJwk,
   encryptSmallStringWithPublicKeyJwk,
-  encryptSignedMessage,
   generateRsaKeyPair,
   importRsaPssPrivateKeyJwk,
   importRsaPssPublicKeyJwk,
   importRsaPrivateKeyJwk,
   publicJwkFromPrivateJwk,
-  signSignedEnvelope,
-  verifySignedEnvelope,
+  signEnvelope,
+  verifyEnvelope,
 } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 import { APP_VERSION as CLIENT_APP_VERSION } from '../appVersion'
@@ -120,6 +120,10 @@ const MAX_PASSWORD_LEN = 512
 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large'
+const CHAT_META_TEXT_PAD_MIN_CHARS = 0
+const CHAT_META_TEXT_PAD_MAX_CHARS = 32
+const MESSAGE_TEXT_PAD_MIN_CHARS = 0
+const MESSAGE_TEXT_PAD_MAX_CHARS = 64
 
 // Signature verification: cache imported RSA-PSS verify keys by JWK string.
 const verifyKeyCache = new Map<string, CryptoKey>()
@@ -1477,7 +1481,13 @@ export const useAuthStore = defineStore('auth', () => {
 
           if (privateKey.value && userId.value) {
             try {
-              const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+              const plain = await decryptMessageEnvelope({
+                encryptedData,
+                myUserId: userId.value,
+                myPrivateKey: privateKey.value,
+                textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+                textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+              })
               const displayName = await resolveDisplayNameInChat(chatId, senderId)
               const msg: AuthDecryptedMessage = {
                 id,
@@ -1588,7 +1598,13 @@ export const useAuthStore = defineStore('auth', () => {
 
           if (privateKey.value && userId.value) {
             try {
-              const plain = await decryptSignedMessage({ encryptedData, myUserId: userId.value, myPrivateKey: privateKey.value })
+              const plain = await decryptMessageEnvelope({
+                encryptedData,
+                myUserId: userId.value,
+                myPrivateKey: privateKey.value,
+                textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+                textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+              })
               const displayName = await resolveDisplayNameInChat(chatId, senderId)
               const cur = messagesByChatId.value[chatId] ?? []
               const next = cur.map((m) =>
@@ -1764,10 +1780,12 @@ export const useAuthStore = defineStore('auth', () => {
         entries.map(async ([chatId, lm]) => {
           if (!lm) return null
           try {
-            const plain = await decryptSignedMessage({
+            const plain = await decryptMessageEnvelope({
               encryptedData: lm.encryptedData,
               myUserId: userId.value as string,
               myPrivateKey: privateKey.value as CryptoKey,
+              textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+              textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
             })
             const tsMs = uuidV7ToUnixMs(lm.id) ?? 0
             const text = typeof plain?.text === 'string' ? plain.text : ''
@@ -1936,7 +1954,7 @@ export const useAuthStore = defineStore('auth', () => {
     let signature = ''
     try {
       if (signingKey.value && userId.value) {
-        signature = await signSignedEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
+        signature = await signEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
       }
     } catch {
       signature = ''
@@ -1977,9 +1995,11 @@ export const useAuthStore = defineStore('auth', () => {
       if (!recipients.length) throw new Error('No recipients')
     }
 
-    const encryptedData = await encryptSignedMessage({
+    const encryptedData = await encryptMessageEnvelope({
       plaintext: { text: t, atIso, replyToId, modifiedAtIso },
       recipients,
+      textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+      textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
     })
 
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
@@ -2050,9 +2070,11 @@ export const useAuthStore = defineStore('auth', () => {
     text: string
     recipients: Array<{ userId: string; publicKeyJwk: string }>
   }): Promise<string> {
-    return await encryptSignedMessage({
+    return await encryptMessageEnvelope({
       plaintext: { text: String(params.text ?? ''), atIso: new Date().toISOString() },
       recipients: params.recipients,
+      textPadMinChars: CHAT_META_TEXT_PAD_MIN_CHARS,
+      textPadMaxChars: CHAT_META_TEXT_PAD_MAX_CHARS,
     })
   }
 
@@ -2061,7 +2083,13 @@ export const useAuthStore = defineStore('auth', () => {
     const s = String(enc ?? '')
     if (!s) return null
     try {
-      const plain = await decryptSignedMessage({ encryptedData: s, myUserId: userId.value, myPrivateKey: privateKey.value })
+      const plain = await decryptMessageEnvelope({
+        encryptedData: s,
+        myUserId: userId.value,
+        myPrivateKey: privateKey.value,
+        textPadMinChars: CHAT_META_TEXT_PAD_MIN_CHARS,
+        textPadMaxChars: CHAT_META_TEXT_PAD_MAX_CHARS,
+      })
       return typeof plain?.text === 'string' ? plain.text : ''
     } catch {
       return null
@@ -2147,7 +2175,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!pubJwk) return null
 
     const verifyKey = await getVerifyKeyFromPublicJwk(pubJwk)
-    return await verifySignedEnvelope({
+    return await verifyEnvelope({
       verifyKey,
       signatureB64: sig,
       senderId: String(params.senderId),
@@ -2360,10 +2388,12 @@ export const useAuthStore = defineStore('auth', () => {
           continue
         }
 
-        const plain = await decryptSignedMessage({
+        const plain = await decryptMessageEnvelope({
           encryptedData: m.encryptedData,
           myUserId: userId.value,
           myPrivateKey: privateKey.value,
+          textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+          textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
         })
         const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
         out.push({
@@ -2456,10 +2486,12 @@ export const useAuthStore = defineStore('auth', () => {
             continue
           }
 
-          const plain = await decryptSignedMessage({
+          const plain = await decryptMessageEnvelope({
             encryptedData: m.encryptedData,
             myUserId: userId.value,
             myPrivateKey: privateKey.value,
+            textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+            textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
           })
           const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
           decoded.push({
@@ -2535,12 +2567,14 @@ export const useAuthStore = defineStore('auth', () => {
       if (!recipients.length) throw new Error('No recipients')
     }
 
-    const encryptedData = await encryptSignedMessage({
+    const encryptedData = await encryptMessageEnvelope({
       plaintext: { text: t, atIso, replyToId, modifiedAtIso: null },
       recipients,
+      textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
+      textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
     })
 
-    const signature = await signSignedEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
+    const signature = await signEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })
 
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
 
