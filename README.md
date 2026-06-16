@@ -2,12 +2,12 @@
 
 Minimal ephemeral voice chat: open the page, enter a name, see online users, click to call, accept/reject incoming calls.
 
-**Privacy model**: No registration, no cookies, no persistent sessions. Server keeps only in-memory presence while your WebSocket is connected. When you close the tab, your name disappears.
+**Privacy model**: No registration, no cookies, no persistent sessions. Server keeps only in-memory presence while your WebTransport session is connected. When you close the tab, your name disappears.
 
 ## How it works
 
 - Audio uses **WebRTC** (Opus) between browsers.
-- The server only does **signaling** (WebSocket) + presence.
+- The server only does **signaling** over WebTransport + presence.
 - Media is encrypted by WebRTC (**DTLS-SRTP**).
 
 ## Important: HTTPS for microphone
@@ -202,7 +202,7 @@ Tradeoff: fewer relay ports means fewer simultaneous TURN-relayed calls. Rough r
 
 ## Security notes (practical)
 
-- WebRTC encrypts media, but you still must protect **signaling** with HTTPS/WSS to reduce MITM risk.
+- WebRTC encrypts media, but you still must protect **signaling** with HTTPS/HTTP3 to reduce MITM risk.
 - This project intentionally does not log calls or store user data.
 - Names are limited to simple characters and must be unique while online.
 
@@ -234,4 +234,4 @@ node scripts/delete-user.js --username alice --yes
 Notes:
 
 - This performs the same DB deletion as the in-app flow (`signedDeleteAccount`).
-- If the main server process is currently running, any in-memory session/websocket state for that user can persist until restart. Restart the server if you need to force-disconnect/revoke RAM-only state.
+- If the main server process is currently running, any in-memory session/transport state for that user can persist until restart. Restart the server if you need to force-disconnect/revoke RAM-only state.

@@ -16,7 +16,7 @@ Options:
 
 Notes:
   - This performs the same DB deletion as Settings → Delete account (authDeleteAccount).
-  - If the main server process is running, any in-memory session/websocket state for the user may persist until restart.
+  - If the main server process is running, any in-memory session/transport state for the user may persist until restart.
 `
   // eslint-disable-next-line no-console
   console.log(msg)

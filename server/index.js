@@ -1146,7 +1146,7 @@ app.post('/api/private/chats/delete', requireAuthSession, async (req, res) => {
         try {
           const ids = Array.isArray(left.deletedMessageIds) ? left.deletedMessageIds : [];
           if (ids.length) {
-            // Avoid huge websocket frames if someone deletes a lot of messages.
+            // Avoid huge realtime payloads if someone deletes a lot of messages.
             const CHUNK = 500;
             for (let i = 0; i < ids.length; i += CHUNK) {
               const part = ids.slice(i, i + CHUNK);
@@ -1279,7 +1279,7 @@ const server = https.createServer(
 const authTransportSessions = new Map(); // userId -> Map(sessionId -> transportConn)
 
 // Auth-mode: in-memory user state (presence + call state). Kept RAM-only.
-const authUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
+const authUsers = new Map(); // userId -> { id, name, transportConn, roomId, ... }
 
 // Auth-only: keep small client message receipt cache (for idempotency).
 const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);

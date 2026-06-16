@@ -189,7 +189,7 @@ onMounted(() => {
   document.addEventListener('keydown', onGlobalKeyDown)
 
   // Extra safety: refresh chats whenever the list page is opened.
-  // WS notifications are best-effort; the list should self-heal.
+  // Realtime notifications are best-effort; the list should self-heal.
   void authStore.refreshChats()
 })
 

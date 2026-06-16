@@ -468,8 +468,8 @@ export const useAuthStore = defineStore('auth', () => {
     serverUpdateModalOpen.value = false
   }
 
-  // Presence polling should not depend on WS open: if WS is delayed/blocked
-  // we still want to query presence for known correspondents.
+  // Presence heartbeat should not depend on transport open: if transport is delayed/blocked
+  // we still want to refresh presence for known correspondents.
   watch(
     () => authReadyForPresence.value,
     (ready) => {
@@ -828,7 +828,7 @@ export const useAuthStore = defineStore('auth', () => {
     const cid = activeChatId.value
     if (view.value === 'chat' && cid) {
       try {
-        // Pull more history on reconnect in case we missed WS events.
+        // Pull more history on reconnect in case we missed realtime events.
         await loadMessages(cid, 200)
       } catch {
         // ignore
@@ -1986,7 +1986,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     await updateMessage(chatId, messageId, encryptedData)
 
-    // Optimistic local patch (WS update is best-effort).
+    // Optimistic local patch (realtime update is best-effort).
     const next: AuthDecryptedMessage[] = cur.map((m): AuthDecryptedMessage =>
       m.id === messageId
         ? { ...m, senderId: userId.value as string, atIso, modifiedAtIso, fromUsername: username.value as string, text: t, replyToId, verification: 'verified' }
@@ -2553,7 +2553,7 @@ export const useAuthStore = defineStore('auth', () => {
     const msgId = typeof j.messageId === 'string' ? j.messageId : null
     if (!msgId) return
 
-    // Append optimistically (it will also arrive via WS, but WS is best-effort).
+    // Append optimistically (it will also arrive via realtime events, but those are best-effort).
     const cur = messagesByChatId.value[chatId] ?? []
     if (cur.some((m) => m.id === msgId)) return
     messagesByChatId.value = {
