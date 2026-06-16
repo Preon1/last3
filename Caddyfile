@@ -113,16 +113,6 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_presence {
-        match {
-          path /api/private/presence
-          method POST
-        }
-        key    {remote_host}
-        events 150
-        window 1m
-      }
-
       zone signed_message_send {
         match {
           path /api/private/messages/send

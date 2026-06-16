@@ -4,7 +4,6 @@ import https from 'https';
 import path from 'path';
 import express from 'express';
 import webpush from 'web-push';
-import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { Oprf, VOPRFServer, generatePublicKey, randomPrivateKey, EvaluationRequest, Evaluation } from '@cloudflare/voprf-ts';
 import { debugError } from './logger.js';
@@ -262,8 +261,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Permissions-Policy', 'microphone=(self), camera=()');
 
-  // Note: WebRTC needs 'connect-src' for WSS/WS to this origin.
-  // Keep CSP simple; adjust if you add external assets.
+  // Note: WebRTC needs 'connect-src' for data channels to this origin.
+  // WebTransport connects over HTTPS (same origin), no wss: needed.
   res.setHeader(
     'Content-Security-Policy',
     [
@@ -274,7 +273,7 @@ app.use((req, res, next) => {
       "img-src 'self' data:",
       "style-src 'self'",
       "script-src 'self'",
-      "connect-src 'self' wss:",
+      "connect-src 'self'",
     ].join('; '),
   );
 
@@ -774,19 +773,6 @@ async function buildPresenceSnapshotForUser(userId, idsInput) {
     serverVersion: String(SERVER_APP_VERSION),
   };
 }
-
-// Auth presence (privacy-preserving): caller provides a list of userIds; response
-// only indicates which of those are currently connected to auth WS.
-app.post('/api/private/presence', requireAuthSession, async (req, res) => {
-  try {
-    const userId = String(req._authUserId);
-    const raw = req.body?.userIds;
-    const snapshot = await buildPresenceSnapshotForUser(userId, raw);
-    res.json({ success: true, ...snapshot });
-  } catch {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
 
 app.post('/api/private/chats/create-personal', requireAuthSession, async (req, res) => {
   try {
@@ -1290,27 +1276,17 @@ const server = https.createServer(
   app,
 );
 
-const wss = new WebSocketServer({ server });
-const WS_FALLBACK_ENABLED = false;
-
-// Auth-mode transport sessions keyed by authenticated userId + sessionId.
-// Current transport connection is WS; this registry is transport-agnostic.
 const authTransportSessions = new Map(); // userId -> Map(sessionId -> transportConn)
 
 // Auth-mode: in-memory user state (presence + call state). Kept RAM-only.
 const authUsers = new Map(); // userId -> { id, name, ws, roomId, ... }
 
 // Auth-only: keep small client message receipt cache (for idempotency).
-const STALE_WS_MS = Number(process.env.STALE_WS_MS ?? 45000);
 const CLIENT_MSGIDS_MAX = Number(process.env.CLIENT_MSGIDS_MAX ?? 2000);
 
-// WS heartbeat (server ping/pong) to detect dead TCP connections without
-// requiring the client to actively send WS messages.
-const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 30000);
-
-// Reliable WS notifications (auth mode) for small control-plane events.
-// We retry until the client ACKs, but only while the WS is open.
-const WS_NOTIFY_RETRY_MS = Number(process.env.WS_NOTIFY_RETRY_MS ?? 5000);
+// Reliable notifications (auth mode) for small control-plane events.
+// We retry until the client ACKs, but only while the transport is open.
+const TRANSPORT_NOTIFY_RETRY_MS = Number(process.env.TRANSPORT_NOTIFY_RETRY_MS ?? 5000);
 const TRANSPORT_MAX_CTRL_PAYLOAD_BYTES = Number(process.env.TRANSPORT_MAX_CTRL_PAYLOAD_BYTES ?? 64 * 1024);
 const TRANSPORT_MAX_DGRAM_PAYLOAD_BYTES = Number(process.env.TRANSPORT_MAX_DGRAM_PAYLOAD_BYTES ?? 1200);
 
@@ -1619,7 +1595,7 @@ function ensureWsNotifyRetryTimer(ws) {
     } catch {
       // ignore
     }
-  }, Math.max(1000, WS_NOTIFY_RETRY_MS));
+  }, Math.max(1000, TRANSPORT_NOTIFY_RETRY_MS));
 }
 
 function sendReliable(ws, obj) {
@@ -2517,110 +2493,6 @@ async function startWebTransportServer() {
   const sessions = wtServer.sessionStream(WEBTRANSPORT_PATH);
   void streamWebTransportSessions(sessions);
   return wtServer;
-}
-
-wss.on('connection', async (ws, req) => {
-  if (!WS_FALLBACK_ENABLED) {
-    try { ws.close(); } catch { /* ignore */ }
-    return;
-  }
-
-  // Auth-mode WS: separate world; requires token in querystring.
-  try {
-    const rawUrl = typeof req?.url === 'string' ? req.url : '/';
-    if (rawUrl.startsWith('/private')) {
-      const u = new URL(rawUrl, 'http://localhost');
-      const token = u.searchParams.get('token');
-      const sess = getSessionForToken(token);
-      if (!sess?.userId || !sess?.sessionId) {
-        try { ws.close(); } catch { /* ignore */ }
-        return;
-      }
-
-      const uid = String(sess.userId);
-      const sid = String(sess.sessionId);
-
-      // Mark alive; updated via 'pong'.
-      ws.isAlive = true;
-      ws.on('pong', () => {
-        ws.isAlive = true;
-      });
-
-      const authName = '';
-
-      const prev = authUsers.get(uid);
-
-      // Reuse the existing per-user state on reconnect (preserves call state,
-      // receipts, etc).
-      const authUser = prev ?? {
-        id: uid,
-        name: authName,
-        lastMsgAt: Date.now(),
-        roomId: null,
-        controllingSessionId: null,
-        joinPendingRoomId: null,
-        joinPendingSessionId: null,
-        _clientReceipts: null,
-        _clientReceiptQueue: null,
-      };
-
-      authUser.name = authName || authUser.name;
-      authUser.lastMsgAt = Date.now();
-
-      ws._lrcomAuthUserId = uid;
-      ws._lrcomSessionId = sid;
-      addAuthSocket(uid, sid, ws);
-      authUsers.set(uid, authUser);
-
-      sendBestEffort(ws, { type: 'authHello', userId: uid });
-
-      ws.on('message', async (data) => {
-        authUser.lastMsgAt = Date.now();
-        const msg = parseIncomingControlMessage(data);
-        if (!msg) return;
-        await handleAuthControlMessage(ws, authUser, sid, msg);
-      });
-
-      ws.on('close', () => {
-        handleAuthSessionClose(uid, sid, ws);
-      });
-
-      ws.on('error', () => {
-        // no-op (no logs)
-      });
-
-      return;
-    }
-  } catch {
-    try { ws.close(); } catch { /* ignore */ }
-    return;
-  }
-
-  // No anonymous/unauth WS mode: reject anything not on /private.
-  try { ws.close(); } catch { /* ignore */ }
-});
-
-// Terminate dead auth sockets (e.g. laptop sleep / mobile drop) using server
-// ping/pong heartbeat. This avoids disconnecting healthy-but-idle clients.
-if (WS_FALLBACK_ENABLED) {
-  setInterval(() => {
-    for (const m of authTransportSessions.values()) {
-      for (const ws of m.values()) {
-        try {
-          if (!ws || ws.readyState !== 1) continue;
-          if (ws.isAlive === false) {
-            if (typeof ws.terminate === 'function') ws.terminate();
-            else ws.close();
-            continue;
-          }
-          ws.isAlive = false;
-          if (typeof ws.ping === 'function') ws.ping();
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }, Math.max(5000, WS_HEARTBEAT_MS));
 }
 
 // Initialize database connection
