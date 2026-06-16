@@ -83,7 +83,7 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone auth_login {
+      zone login {
         match {
           path /api/auth/login /api/auth/login-init /api/auth/login-final
           method POST
@@ -93,7 +93,7 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone auth_register {
+      zone register {
         match {
           path /api/auth/register
           method POST
@@ -103,19 +103,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone auth_check_username {
+      zone message_send {
         match {
-          path /api/auth/check-username
-          method POST
-        }
-        key    {remote_host}
-        events 60
-        window 1m
-      }
-
-      zone signed_message_send {
-        match {
-          path /api/private/messages/send
+          path /api/messages/send
           method POST
         }
         key    {remote_host}
@@ -123,9 +113,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_message_update {
+      zone message_update {
         match {
-          path /api/private/messages/update
+          path /api/messages/update
           method POST
         }
         key    {remote_host}
@@ -133,9 +123,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_message_delete {
+      zone message_delete {
         match {
-          path /api/private/messages/delete
+          path /api/messages/delete
           method POST
         }
         key    {remote_host}
@@ -143,9 +133,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_create_chat {
+      zone create_chat {
         match {
-          path /api/private/chats/create-personal /api/private/chats/create-group
+          path /api/chats/create-personal /api/chats/create-group
           method POST
         }
         key    {remote_host}
@@ -153,9 +143,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_group_admin {
+      zone group_admin {
         match {
-          path /api/private/chats/add-member /api/private/chats/rename-group
+          path /api/chats/add-member /api/chats/rename-group
           method POST
         }
         key    {remote_host}
@@ -163,9 +153,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_account_delete {
+      zone account_delete {
         match {
-          path /api/private/account/delete
+          path /api/account/delete
           method POST
         }
         key    {remote_host}
@@ -173,9 +163,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_account_update {
+      zone account_update {
         match {
-          path /api/private/account/update
+          path /api/account/update
           method POST
         }
         key    {remote_host}
@@ -183,9 +173,9 @@ https://{$LRCOM_DOMAIN:localhost} {
         window 1m
       }
 
-      zone signed_session_refresh {
+      zone session_refresh {
         match {
-          path /api/private/session/refresh
+          path /api/session/refresh
           method POST
         }
         key    {remote_host}

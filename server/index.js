@@ -318,7 +318,7 @@ app.get('/api/push/public-key', (req, res) => {
 });
 
 // Auth session refresh: rotate bearer token without re-login.
-app.post('/api/private/session/refresh', requireAuthSession, (req, res) => {
+app.post('/api/session/refresh', requireAuthSession, (req, res) => {
   try {
     const oldToken = parseAuthTokenFromReq(req);
     const rotated = rotateToken(oldToken);
@@ -567,7 +567,7 @@ app.post('/api/auth/login-final', async (req, res) => {
   }
 });
 
-app.post('/api/private/account/update', requireAuthSession, async (req, res) => {
+app.post('/api/account/update', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const sessionId = String(req._authSessionId);
@@ -774,7 +774,7 @@ async function buildPresenceSnapshotForUser(userId, idsInput) {
   };
 }
 
-app.post('/api/private/chats/create-personal', requireAuthSession, async (req, res) => {
+app.post('/api/chats/create-personal', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const otherUserId = typeof req.body?.otherUserId === 'string' ? req.body.otherUserId : '';
@@ -816,7 +816,7 @@ app.post('/api/private/chats/create-personal', requireAuthSession, async (req, r
   }
 });
 
-app.post('/api/private/chats/create-group', requireAuthSession, async (req, res) => {
+app.post('/api/chats/create-group', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatNameEnc = typeof req.body?.chatNameEnc === 'string' ? req.body.chatNameEnc : '';
@@ -869,7 +869,7 @@ app.get('/api/private/chats/members', requireAuthSession, async (req, res) => {
   }
 });
 
-app.post('/api/private/chats/add-member', requireAuthSession, async (req, res) => {
+app.post('/api/chats/add-member', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -913,7 +913,7 @@ app.post('/api/private/chats/add-member', requireAuthSession, async (req, res) =
   }
 });
 
-app.post('/api/private/chats/rename-group', requireAuthSession, async (req, res) => {
+app.post('/api/chats/rename-group', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -979,7 +979,7 @@ app.get('/api/private/messages/unread', requireAuthSession, async (req, res) => 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024;
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large';
 
-app.post('/api/private/messages/send', requireAuthSession, async (req, res) => {
+app.post('/api/messages/send', requireAuthSession, async (req, res) => {
   try {
     const senderId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -1029,7 +1029,7 @@ app.post('/api/private/messages/send', requireAuthSession, async (req, res) => {
   }
 });
 
-app.post('/api/private/messages/delete', requireAuthSession, async (req, res) => {
+app.post('/api/messages/delete', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -1056,7 +1056,7 @@ app.post('/api/private/messages/delete', requireAuthSession, async (req, res) =>
   }
 });
 
-app.post('/api/private/messages/update', requireAuthSession, async (req, res) => {
+app.post('/api/messages/update', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId : '';
@@ -1170,7 +1170,7 @@ app.post('/api/private/chats/delete', requireAuthSession, async (req, res) => {
   }
 });
 
-app.post('/api/private/account/delete', requireAuthSession, async (req, res) => {
+app.post('/api/account/delete', requireAuthSession, async (req, res) => {
   try {
     const userId = String(req._authUserId);
     const token = parseAuthTokenFromReq(req);

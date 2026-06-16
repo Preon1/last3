@@ -34,7 +34,7 @@ Important implementation points:
 - Challenge-response login flow:
 	- /api/auth/login-init: server encrypts challenge to stored public key.
 	- /api/auth/login-final: client proves private key possession.
-- Bearer tokens are in-memory (authSession.js), rotated via /api/private/session/refresh.
+- Bearer tokens are in-memory (authSession.js), rotated via /api/session/refresh.
 - Multi-device sessions supported with eviction and forced logout notifications.
 
 ### 3.2 VOPRF-Based Name Tokens
