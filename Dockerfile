@@ -27,15 +27,15 @@ COPY --from=client-build /app/client/dist ./client/dist
 
 RUN chmod +x /app/server/entrypoint.sh
 
-ENV HOST=0.0.0.0
-ENV PORT=8443
-ENV WEBTRANSPORT_HOST=0.0.0.0
-ENV WEBTRANSPORT_PORT=8444
-ENV WEBTRANSPORT_PATH=/wt
-ENV PUBLIC_DIR=/app/client/dist
+# ENV HOST=0.0.0.0
+# ENV PORT=8443
+# ENV WEBTRANSPORT_HOST=0.0.0.0
+# ENV WEBTRANSPORT_PORT=8444
+# ENV WEBTRANSPORT_PATH=/wt
+# ENV PUBLIC_DIR=/app/client/dist
 
 # AUTO_TLS=1 will generate a self-signed cert (for personal/private use)
-ENV AUTO_TLS=1
+# ENV AUTO_TLS=1
 
 EXPOSE 8443
 

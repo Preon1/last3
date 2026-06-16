@@ -56,8 +56,8 @@ services:
 
       # HTTPS: auto-generate a self-signed certificate in the container.
       # Add your LAN IP to TLS_SANS so browsers accept it for that address.
-      - AUTO_TLS=1
-      - TLS_SANS=${LRCOM_TLS_SANS:-DNS:localhost,IP:127.0.0.1}
+      - AUTO_TLS=${AUTO_TLS:-0}
+      # - TLS_SANS=${LRCOM_TLS_SANS:-DNS:localhost,IP:127.0.0.1}
 
       # TURN (optional): generated time-limited credentials based on shared secret.
       # IMPORTANT: the TURN host must be reachable by browsers.
@@ -93,6 +93,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-lrcom}
       - POSTGRES_USER=${POSTGRES_USER:-lrcom}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+
+      - VOPRF_PRIVATE_KEY_B64U=${VOPRF_PRIVATE_KEY_B64U:-}
     depends_on:
       postgres:
         condition: service_healthy

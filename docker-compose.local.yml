@@ -10,8 +10,8 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
-    environment:
-      - LRCOM_DOMAIN=localhost
+    env_file:
+      - ".env"
     volumes:
       - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
       - ./certs/cert.pem:/etc/caddy/cert.pem:ro
@@ -32,8 +32,14 @@ services:
     ports:
       - "8443:8443"
       - "${WEBTRANSPORT_PORT:-8444}:${WEBTRANSPORT_PORT:-8444}/udp"
+    expose:
+      - 8443
+    volumes:
+      - ./certs/cert.pem:/etc/certs/cert.pem:ro
+      - ./certs/key.pem:/etc/certs/key.pem:ro
     environment:
       - APP_NAME=${LRCOM_APP_NAME:-Last}
+
       - HOST=0.0.0.0
       - PORT=8443
       - WEBTRANSPORT_ENABLED=${WEBTRANSPORT_ENABLED:-1}
@@ -41,26 +47,37 @@ services:
       - WEBTRANSPORT_PORT=${WEBTRANSPORT_PORT:-8444}
       - WEBTRANSPORT_PATH=/wt
       - WEBTRANSPORT_SECRET=${WEBTRANSPORT_SECRET:-}
-      - AUTO_TLS=1
+
+      - AUTO_TLS=${AUTO_TLS:-0}
       - TLS_SANS=${LRCOM_TLS_SANS:-DNS:localhost,IP:127.0.0.1}
+
+      - TLS_DIR=${TLS_DIR:-/etc/certs/}
+      - TLS_KEY_PATH=${TLS_KEY_PATH:-/etc/certs/key.pem}
+      - TLS_CERT_PATH=${TLS_CERT_PATH:-/etc/certs/cert.pem}
+
       - TURN_URLS=turn:${LRCOM_TURN_HOST:-localhost}:3478?transport=udp,turn:${LRCOM_TURN_HOST:-localhost}:3478?transport=tcp
       - TURN_SECRET=${LRCOM_TURN_SECRET:-change-me}
       - TURN_USERNAME_TTL_SECONDS=3600
       - TURN_RELAY_MIN_PORT=${LRCOM_TURN_MIN_PORT:-49160}
       - TURN_RELAY_MAX_PORT=${LRCOM_TURN_MAX_PORT:-49169}
-      - STARTUP_LOG=1
+
       - DEBUG=${DEBUG:-false}
+
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@localhost}
+
       - SIGNED_CLEANUP_ENABLED=${SIGNED_CLEANUP_ENABLED:-1}
       - SIGNED_CLEANUP_INTERVAL_MS=${SIGNED_CLEANUP_INTERVAL_MS:-600000}
       - SIGNED_CLEANUP_INITIAL_DELAY_MS=${SIGNED_CLEANUP_INITIAL_DELAY_MS:-30000}
+
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-lrcom}
       - POSTGRES_USER=${POSTGRES_USER:-lrcom}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+
+      - VOPRF_PRIVATE_KEY_B64U=${VOPRF_PRIVATE_KEY_B64U:-}
     depends_on:
       postgres:
         condition: service_healthy
