@@ -213,7 +213,7 @@ async function onToggleHiddenMode(ev: Event) {
     await authStore.updateHiddenMode(next)
     toast.push({
       title: String(t('settingsToast.savedTitle')),
-      message: String(t(next ? 'authStore.settingsToast.hiddenModeOn' : 'authStore.settingsToast.hiddenModeOff')),
+      message: String(t(next ? 'settingsToast.hiddenModeOn' : 'settingsToast.hiddenModeOff')),
       variant: 'info',
       timeoutMs: 3000,
     })
@@ -241,7 +241,7 @@ async function onToggleIntrovertMode(ev: Event) {
     await authStore.updateIntrovertMode(next)
     toast.push({
       title: String(t('settingsToast.savedTitle')),
-      message: String(t(next ? 'authStore.settingsToast.introvertModeOn' : 'authStore.settingsToast.introvertModeOff')),
+      message: String(t(next ? 'settingsToast.introvertModeOn' : 'settingsToast.introvertModeOff')),
       variant: 'info',
       timeoutMs: 3000,
     })

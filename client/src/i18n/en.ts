@@ -222,7 +222,7 @@ const en = {
     bodyFromTo:
       'Server has been updated from {from} to {to}. Application should be reloaded now or later in settings.',
   },
-    removeSpecific: 'Een specifieke sleutel verwijderen',
+  removeSpecific: 'Een specifieke sleutel verwijderen',
   settingsToast: {
     savedTitle: 'Saved',
     failedTitle: 'Update failed',
