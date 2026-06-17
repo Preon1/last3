@@ -5,13 +5,19 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
-import { decryptLocalUsername, decryptPrivateKeyJwk, encryptLocalUsername, encryptPrivateKeyJwk } from '../utils/signedCrypto'
+import { decryptStringWithPassword, encryptStringWithPassword, LOCAL_KEY_PRIVATE_KEY_ITERATIONS } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 
-type StoredKeyV2 = {
-  v: 2
-  encryptedUsername: string
-  encryptedPrivateKey: string
+type StoredKeyV3 = {
+  v: 3
+  d: string
+}
+
+type LocalKeyEntryPlain = {
+  n: string
+  k: string
+  p: string
+  s?: string
 }
 
 const DOWNLOAD_NAME = 'last_keys.json'
@@ -49,7 +55,7 @@ const rmUsername = ref('')
 const rmPassword = ref('')
 const rmBusy = ref(false)
 const rmErr = ref('')
-const rmFoundEntry = ref<StoredKeyV2 | null>(null)
+const rmFoundEntry = ref<StoredKeyV3 | null>(null)
 const rmFoundUsername = ref<string | null>(null)
 
 const chUsername = ref('')
@@ -58,12 +64,12 @@ const chNewPassword = ref('')
 const chNewPassword2 = ref('')
 const chBusy = ref(false)
 const chErr = ref('')
-const chFoundEntry = ref<StoredKeyV2 | null>(null)
+const chFoundEntry = ref<StoredKeyV3 | null>(null)
 const chFoundUsername = ref<string | null>(null)
-const chFoundPrivateJwk = ref<string | null>(null)
+const chFoundPayload = ref<LocalKeyEntryPlain | null>(null)
 
 type ImportPlan = {
-  merged: StoredKeyV2[]
+  merged: StoredKeyV3[]
   read: number
   added: number
   ignored: number
@@ -76,21 +82,41 @@ function refresh() {
   refreshTick.value++
 }
 
-function loadKeyEntries(): StoredKeyV2[] {
+function parseLocalKeyEntryPlain(raw: string): LocalKeyEntryPlain | null {
+  try {
+    const obj = JSON.parse(raw) as Partial<LocalKeyEntryPlain>
+    if (!obj || typeof obj !== 'object') return null
+    const n = typeof obj.n === 'string' ? obj.n : ''
+    const k = typeof obj.k === 'string' ? obj.k : ''
+    const p = typeof obj.p === 'string' ? obj.p : ''
+    if (!n || !k) return null
+    if (p.length < 0 || p.length > 32) return null
+    const s = typeof obj.s === 'string' && obj.s ? obj.s : undefined
+    return s ? { n, k, p, s } : { n, k, p }
+  } catch {
+    return null
+  }
+}
+
+function loadKeyEntries(): StoredKeyV3[] {
   void refreshTick.value
   const arr = localData.getJson<any[]>(LocalEntity.AuthKeys)
   if (!Array.isArray(arr)) return []
-  const out: StoredKeyV2[] = []
+  const out: StoredKeyV3[] = []
   for (const it of arr) {
-    if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
-      out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
+    if (it && it.v === 3 && typeof it.d === 'string') {
+      out.push({ v: 3, d: it.d })
     }
   }
   return out
 }
 
-function saveKeyEntries(next: StoredKeyV2[]) {
+function saveKeyEntries(next: StoredKeyV3[]) {
   localData.setJson(LocalEntity.AuthKeys, next)
+}
+
+function entrySig(entry: StoredKeyV3): string {
+  return entry.d
 }
 
 const keyEntries = computed(() => loadKeyEntries())
@@ -164,7 +190,7 @@ function resetStateOnOpen() {
   chErr.value = ''
   chFoundEntry.value = null
   chFoundUsername.value = null
-  chFoundPrivateJwk.value = null
+  chFoundPayload.value = null
 
   importPlan.value = null
 }
@@ -194,7 +220,7 @@ function goBack() {
   if (page.value === 'changePasswordNew') {
     chNewPassword.value = ''
     chNewPassword2.value = ''
-    chFoundPrivateJwk.value = null
+    chFoundPayload.value = null
     chFoundEntry.value = null
     chFoundUsername.value = null
     page.value = 'changePasswordFind'
@@ -303,7 +329,7 @@ function openChangePasswordPage() {
   chNewPassword2.value = ''
   chFoundEntry.value = null
   chFoundUsername.value = null
-  chFoundPrivateJwk.value = null
+  chFoundPayload.value = null
   page.value = 'changePasswordFind'
 }
 
@@ -311,7 +337,7 @@ async function findKeyForPasswordChange() {
   chErr.value = ''
   chFoundEntry.value = null
   chFoundUsername.value = null
-  chFoundPrivateJwk.value = null
+  chFoundPayload.value = null
 
   const u = chUsername.value.trim()
   const pw = chOldPassword.value
@@ -329,14 +355,13 @@ async function findKeyForPasswordChange() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const decU = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
-        if (decU !== u) continue
-
-        const privateJwk = await decryptPrivateKeyJwk({ encrypted: entry.encryptedPrivateKey, password: pw })
+        const raw = await decryptStringWithPassword({ encrypted: entry.d, password: pw })
+        const payload = parseLocalKeyEntryPlain(raw)
+        if (!payload || payload.n !== u) continue
 
         chFoundEntry.value = entry
         chFoundUsername.value = u
-        chFoundPrivateJwk.value = privateJwk
+        chFoundPayload.value = payload
         chOldPassword.value = ''
         chNewPassword.value = ''
         chNewPassword2.value = ''
@@ -356,8 +381,8 @@ async function applyPasswordChange() {
   chErr.value = ''
   const entry = chFoundEntry.value
   const u = chFoundUsername.value
-  const privateJwk = chFoundPrivateJwk.value
-  if (!entry || !u || !privateJwk) {
+  const payload = chFoundPayload.value
+  if (!entry || !u || !payload) {
     chErr.value = String(t('auth.keys.specificNotFound'))
     return
   }
@@ -383,24 +408,24 @@ async function applyPasswordChange() {
 
   chBusy.value = true
   try {
-    const encryptedUsername = await encryptLocalUsername({ username: u, password: pw1 })
-    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: pw1 })
-    const updated: StoredKeyV2 = { v: 2, encryptedUsername, encryptedPrivateKey }
+    const raw = JSON.stringify({ ...payload, n: u })
+    const d = await encryptStringWithPassword({ plaintext: raw, password: pw1, iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS })
+    const updated: StoredKeyV3 = { v: 3, d }
 
     const existing = keyEntries.value
-    const removeSig = `${entry.encryptedUsername}\n${entry.encryptedPrivateKey}`
-    const next: StoredKeyV2[] = []
+    const removeSig = entrySig(entry)
+    const next: StoredKeyV3[] = []
     const seen = new Set<string>()
 
     for (const k of existing) {
-      const sig = `${k.encryptedUsername}\n${k.encryptedPrivateKey}`
+      const sig = entrySig(k)
       if (sig === removeSig) continue
       if (seen.has(sig)) continue
       seen.add(sig)
       next.push(k)
     }
 
-    const updatedSig = `${updated.encryptedUsername}\n${updated.encryptedPrivateKey}`
+    const updatedSig = entrySig(updated)
     if (!seen.has(updatedSig)) next.push(updated)
 
     if (next.length > 0) saveKeyEntries(next)
@@ -414,7 +439,7 @@ async function applyPasswordChange() {
     chNewPassword2.value = ''
     chFoundEntry.value = null
     chFoundUsername.value = null
-    chFoundPrivateJwk.value = null
+    chFoundPayload.value = null
     page.value = 'main'
   } catch (e: any) {
     chErr.value = typeof e?.message === 'string' ? e.message : String(e)
@@ -443,8 +468,9 @@ async function onDownloadSpecific() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const dec = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
-        if (dec === u) {
+        const raw = await decryptStringWithPassword({ encrypted: entry.d, password: pw })
+        const payload = parseLocalKeyEntryPlain(raw)
+        if (payload?.n === u) {
           downloadJson([entry])
           page.value = 'download'
           toastInfo(String(t('auth.keys.downloadSpecific')), String(t('auth.keys.downloadOneOk')))
@@ -505,8 +531,9 @@ async function findKeyForRemoval() {
     const list = keyEntries.value
     for (const entry of list) {
       try {
-        const dec = await decryptLocalUsername({ encrypted: entry.encryptedUsername, password: pw })
-        if (dec === u) {
+        const raw = await decryptStringWithPassword({ encrypted: entry.d, password: pw })
+        const payload = parseLocalKeyEntryPlain(raw)
+        if (payload?.n === u) {
           rmFoundEntry.value = entry
           rmFoundUsername.value = u
           page.value = 'removeSpecificConfirm'
@@ -534,8 +561,8 @@ function removeSpecificKeyNow() {
   rmBusy.value = true
   try {
     const existing = keyEntries.value
-    const sigToRemove = `${entry.encryptedUsername}\n${entry.encryptedPrivateKey}`
-    const next = existing.filter((k) => `${k.encryptedUsername}\n${k.encryptedPrivateKey}` !== sigToRemove)
+    const sigToRemove = entrySig(entry)
+    const next = existing.filter((k) => entrySig(k) !== sigToRemove)
     if (next.length > 0) saveKeyEntries(next)
     else localData.remove(LocalEntity.AuthKeys)
 
@@ -575,12 +602,12 @@ async function onFileSelected(ev: Event) {
     const text = await file.text()
     const parsed = JSON.parse(text)
 
-    const incoming: StoredKeyV2[] = []
+    const incoming: StoredKeyV3[] = []
     const invalid: string[] = []
 
     const consider = (it: any) => {
-      if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
-        incoming.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
+      if (it && it.v === 3 && typeof it.d === 'string') {
+        incoming.push({ v: 3, d: it.d })
       } else {
         invalid.push('invalid_entry')
       }
@@ -595,13 +622,13 @@ async function onFileSelected(ev: Event) {
     }
 
     const existing = keyEntries.value
-    const seen = new Set(existing.map((k) => `${k.encryptedUsername}\n${k.encryptedPrivateKey}`))
+    const seen = new Set(existing.map((k) => entrySig(k)))
 
     let added = 0
     let ignored = 0
     const merged = [...existing]
     for (const k of incoming) {
-      const sig = `${k.encryptedUsername}\n${k.encryptedPrivateKey}`
+      const sig = entrySig(k)
       if (seen.has(sig)) {
         ignored++
         continue

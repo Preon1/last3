@@ -7,20 +7,16 @@ type StoredEncryptedBlobV1 = {
   ctB64: string
 }
 
-export const LOCAL_KEY_USERNAME_ITERATIONS = 1_212_123
 export const LOCAL_KEY_PRIVATE_KEY_ITERATIONS = 612_345
 
-const LOCAL_USERNAME_PAD_TOTAL_LEN = 75
-const LOCAL_USERNAME_PAD_PREFIX = 'LP'
-const LOCAL_USERNAME_PAD_LEN_HEX_WIDTH = 4
 const SIGNED_TEXT_PAD_PREFIX = 'STP'
 const SIGNED_TEXT_PAD_LEN_HEX_WIDTH = 4
 const SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN = 4096
 
-const LOCAL_USERNAME_PAD_ALPHABET =
+const TEXT_PAD_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
 
-const LOCAL_USERNAME_PAD_ALPHABET_SET = new Set(LOCAL_USERNAME_PAD_ALPHABET.split(''))
+const TEXT_PAD_ALPHABET_SET = new Set(TEXT_PAD_ALPHABET.split(''))
 
 function isStringFromAlphabet(s: string, alphabetSet: Set<string>) {
   const str = String(s ?? '')
@@ -73,45 +69,6 @@ function randomIntInclusive(min: number, max: number) {
   return lo + ((u32[0] ?? 0) % span)
 }
 
-function padUsernameForLocalKey(username: string) {
-  const u = String(username ?? '')
-
-  const lenHex = u.length.toString(16).padStart(LOCAL_USERNAME_PAD_LEN_HEX_WIDTH, '0')
-  if (lenHex.length !== LOCAL_USERNAME_PAD_LEN_HEX_WIDTH || !/^[0-9a-fA-F]{4}$/.test(lenHex)) {
-    throw new Error('Username too long to pad')
-  }
-
-  const base = `${LOCAL_USERNAME_PAD_PREFIX}${lenHex}${u}`
-  const padLen = LOCAL_USERNAME_PAD_TOTAL_LEN - base.length
-  if (padLen < 0) throw new Error('Username too long to pad')
-  return base + randomStringFromAlphabet(padLen, LOCAL_USERNAME_PAD_ALPHABET)
-}
-
-function unpadUsernameFromLocalKey(padded: string) {
-  const s = String(padded ?? '')
-
-  // New format: LP + 4-hex-length + username + random padding.
-  // Only treat it as LP-format if it looks like a padded blob.
-  if (s.length === LOCAL_USERNAME_PAD_TOTAL_LEN && s.startsWith(LOCAL_USERNAME_PAD_PREFIX)) {
-    const start = LOCAL_USERNAME_PAD_PREFIX.length
-    const lenHex = s.slice(start, start + LOCAL_USERNAME_PAD_LEN_HEX_WIDTH)
-    if (/^[0-9a-fA-F]{4}$/.test(lenHex)) {
-      const n = Number.parseInt(lenHex, 16)
-      const uStart = start + LOCAL_USERNAME_PAD_LEN_HEX_WIDTH
-      const uEnd = uStart + n
-      if (Number.isFinite(n) && n >= 0 && uEnd <= s.length) {
-        // Additional guard: ensure the remaining tail looks like our padding.
-        const tail = s.slice(uEnd)
-        if (isStringFromAlphabet(tail, LOCAL_USERNAME_PAD_ALPHABET_SET)) {
-          return s.slice(uStart, uEnd)
-        }
-      }
-    }
-  }
-
-  throw new Error('Unsupported local username format')
-}
-
 export async function generateRsaKeyPair() {
   const kp = await crypto.subtle.generateKey(
     {
@@ -151,14 +108,6 @@ async function deriveAesKeyFromPassword(password: string, salt: Uint8Array, iter
   )
 }
 
-export async function encryptPrivateKeyJwk(params: { privateJwk: string; password: string }) {
-  return encryptStringWithPassword({ plaintext: params.privateJwk, password: params.password, iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS })
-}
-
-export async function decryptPrivateKeyJwk({ encrypted, password }: { encrypted: string; password: string }) {
-  return decryptStringWithPassword({ encrypted, password })
-}
-
 export async function encryptStringWithPassword(params: { plaintext: string; password: string; iterations?: number }) {
   const iterations = typeof params.iterations === 'number' && Number.isFinite(params.iterations)
     ? Math.max(1, Math.floor(params.iterations))
@@ -195,20 +144,6 @@ export async function decryptStringWithPassword(params: { encrypted: string; pas
   return decUtf8(pt)
 }
 
-export async function encryptLocalUsername(params: { username: string; password: string }) {
-  const padded = padUsernameForLocalKey(params.username)
-  return encryptStringWithPassword({
-    plaintext: padded,
-    password: params.password,
-    iterations: LOCAL_KEY_USERNAME_ITERATIONS,
-  })
-}
-
-export async function decryptLocalUsername(params: { encrypted: string; password: string }) {
-  const padded = await decryptStringWithPassword({ encrypted: params.encrypted, password: params.password })
-  return unpadUsernameFromLocalKey(padded)
-}
-
 function normalizeTextPadBounds(minPadChars: number, maxPadChars: number) {
   const min = Number.isFinite(minPadChars) ? Math.max(0, Math.floor(minPadChars)) : NaN
   const max = Number.isFinite(maxPadChars) ? Math.max(0, Math.floor(maxPadChars)) : NaN
@@ -230,7 +165,7 @@ function padEnvelopeText(rawText: string, minPadChars: number, maxPadChars: numb
   }
 
   const randomLen = randomIntInclusive(bounds.min, bounds.max)
-  const tail = randomStringFromAlphabet(randomLen, LOCAL_USERNAME_PAD_ALPHABET)
+  const tail = randomStringFromAlphabet(randomLen, TEXT_PAD_ALPHABET)
   return `${SIGNED_TEXT_PAD_PREFIX}${lenHex}${text}${tail}`
 }
 
@@ -255,7 +190,7 @@ function unpadEnvelopeText(padded: string, minPadChars: number, maxPadChars: num
 
   const tail = s.slice(textEnd)
   if (tail.length < bounds.min || tail.length > bounds.max) throw new Error('Unsupported signed text format')
-  if (!isStringFromAlphabet(tail, LOCAL_USERNAME_PAD_ALPHABET_SET)) throw new Error('Unsupported signed text format')
+  if (!isStringFromAlphabet(tail, TEXT_PAD_ALPHABET_SET)) throw new Error('Unsupported signed text format')
 
   return s.slice(textStart, textEnd)
 }

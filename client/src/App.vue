@@ -67,14 +67,14 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
                 toast.error('Invalid JSON', 'The shared file is not valid JSON.')
                 continue
               }
-              // Validate keys format: expect array of objects with encryptedUsername & encryptedPrivateKey
-              if (Array.isArray(parsed) && parsed.every(k => k && typeof k.encryptedUsername === 'string' && typeof k.encryptedPrivateKey === 'string')) {
+              // Validate keys format: expect array of objects with v=3 and encrypted payload d.
+              if (Array.isArray(parsed) && parsed.every(k => k && k.v === 3 && typeof k.d === 'string')) {
                 // Merge with existing keys
                 const existing = localData.getJson<any[]>(LocalEntity.AuthKeys) ?? []
                 const merged = [...existing]
                 let added = 0
                 for (const k of parsed) {
-                  if (!merged.some(e => e.encryptedUsername === k.encryptedUsername && e.encryptedPrivateKey === k.encryptedPrivateKey)) {
+                  if (!merged.some(e => e && e.v === 3 && typeof e.d === 'string' && e.d === k.d)) {
                     merged.push(k)
                     added++
                   }
@@ -86,7 +86,7 @@ if (typeof window !== 'undefined' && typeof (window as any).launchQueue !== 'und
                   toast.push({ title: 'No New Keys', message: 'All keys were already present.', variant: 'info', timeoutMs: 6000 })
                 }
               } else {
-                toast.error('Invalid Key Format', 'JSON must be an array of key objects.')
+                toast.error('Invalid Key Format', 'JSON must be an array of v3 key objects.')
               }
             }
           }

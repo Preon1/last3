@@ -13,17 +13,16 @@ import {
 } from '../utils/notificationPrefs'
 import {
   decryptMessageEnvelope,
-  decryptLocalUsername,
-  decryptPrivateKeyJwk,
+  decryptStringWithPassword,
   decryptSmallStringWithPrivateKey,
   encryptMessageEnvelope,
-  encryptLocalUsername,
-  encryptPrivateKeyJwk,
+  encryptStringWithPassword,
   encryptSmallStringWithPublicKeyJwk,
   generateRsaKeyPair,
   importRsaPssPrivateKeyJwk,
   importRsaPssPublicKeyJwk,
   importRsaPrivateKeyJwk,
+  LOCAL_KEY_PRIVATE_KEY_ITERATIONS,
   publicJwkFromPrivateJwk,
   signEnvelope,
   verifyEnvelope,
@@ -124,6 +123,10 @@ const CHAT_META_TEXT_PAD_MIN_CHARS = 0
 const CHAT_META_TEXT_PAD_MAX_CHARS = 32
 const MESSAGE_TEXT_PAD_MIN_CHARS = 0
 const MESSAGE_TEXT_PAD_MAX_CHARS = 64
+const LOCAL_KEY_ENTRY_POSTFIX_MIN_CHARS = 0
+const LOCAL_KEY_ENTRY_POSTFIX_MAX_CHARS = 32
+const LOCAL_KEY_ENTRY_POSTFIX_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
 
 // Signature verification: cache imported RSA-PSS verify keys by JWK string.
 const verifyKeyCache = new Map<string, CryptoKey>()
@@ -159,10 +162,16 @@ function assertUsernameIsXssSafe(username: string) {
   if (/[\u0000-\u001F\u007F]/.test(u)) throw new Error('Username contains unsafe characters')
 }
 
-type StoredKeyV2 = {
-  v: 2
-  encryptedUsername: string
-  encryptedPrivateKey: string
+type StoredKeyV3 = {
+  v: 3
+  d: string
+}
+
+type LocalKeyEntryPlain = {
+  n: string
+  k: string
+  p: string
+  s?: string
 }
 
 type StoredUser = {
@@ -549,6 +558,35 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function randomStringFromAlphabet(len: number, alphabet: string) {
+    if (len <= 0) return ''
+    const chars = String(alphabet ?? '')
+    if (!chars.length) throw new Error('Alphabet must not be empty')
+
+    const u8 = crypto.getRandomValues(new Uint8Array(len))
+    let out = ''
+    for (let i = 0; i < u8.length; i++) out += chars[u8[i]! % chars.length]
+    return out
+  }
+
+  function parseLocalKeyEntryPlain(raw: string): LocalKeyEntryPlain | null {
+    try {
+      const obj = JSON.parse(raw) as Partial<LocalKeyEntryPlain>
+      if (!obj || typeof obj !== 'object') return null
+
+      const n = typeof obj.n === 'string' ? obj.n : ''
+      const k = typeof obj.k === 'string' ? obj.k : ''
+      const p = typeof obj.p === 'string' ? obj.p : ''
+      if (!n || !k) return null
+      if (p.length < LOCAL_KEY_ENTRY_POSTFIX_MIN_CHARS || p.length > LOCAL_KEY_ENTRY_POSTFIX_MAX_CHARS) return null
+
+      const s = typeof obj.s === 'string' && obj.s ? obj.s : undefined
+      return s ? { n, k, p, s } : { n, k, p }
+    } catch {
+      return null
+    }
+  }
+
   function computeRemoveDateIsoForNow(expirationDays: number) {
     const jitterSeconds = randomIntInclusive(0, 86400)
     const ms = Date.now() + expirationDays * 86400_000 + jitterSeconds * 1000
@@ -864,19 +902,19 @@ export const useAuthStore = defineStore('auth', () => {
     }, retryDelayMs)
   }
 
-  function loadKeyEntries(): StoredKeyV2[] {
+  function loadKeyEntries(): StoredKeyV3[] {
     const arr = localData.getJson<any[]>(LocalEntity.AuthKeys)
     if (!Array.isArray(arr)) return []
-    const out: StoredKeyV2[] = []
+    const out: StoredKeyV3[] = []
     for (const it of arr) {
-      if (it && it.v === 2 && typeof it.encryptedUsername === 'string' && typeof it.encryptedPrivateKey === 'string') {
-        out.push({ v: 2, encryptedUsername: it.encryptedUsername, encryptedPrivateKey: it.encryptedPrivateKey })
+      if (it && it.v === 3 && typeof it.d === 'string') {
+        out.push({ v: 3, d: it.d })
       }
     }
     return out
   }
 
-  function saveKeyEntries(next: StoredKeyV2[]) {
+  function saveKeyEntries(next: StoredKeyV3[]) {
     localData.setJson(LocalEntity.AuthKeys, next)
   }
 
@@ -885,34 +923,55 @@ export const useAuthStore = defineStore('auth', () => {
     localData.remove(LocalEntity.AuthKeys)
   }
 
-  async function saveLocalKeyForUser(params: { username: string; password: string; encryptedPrivateKey: string }) {
+  async function saveLocalKeyForUser(params: { username: string; password: string; privateKeyMaterial: string; signingKeyMaterial?: string }) {
     if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
-    const encryptedUsername = await encryptLocalUsername({ username: params.username, password: params.password })
+
+    const postfixLen = randomIntInclusive(LOCAL_KEY_ENTRY_POSTFIX_MIN_CHARS, LOCAL_KEY_ENTRY_POSTFIX_MAX_CHARS)
+    const p = randomStringFromAlphabet(postfixLen, LOCAL_KEY_ENTRY_POSTFIX_ALPHABET)
+
+    const payload: LocalKeyEntryPlain = {
+      n: String(params.username ?? ''),
+      k: String(params.privateKeyMaterial ?? ''),
+      p,
+    }
+    const separateSigning = typeof params.signingKeyMaterial === 'string' && params.signingKeyMaterial && params.signingKeyMaterial !== payload.k
+    if (separateSigning) payload.s = params.signingKeyMaterial
+
+    const d = await encryptStringWithPassword({
+      plaintext: JSON.stringify(payload),
+      password: params.password,
+      iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS,
+    })
 
     const cur = loadKeyEntries()
-    const kept: StoredKeyV2[] = []
+    const kept: StoredKeyV3[] = []
     for (const e of cur) {
       try {
-        const u = await decryptLocalUsername({ encrypted: e.encryptedUsername, password: params.password })
-        if (u === params.username) continue
+        const raw = await decryptStringWithPassword({ encrypted: e.d, password: params.password })
+        const plain = parseLocalKeyEntryPlain(raw)
+        if (plain?.n === params.username) continue
       } catch {
         // If it can't be decrypted with this password, keep it.
       }
       kept.push(e)
     }
 
-    kept.push({ v: 2, encryptedUsername, encryptedPrivateKey: params.encryptedPrivateKey })
+    kept.push({ v: 3, d })
     saveKeyEntries(kept)
-
-    // No legacy key storage is supported.
   }
 
-  async function findEncryptedPrivateKeyForLogin(params: { username: string; password: string }) {
+  async function findLocalKeyMaterialForLogin(params: { username: string; password: string }) {
     const list = loadKeyEntries()
     for (const e of list) {
       try {
-        const u = await decryptLocalUsername({ encrypted: e.encryptedUsername, password: params.password })
-        if (u === params.username) return e.encryptedPrivateKey
+        const raw = await decryptStringWithPassword({ encrypted: e.d, password: params.password })
+        const plain = parseLocalKeyEntryPlain(raw)
+        if (plain?.n === params.username) {
+          return {
+            privateKeyMaterial: plain.k,
+            signingKeyMaterial: plain.s ?? plain.k,
+          }
+        }
       } catch {
         // ignore
       }
@@ -1066,20 +1125,26 @@ export const useAuthStore = defineStore('auth', () => {
     if (!params.password) throw new Error('Password required')
     if (params.password.length > MAX_PASSWORD_LEN) throw new Error(`Password must be at most ${MAX_PASSWORD_LEN} characters`)
 
-    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
-    if (!encryptedPrivateKey) throw new Error('No local key found')
+    const localKey = await findLocalKeyMaterialForLogin({ username: u, password: params.password })
+    if (!localKey) throw new Error('No local key found')
 
-    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    const privateJwk = localKey.privateKeyMaterial
+    const signingJwk = localKey.signingKeyMaterial
     lastPrivateJwkJsonForStay = privateJwk
     privateKey.value = await importRsaPrivateKeyJwk(privateJwk)
-    signingKey.value = await importRsaPssPrivateKeyJwk(privateJwk)
+    signingKey.value = await importRsaPssPrivateKeyJwk(signingJwk)
     publicKeyJwk.value = publicJwkFromPrivateJwk(privateJwk)
 
     // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     // Now that the password is known, ensure we persist only the low-profile entry.
-    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+    await saveLocalKeyForUser({
+      username: u,
+      password: params.password,
+      privateKeyMaterial: privateJwk,
+      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
+    })
 
     // After unlock: load server state and connect realtime.
     if (token.value) {
@@ -2626,7 +2691,6 @@ export const useAuthStore = defineStore('auth', () => {
     storeLastUsername(u)
 
     const { publicJwk, privateJwk } = await generateRsaKeyPair()
-    const encryptedPrivateKey = await encryptPrivateKeyJwk({ privateJwk, password: params.password })
 
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
@@ -2670,7 +2734,7 @@ export const useAuthStore = defineStore('auth', () => {
     signingKey.value = importedSigningKey
 
     // Persist key material only after server registration succeeds.
-    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+    await saveLocalKeyForUser({ username: u, password: params.password, privateKeyMaterial: privateJwk })
 
     if (token.value && userId.value && username.value) {
       storeSession(
@@ -2702,14 +2766,15 @@ export const useAuthStore = defineStore('auth', () => {
 
     storeLastUsername(u)
 
-    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
-    if (!encryptedPrivateKey) throw new Error('No local key found')
+    const localKey = await findLocalKeyMaterialForLogin({ username: u, password: params.password })
+    if (!localKey) throw new Error('No local key found')
 
-    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    const privateJwk = localKey.privateKeyMaterial
+    const signingJwk = localKey.signingKeyMaterial
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
     const priv = await importRsaPrivateKeyJwk(privateJwk)
-    const signPriv = await importRsaPssPrivateKeyJwk(privateJwk)
+    const signPriv = await importRsaPssPrivateKeyJwk(signingJwk)
 
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
 
@@ -2770,7 +2835,12 @@ export const useAuthStore = defineStore('auth', () => {
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     // Migrate/ensure low-profile local storage now that we have the password.
-    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+    await saveLocalKeyForUser({
+      username: u,
+      password: params.password,
+      privateKeyMaterial: privateJwk,
+      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
+    })
 
     await refreshChats()
     await connectWs()
@@ -2801,14 +2871,15 @@ export const useAuthStore = defineStore('auth', () => {
 
     storeLastUsername(u)
 
-    const encryptedPrivateKey = await findEncryptedPrivateKeyForLogin({ username: u, password: params.password })
-    if (!encryptedPrivateKey) throw new Error('No local key found')
+    const localKey = await findLocalKeyMaterialForLogin({ username: u, password: params.password })
+    if (!localKey) throw new Error('No local key found')
 
-    const privateJwk = await decryptPrivateKeyJwk({ encrypted: encryptedPrivateKey, password: params.password })
+    const privateJwk = localKey.privateKeyMaterial
+    const signingJwk = localKey.signingKeyMaterial
     // Cache JWK for optional stay-login auto-unlock.
     lastPrivateJwkJsonForStay = privateJwk
     const priv = await importRsaPrivateKeyJwk(privateJwk)
-    const signPriv = await importRsaPssPrivateKeyJwk(privateJwk)
+    const signPriv = await importRsaPssPrivateKeyJwk(signingJwk)
     const publicJwk = publicJwkFromPrivateJwk(privateJwk)
 
     const vaultJson = makeVaultJson(exp)
@@ -2858,7 +2929,12 @@ export const useAuthStore = defineStore('auth', () => {
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
     // Ensure low-profile local storage now that we have the password.
-    await saveLocalKeyForUser({ username: u, password: params.password, encryptedPrivateKey })
+    await saveLocalKeyForUser({
+      username: u,
+      password: params.password,
+      privateKeyMaterial: privateJwk,
+      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
+    })
 
     await refreshChats()
     await connectWs()
