@@ -118,10 +118,10 @@ const MAX_PASSWORD_LEN = 512
 
 const MAX_ENCRYPTED_MESSAGE_BYTES = 50 * 1024
 const ERR_ENCRYPTED_TOO_LARGE = 'Encrypted message too large'
-const CHAT_META_TEXT_PAD_MIN_CHARS = 0
-const CHAT_META_TEXT_PAD_MAX_CHARS = 32
-const MESSAGE_TEXT_PAD_MIN_CHARS = 0
-const MESSAGE_TEXT_PAD_MAX_CHARS = 64
+const CHAT_META_OBJECT_PAD_MIN_CHARS = 0
+const CHAT_META_OBJECT_PAD_MAX_CHARS = 32
+const MESSAGE_OBJECT_PAD_MIN_CHARS = 0
+const MESSAGE_OBJECT_PAD_MAX_CHARS = 64
 const LOCAL_KEY_ENTRY_POSTFIX_MIN_CHARS = 0
 const LOCAL_KEY_ENTRY_POSTFIX_MAX_CHARS = 32
 const LOCAL_KEY_ENTRY_POSTFIX_ALPHABET =
@@ -1540,8 +1540,8 @@ export const useAuthStore = defineStore('auth', () => {
                 encryptedData,
                 myUserId: userId.value,
                 myPrivateKey: privateKey.value,
-                textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-                textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+                objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+                objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
               })
               const displayName = await resolveDisplayNameInChat(chatId, senderId)
               const msg: AuthDecryptedMessage = {
@@ -1657,8 +1657,8 @@ export const useAuthStore = defineStore('auth', () => {
                 encryptedData,
                 myUserId: userId.value,
                 myPrivateKey: privateKey.value,
-                textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-                textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+                objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+                objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
               })
               const displayName = await resolveDisplayNameInChat(chatId, senderId)
               const cur = messagesByChatId.value[chatId] ?? []
@@ -1839,8 +1839,8 @@ export const useAuthStore = defineStore('auth', () => {
               encryptedData: lm.encryptedData,
               myUserId: userId.value as string,
               myPrivateKey: privateKey.value as CryptoKey,
-              textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-              textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+              objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+              objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
             })
             const tsMs = uuidV7ToUnixMs(lm.id) ?? 0
             const text = typeof plain?.text === 'string' ? plain.text : ''
@@ -2053,8 +2053,8 @@ export const useAuthStore = defineStore('auth', () => {
     const encryptedData = await encryptMessageEnvelope({
       plaintext: { text: t, atIso, replyToId, modifiedAtIso },
       recipients,
-      textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-      textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+      objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+      objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
     })
 
     if (utf8ByteLength(encryptedData) > MAX_ENCRYPTED_MESSAGE_BYTES) throw new Error(ERR_ENCRYPTED_TOO_LARGE)
@@ -2128,8 +2128,8 @@ export const useAuthStore = defineStore('auth', () => {
     return await encryptMessageEnvelope({
       plaintext: { text: String(params.text ?? ''), atIso: new Date().toISOString() },
       recipients: params.recipients,
-      textPadMinChars: CHAT_META_TEXT_PAD_MIN_CHARS,
-      textPadMaxChars: CHAT_META_TEXT_PAD_MAX_CHARS,
+      objectPadMinChars: CHAT_META_OBJECT_PAD_MIN_CHARS,
+      objectPadMaxChars: CHAT_META_OBJECT_PAD_MAX_CHARS,
     })
   }
 
@@ -2142,8 +2142,8 @@ export const useAuthStore = defineStore('auth', () => {
         encryptedData: s,
         myUserId: userId.value,
         myPrivateKey: privateKey.value,
-        textPadMinChars: CHAT_META_TEXT_PAD_MIN_CHARS,
-        textPadMaxChars: CHAT_META_TEXT_PAD_MAX_CHARS,
+        objectPadMinChars: CHAT_META_OBJECT_PAD_MIN_CHARS,
+        objectPadMaxChars: CHAT_META_OBJECT_PAD_MAX_CHARS,
       })
       return typeof plain?.text === 'string' ? plain.text : ''
     } catch {
@@ -2457,8 +2457,8 @@ export const useAuthStore = defineStore('auth', () => {
           encryptedData: m.encryptedData,
           myUserId: userId.value,
           myPrivateKey: privateKey.value,
-          textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-          textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+          objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+          objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
         })
         const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
         out.push({
@@ -2555,8 +2555,8 @@ export const useAuthStore = defineStore('auth', () => {
             encryptedData: m.encryptedData,
             myUserId: userId.value,
             myPrivateKey: privateKey.value,
-            textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-            textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+            objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+            objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
           })
           const displayName = await resolveDisplayNameInChat(chatId, String(m.senderId))
           decoded.push({
@@ -2635,8 +2635,8 @@ export const useAuthStore = defineStore('auth', () => {
     const encryptedData = await encryptMessageEnvelope({
       plaintext: { text: t, atIso, replyToId, modifiedAtIso: null },
       recipients,
-      textPadMinChars: MESSAGE_TEXT_PAD_MIN_CHARS,
-      textPadMaxChars: MESSAGE_TEXT_PAD_MAX_CHARS,
+      objectPadMinChars: MESSAGE_OBJECT_PAD_MIN_CHARS,
+      objectPadMaxChars: MESSAGE_OBJECT_PAD_MAX_CHARS,
     })
 
     const signature = await signEnvelope({ signingKey: signingKey.value, senderId: userId.value, chatId, encryptedData })

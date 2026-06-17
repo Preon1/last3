@@ -14,10 +14,11 @@ const ENVELOPE_WRAPPED_KEY_BYTES = 512
 const ENVELOPE_ENTRY_BYTES = ENVELOPE_RECIPIENT_ID_BYTES + ENVELOPE_WRAPPED_KEY_BYTES
 const ENVELOPE_MIN_CT_BYTES = AES_GCM_TAG_BYTES
 const ENVELOPE_MAX_RECIPIENTS = 65_535
+const ENVELOPE_TEXT_COMPRESS_MIN_INPUT_BYTES = 192
+const ENVELOPE_TEXT_COMPRESS_MAX_RATIO = 0.9
+const ENVELOPE_TEXT_MAX_DECOMPRESSED_BYTES = 64 * 1024
 
-const SIGNED_TEXT_PAD_PREFIX = 'STP'
-const SIGNED_TEXT_PAD_LEN_HEX_WIDTH = 4
-const SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN = 4096
+const ENVELOPE_PAD_HARD_MAX_RANDOM_LEN = 4096
 
 const TEXT_PAD_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
@@ -37,8 +38,9 @@ function encUtf8(s: string) {
   return new TextEncoder().encode(s)
 }
 
-function decUtf8(b: ArrayBuffer) {
-  return new TextDecoder().decode(new Uint8Array(b))
+function decUtf8(b: ArrayBuffer | Uint8Array) {
+  const u8 = b instanceof Uint8Array ? b : new Uint8Array(b)
+  return new TextDecoder().decode(u8)
 }
 
 function b64(bytes: ArrayBuffer | Uint8Array) {
@@ -265,55 +267,131 @@ export async function decryptStringWithPassword(params: { encrypted: string; pas
   return decUtf8(pt)
 }
 
-function normalizeTextPadBounds(minPadChars: number, maxPadChars: number) {
+function normalizeEnvelopePadBounds(minPadChars: number, maxPadChars: number) {
   const min = Number.isFinite(minPadChars) ? Math.max(0, Math.floor(minPadChars)) : NaN
   const max = Number.isFinite(maxPadChars) ? Math.max(0, Math.floor(maxPadChars)) : NaN
   if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
-    throw new Error('Invalid signed text padding range')
+    throw new Error('Invalid envelope padding range')
   }
-  if (max > SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN) {
-    throw new Error('Signed text padding range too large')
+  if (max > ENVELOPE_PAD_HARD_MAX_RANDOM_LEN) {
+    throw new Error('Envelope padding range too large')
   }
   return { min, max }
 }
 
-function padEnvelopeText(rawText: string, minPadChars: number, maxPadChars: number) {
-  const bounds = normalizeTextPadBounds(minPadChars, maxPadChars)
-  const text = String(rawText ?? '')
-  const lenHex = text.length.toString(16).padStart(SIGNED_TEXT_PAD_LEN_HEX_WIDTH, '0')
-  if (lenHex.length !== SIGNED_TEXT_PAD_LEN_HEX_WIDTH || !/^[0-9a-fA-F]{4}$/.test(lenHex)) {
-    throw new Error('Signed text too long to pad')
-  }
-
+function makeEnvelopeObjectPadding(minPadChars: number, maxPadChars: number) {
+  const bounds = normalizeEnvelopePadBounds(minPadChars, maxPadChars)
   const randomLen = randomIntInclusive(bounds.min, bounds.max)
-  const tail = randomStringFromAlphabet(randomLen, TEXT_PAD_ALPHABET)
-  return `${SIGNED_TEXT_PAD_PREFIX}${lenHex}${text}${tail}`
+  return randomStringFromAlphabet(randomLen, TEXT_PAD_ALPHABET)
 }
 
-function unpadEnvelopeText(padded: string, minPadChars: number, maxPadChars: number) {
-  const bounds = normalizeTextPadBounds(minPadChars, maxPadChars)
-  const s = String(padded ?? '')
-  if (!s.startsWith(SIGNED_TEXT_PAD_PREFIX)) throw new Error('Unsupported signed text format')
+function assertEnvelopeObjectPadding(padding: unknown, minPadChars: number, maxPadChars: number) {
+  if (typeof padding !== 'string') throw new Error('Unsupported message format')
+  const bounds = normalizeEnvelopePadBounds(minPadChars, maxPadChars)
+  if (padding.length < bounds.min || padding.length > bounds.max) throw new Error('Unsupported message format')
+  if (!isStringFromAlphabet(padding, TEXT_PAD_ALPHABET_SET)) throw new Error('Unsupported message format')
+}
 
-  const lenStart = SIGNED_TEXT_PAD_PREFIX.length
-  const lenEnd = lenStart + SIGNED_TEXT_PAD_LEN_HEX_WIDTH
-  if (s.length < lenEnd) throw new Error('Unsupported signed text format')
+function getCompressionStreamConstructors() {
+  const CompressionStreamCtor = (globalThis as { CompressionStream?: unknown }).CompressionStream
+  const DecompressionStreamCtor = (globalThis as { DecompressionStream?: unknown }).DecompressionStream
+  if (typeof CompressionStreamCtor !== 'function' || typeof DecompressionStreamCtor !== 'function') {
+    throw new Error('Unsupported message format')
+  }
+  return {
+    CompressionStreamCtor: CompressionStreamCtor as new (format: 'deflate') => {
+      readable: ReadableStream<Uint8Array>
+      writable: WritableStream<Uint8Array>
+    },
+    DecompressionStreamCtor: DecompressionStreamCtor as new (format: 'deflate') => {
+      readable: ReadableStream<Uint8Array>
+      writable: WritableStream<Uint8Array>
+    },
+  }
+}
 
-  const lenHex = s.slice(lenStart, lenEnd)
-  if (!/^[0-9a-fA-F]{4}$/.test(lenHex)) throw new Error('Unsupported signed text format')
+async function deflateBytes(input: Uint8Array) {
+  const { CompressionStreamCtor } = getCompressionStreamConstructors()
+  const stream = new CompressionStreamCtor('deflate')
+  const writer = stream.writable.getWriter()
+  await writer.write(input)
+  await writer.close()
+  const compressed = await new Response(stream.readable).arrayBuffer()
+  return new Uint8Array(compressed)
+}
 
-  const n = Number.parseInt(lenHex, 16)
-  if (!Number.isFinite(n) || n < 0) throw new Error('Unsupported signed text format')
+async function inflateBytes(input: Uint8Array) {
+  const { DecompressionStreamCtor } = getCompressionStreamConstructors()
+  const stream = new DecompressionStreamCtor('deflate')
+  const writer = stream.writable.getWriter()
+  await writer.write(input)
+  await writer.close()
+  const decompressed = await new Response(stream.readable).arrayBuffer()
+  return new Uint8Array(decompressed)
+}
 
-  const textStart = lenEnd
-  const textEnd = textStart + n
-  if (textEnd > s.length) throw new Error('Unsupported signed text format')
+async function encodeEnvelopeMessageText(rawText: string) {
+  const text = String(rawText ?? '')
+  const sourceBytes = encUtf8(text)
 
-  const tail = s.slice(textEnd)
-  if (tail.length < bounds.min || tail.length > bounds.max) throw new Error('Unsupported signed text format')
-  if (!isStringFromAlphabet(tail, TEXT_PAD_ALPHABET_SET)) throw new Error('Unsupported signed text format')
+  // Fast path: skip compression for short messages.
+  if (sourceBytes.byteLength < ENVELOPE_TEXT_COMPRESS_MIN_INPUT_BYTES) {
+    return { z: 0 as const, t: text }
+  }
 
-  return s.slice(textStart, textEnd)
+  const compressed = await deflateBytes(sourceBytes)
+  if (!compressed.byteLength) return { z: 0 as const, t: text }
+
+  const compressedB64Url = b64Url(compressed)
+  const compressedLen = encUtf8(compressedB64Url).byteLength
+  const sourceLen = sourceBytes.byteLength
+
+  // Keep compressed form only if it produces a meaningful size reduction.
+  if (compressedLen > Math.floor(sourceLen * ENVELOPE_TEXT_COMPRESS_MAX_RATIO)) {
+    return { z: 0 as const, t: text }
+  }
+
+  return { z: 1 as const, t: compressedB64Url }
+}
+
+async function decodeEnvelopeMessageText(encodedText: string, compressionMode: 0 | 1) {
+  const text = String(encodedText ?? '')
+  if (compressionMode === 0) return text
+
+  let compressedBytes: Uint8Array
+  try {
+    compressedBytes = unb64Url(text)
+  } catch {
+    throw new Error('Unsupported message format')
+  }
+
+  let decompressed: Uint8Array
+  try {
+    decompressed = await inflateBytes(compressedBytes)
+  } catch {
+    throw new Error('Unsupported message format')
+  }
+
+  if (decompressed.byteLength > ENVELOPE_TEXT_MAX_DECOMPRESSED_BYTES) {
+    throw new Error('Unsupported message format')
+  }
+
+  return decUtf8(decompressed)
+}
+
+type CompactEnvelopePayload = {
+  // t = plaintext message text
+  t: string
+  // z = text compression mode: 0 = plain UTF-8 text in t, 1 = deflate+base64url in t
+  z: 0 | 1
+  // ct = create time (ISO)
+  ct: string
+  // a = reply target message id (legacy replyToId semantic)
+  a: string | null
+  // mt = modification time (ISO), omitted for new messages
+  mt?: string
+  // p = random object-level padding
+  p: string
 }
 
 export function publicJwkFromPrivateJwk(privateJwkJson: string) {
@@ -456,18 +534,29 @@ export async function encryptMessageEnvelope(params: {
     modifiedAtIso?: string | null
   }
   recipients: Array<{ userId: string; publicKeyJwk: string }>
-  textPadMinChars: number
-  textPadMaxChars: number
+  objectPadMinChars: number
+  objectPadMaxChars: number
 }) {
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
   const iv = crypto.getRandomValues(new Uint8Array(12))
 
-  const paddedText = padEnvelopeText(
-    String(params.plaintext?.text ?? ''),
-    params.textPadMinChars,
-    params.textPadMaxChars,
-  )
-  const pt = JSON.stringify({ ...params.plaintext, text: paddedText })
+  const encodedText = await encodeEnvelopeMessageText(String(params.plaintext?.text ?? ''))
+
+  const compactPayload: CompactEnvelopePayload = {
+    t: encodedText.t,
+    z: encodedText.z,
+    ct: String(params.plaintext?.atIso ?? ''),
+    a: typeof params.plaintext?.replyToId === 'string' ? params.plaintext.replyToId : null,
+    p: makeEnvelopeObjectPadding(params.objectPadMinChars, params.objectPadMaxChars),
+  }
+
+  if (!compactPayload.ct) throw new Error('Unsupported message format')
+
+  if (typeof params.plaintext?.modifiedAtIso === 'string' && params.plaintext.modifiedAtIso) {
+    compactPayload.mt = params.plaintext.modifiedAtIso
+  }
+
+  const pt = JSON.stringify(compactPayload)
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encUtf8(pt))
 
   const rawKey = await crypto.subtle.exportKey('raw', aesKey)
@@ -489,8 +578,8 @@ export async function decryptMessageEnvelope(params: {
   encryptedData: string
   myUserId: string
   myPrivateKey: CryptoKey
-  textPadMinChars: number
-  textPadMaxChars: number
+  objectPadMinChars: number
+  objectPadMaxChars: number
 }) {
   const myUserIdBytes = parseUuidToBytes(String(params.myUserId))
   const obj = unpackMessageEnvelopeBlob(params.encryptedData)
@@ -513,20 +602,29 @@ export async function decryptMessageEnvelope(params: {
 
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: obj.iv }, aesKey, obj.ct)
 
-  const parsed = JSON.parse(decUtf8(pt)) as {
-    text: unknown
-    atIso: unknown
-    replyToId?: unknown
-    modifiedAtIso?: unknown
+  const parsed = JSON.parse(decUtf8(pt)) as Partial<CompactEnvelopePayload> | null
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Unsupported message format')
+
+  const encodedText = typeof parsed.t === 'string' ? parsed.t : null
+  const compressionMode = parsed.z === 0 || parsed.z === 1 ? parsed.z : null
+  const atIso = typeof parsed.ct === 'string' && parsed.ct ? parsed.ct : null
+  if (encodedText === null || compressionMode === null || atIso === null) throw new Error('Unsupported message format')
+
+  if (!(parsed.a === null || typeof parsed.a === 'string' || typeof parsed.a === 'undefined')) {
+    throw new Error('Unsupported message format')
   }
 
-  const rawText = typeof parsed?.text === 'string' ? parsed.text : ''
-  const text = unpadEnvelopeText(rawText, params.textPadMinChars, params.textPadMaxChars)
+  const modifiedAtIso =
+    typeof parsed.mt === 'undefined' ? null : typeof parsed.mt === 'string' && parsed.mt ? parsed.mt : null
+  if (typeof parsed.mt !== 'undefined' && modifiedAtIso === null) throw new Error('Unsupported message format')
+
+  assertEnvelopeObjectPadding(parsed.p, params.objectPadMinChars, params.objectPadMaxChars)
+  const text = await decodeEnvelopeMessageText(encodedText, compressionMode)
 
   return {
     text,
-    atIso: typeof parsed?.atIso === 'string' ? parsed.atIso : new Date().toISOString(),
-    replyToId: typeof parsed?.replyToId === 'string' ? parsed.replyToId : null,
-    modifiedAtIso: typeof parsed?.modifiedAtIso === 'string' ? parsed.modifiedAtIso : null,
+    atIso,
+    replyToId: typeof parsed.a === 'string' ? parsed.a : null,
+    modifiedAtIso,
   }
 }
