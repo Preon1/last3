@@ -702,6 +702,7 @@ app.post('/api/chats/last-messages', requireAuthSession, async (req, res) => {
     res.json({ success: true, lastMessages });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
+    if (e && e.code === 'bad_payload') return res.status(400).json({ error: 'Bad payload' });
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -909,6 +910,7 @@ app.post('/api/chats/add-member', requireAuthSession, async (req, res) => {
     res.json({ success: true, member: result.member });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
+    if (e && e.code === 'bad_payload') return res.status(400).json({ error: 'Bad payload' });
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -1025,6 +1027,7 @@ app.post('/api/messages/send', requireAuthSession, async (req, res) => {
     res.json({ success: true, messageId });
   } catch (e) {
     if (e && e.code === 'forbidden') return res.status(403).json({ error: 'Forbidden' });
+    if (e && e.code === 'bad_payload') return res.status(400).json({ error: 'Bad payload' });
     res.status(500).json({ error: 'Server error' });
   }
 });

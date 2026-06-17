@@ -1,23 +1,204 @@
 import { query, transaction } from './db.js'
 import { v7 as uuidv7 } from 'uuid'
 
+const AES_GCM_TAG_BYTES = 16
+const ENVELOPE_IV_BYTES = 12
+const ENVELOPE_RECIPIENT_COUNT_BYTES = 2
+const ENVELOPE_RECIPIENT_ID_BYTES = 16
+const ENVELOPE_WRAPPED_KEY_BYTES = 512
+const ENVELOPE_ENTRY_BYTES = ENVELOPE_RECIPIENT_ID_BYTES + ENVELOPE_WRAPPED_KEY_BYTES
+const ENVELOPE_MIN_CT_BYTES = AES_GCM_TAG_BYTES
+
+function b64UrlDecode(str) {
+  const raw = String(str ?? '').replace(/-/g, '+').replace(/_/g, '/')
+  const padLen = (4 - (raw.length % 4)) % 4
+  return Buffer.from(`${raw}${'='.repeat(padLen)}`, 'base64')
+}
+
+function b64UrlEncode(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function parseUuidToBytes(uuid) {
+  const raw = String(uuid ?? '').trim().toLowerCase().replace(/-/g, '')
+  if (!/^[0-9a-f]{32}$/.test(raw)) throw new Error('Invalid user id in envelope')
+  const out = Buffer.alloc(ENVELOPE_RECIPIENT_ID_BYTES)
+  for (let i = 0; i < ENVELOPE_RECIPIENT_ID_BYTES; i++) {
+    out[i] = Number.parseInt(raw.slice(i * 2, i * 2 + 2), 16)
+  }
+  return out
+}
+
+function parseEnvelopeBlob(encryptedData) {
+  const all = b64UrlDecode(encryptedData)
+  const min = ENVELOPE_IV_BYTES + ENVELOPE_RECIPIENT_COUNT_BYTES + ENVELOPE_MIN_CT_BYTES
+  if (all.byteLength < min) throw new Error('Unsupported message format')
+
+  let off = 0
+  const iv = all.subarray(off, off + ENVELOPE_IV_BYTES)
+  off += ENVELOPE_IV_BYTES
+
+  const recipientCount = (all[off] << 8) | all[off + 1]
+  off += ENVELOPE_RECIPIENT_COUNT_BYTES
+  if (recipientCount <= 0) throw new Error('Unsupported message format')
+
+  const neededForKeys = recipientCount * ENVELOPE_ENTRY_BYTES
+  if (off + neededForKeys + ENVELOPE_MIN_CT_BYTES > all.byteLength) throw new Error('Unsupported message format')
+
+  const keyEntries = []
+  for (let i = 0; i < recipientCount; i++) {
+    const userIdBytes = all.subarray(off, off + ENVELOPE_RECIPIENT_ID_BYTES)
+    off += ENVELOPE_RECIPIENT_ID_BYTES
+    const wrappedKeyBytes = all.subarray(off, off + ENVELOPE_WRAPPED_KEY_BYTES)
+    off += ENVELOPE_WRAPPED_KEY_BYTES
+    keyEntries.push({ userIdBytes, wrappedKeyBytes })
+  }
+
+  const ct = all.subarray(off)
+  if (ct.byteLength < ENVELOPE_MIN_CT_BYTES) throw new Error('Unsupported message format')
+
+  return { iv, keyEntries, ct }
+}
+
+function packEnvelopeBlob(parts) {
+  const iv = Buffer.from(parts?.iv ?? [])
+  const ct = Buffer.from(parts?.ct ?? [])
+  const keyEntries = Array.isArray(parts?.keyEntries) ? parts.keyEntries : []
+  if (iv.byteLength !== ENVELOPE_IV_BYTES) throw new Error('Unsupported message format')
+  if (ct.byteLength < ENVELOPE_MIN_CT_BYTES) throw new Error('Unsupported message format')
+  if (keyEntries.length <= 0 || keyEntries.length > 0xffff) throw new Error('Unsupported message format')
+
+  const out = Buffer.alloc(ENVELOPE_IV_BYTES + ENVELOPE_RECIPIENT_COUNT_BYTES + keyEntries.length * ENVELOPE_ENTRY_BYTES + ct.byteLength)
+  let off = 0
+  iv.copy(out, off)
+  off += ENVELOPE_IV_BYTES
+  out[off] = (keyEntries.length >> 8) & 0xff
+  out[off + 1] = keyEntries.length & 0xff
+  off += ENVELOPE_RECIPIENT_COUNT_BYTES
+
+  for (const entry of keyEntries) {
+    const userIdBytes = Buffer.from(entry.userIdBytes)
+    const wrappedKeyBytes = Buffer.from(entry.wrappedKeyBytes)
+    if (userIdBytes.byteLength !== ENVELOPE_RECIPIENT_ID_BYTES) throw new Error('Unsupported message format')
+    if (wrappedKeyBytes.byteLength !== ENVELOPE_WRAPPED_KEY_BYTES) throw new Error('Unsupported message format')
+    userIdBytes.copy(out, off)
+    off += ENVELOPE_RECIPIENT_ID_BYTES
+    wrappedKeyBytes.copy(out, off)
+    off += ENVELOPE_WRAPPED_KEY_BYTES
+  }
+
+  ct.copy(out, off)
+  return b64UrlEncode(out)
+}
+
+function dbBlobToWireEnvelope(blob) {
+  if (!blob) return ''
+  const b = Buffer.isBuffer(blob) ? blob : Buffer.from(blob)
+  if (!b.byteLength) return ''
+  return b64UrlEncode(b)
+}
+
+function wireEnvelopeToDbBlob(encryptedData) {
+  const wire = String(encryptedData ?? '')
+  if (!wire) {
+    const err = new Error('bad_payload')
+    err.code = 'bad_payload'
+    throw err
+  }
+  try {
+    // Strict format validation (no backward compatibility).
+    parseEnvelopeBlob(wire)
+    return b64UrlDecode(wire)
+  } catch {
+    const err = new Error('bad_payload')
+    err.code = 'bad_payload'
+    throw err
+  }
+}
+
+function normalizeChatNamesPayload(names) {
+  if (!names || typeof names !== 'object' || Array.isArray(names)) return []
+
+  const out = []
+  for (const [subjectUserIdRaw, encRaw] of Object.entries(names)) {
+    const subjectUserId = String(subjectUserIdRaw ?? '')
+    const enc = typeof encRaw === 'string' ? encRaw : ''
+    if (!subjectUserId || !enc) continue
+    // Validate UUID shape used in compact envelope recipient entries.
+    parseUuidToBytes(subjectUserId)
+    out.push({ subjectUserId, enc: wireEnvelopeToDbBlob(enc) })
+  }
+  return out
+}
+
+function mapRowsToNamesObject(rows) {
+  const out = {}
+  for (const row of rows ?? []) {
+    const chatId = String(row.chat_id ?? '')
+    const subjectUserId = String(row.subject_user_id ?? '')
+    if (!chatId || !subjectUserId) continue
+    if (!out[chatId]) out[chatId] = {}
+    out[chatId][subjectUserId] = dbBlobToWireEnvelope(row.enc)
+  }
+  return out
+}
+
+async function replaceChatNamesForChat(client, chatId, nameRows) {
+  const cid = String(chatId || '')
+  if (!cid) return
+
+  await client.query(
+    `DELETE FROM chat_names_enc
+     WHERE chat_id = $1`,
+    [cid],
+  )
+
+  const rows = Array.isArray(nameRows) ? nameRows : []
+  if (!rows.length) return
+
+  const values = []
+  const params = [cid]
+  for (const row of rows) {
+    const subjectUserId = String(row?.subjectUserId ?? '')
+    const enc = row?.enc
+    if (!subjectUserId || !enc) continue
+    params.push(subjectUserId, enc)
+    const i = params.length
+    values.push(`($1, $${i - 1}, $${i})`)
+  }
+  if (!values.length) return
+
+  await client.query(
+    `INSERT INTO chat_names_enc (chat_id, subject_user_id, enc)
+     VALUES ${values.join(',')}`,
+    params,
+  )
+}
+
+async function loadChatNamesByChatIds(chatIds) {
+  const ids = Array.isArray(chatIds) ? chatIds.map(String).filter(Boolean) : []
+  if (!ids.length) return {}
+
+  const r = await query(
+    `SELECT chat_id, subject_user_id, enc
+     FROM chat_names_enc
+     WHERE chat_id = ANY($1::uuid[])`,
+    [ids],
+  )
+  return mapRowsToNamesObject(r.rows)
+}
+
 function scrubRecipientFromEncryptedData(encryptedData, recipientUserId) {
   const enc = typeof encryptedData === 'string' ? encryptedData : ''
   const uid = typeof recipientUserId === 'string' ? recipientUserId : ''
   if (!enc || !uid) return enc
 
-  // Fast-path: if the user id string isn't present, don't parse.
-  if (!enc.includes(uid)) return enc
-
   try {
-    const obj = JSON.parse(enc)
-    if (!obj || obj.v !== 1) return enc
-    if (!obj.keys || typeof obj.keys !== 'object') return enc
-    if (!Object.prototype.hasOwnProperty.call(obj.keys, uid)) return enc
-
-    // Remove only the recipient key wrapper; keep ciphertext intact.
-    delete obj.keys[uid]
-    return JSON.stringify(obj)
+    const parsed = parseEnvelopeBlob(enc)
+    const target = parseUuidToBytes(uid)
+    const nextKeyEntries = parsed.keyEntries.filter((k) => !Buffer.from(k.userIdBytes).equals(target))
+    if (!nextKeyEntries.length || nextKeyEntries.length === parsed.keyEntries.length) return enc
+    return packEnvelopeBlob({ iv: parsed.iv, ct: parsed.ct, keyEntries: nextKeyEntries })
   } catch {
     return enc
   }
@@ -28,51 +209,26 @@ async function scrubRecipientFromChatMessages(client, chatId, recipientUserId) {
   const uid = String(recipientUserId || '')
   if (!cid || !uid) return
 
-  // Only touch rows that likely contain the userId in the envelope.
   const rows = await client.query(
     `SELECT id, encrypted_data
      FROM messages
-     WHERE chat_id = $1 AND encrypted_data LIKE '%' || $2 || '%'`,
-    [cid, uid],
+     WHERE chat_id = $1`,
+    [cid],
   )
 
   for (const r of rows.rows) {
     const id = String(r.id)
-    const cur = String(r.encrypted_data ?? '')
+    const cur = dbBlobToWireEnvelope(r.encrypted_data)
     const next = scrubRecipientFromEncryptedData(cur, uid)
     if (next !== cur) {
       await client.query(
         `UPDATE messages
          SET encrypted_data = $1
          WHERE id = $2`,
-        [next, id],
+        [wireEnvelopeToDbBlob(next), id],
       )
     }
   }
-}
-
-function scrubUserFromChatNamesJson(names, userId) {
-  const uid = typeof userId === 'string' ? userId : ''
-  if (!uid) return names
-  if (!names || typeof names !== 'object') return names
-
-  // names is a JSONB object mapping subjectUserId -> encryptedBlobString
-  const out = { ...names }
-
-  // Remove the leaving/deleted user's own entry.
-  if (Object.prototype.hasOwnProperty.call(out, uid)) {
-    delete out[uid]
-  }
-
-  // Remove them as a recipient from everyone else's blob.
-  for (const [subjectUserId, enc] of Object.entries(out)) {
-    if (!subjectUserId) continue
-    if (typeof enc !== 'string') continue
-    const next = scrubRecipientFromEncryptedData(enc, uid)
-    if (next !== enc) out[subjectUserId] = next
-  }
-
-  return out
 }
 
 async function scrubUserFromChatMetadata(client, chatId, userId) {
@@ -80,32 +236,52 @@ async function scrubUserFromChatMetadata(client, chatId, userId) {
   const uid = String(userId || '')
   if (!cid || !uid) return
 
-  const r = await client.query(
-    `SELECT chat_name_enc, names
-     FROM chats
-     WHERE id = $1
-     LIMIT 1`,
-    [cid],
-  )
+  const r = await client.query(`SELECT chat_name_enc FROM chats WHERE id = $1 LIMIT 1`, [cid])
   const row = r?.rows?.[0]
   if (!row) return
 
-  const curChatNameEnc = typeof row.chat_name_enc === 'string' ? row.chat_name_enc : ''
+  const curChatNameEnc = dbBlobToWireEnvelope(row.chat_name_enc)
   const nextChatNameEnc = scrubRecipientFromEncryptedData(curChatNameEnc, uid)
+  if (nextChatNameEnc !== curChatNameEnc) {
+    await client.query(
+      `UPDATE chats
+       SET chat_name_enc = $1
+       WHERE id = $2`,
+      [wireEnvelopeToDbBlob(nextChatNameEnc), cid],
+    )
+  }
 
-  const curNames = row.names ?? {}
-  const nextNames = scrubUserFromChatNamesJson(curNames, uid)
-
-  const changed = (nextChatNameEnc !== curChatNameEnc) || (JSON.stringify(nextNames) !== JSON.stringify(curNames))
-  if (!changed) return
-
-  await client.query(
-    `UPDATE chats
-     SET chat_name_enc = $1,
-         names = $2
-     WHERE id = $3`,
-    [nextChatNameEnc, nextNames, cid],
+  const namesRows = await client.query(
+    `SELECT subject_user_id, enc
+     FROM chat_names_enc
+     WHERE chat_id = $1`,
+    [cid],
   )
+
+  for (const n of namesRows.rows) {
+    const subjectUserId = String(n.subject_user_id ?? '')
+    if (!subjectUserId) continue
+
+    if (subjectUserId === uid) {
+      await client.query(
+        `DELETE FROM chat_names_enc
+         WHERE chat_id = $1 AND subject_user_id = $2`,
+        [cid, subjectUserId],
+      )
+      continue
+    }
+
+    const cur = dbBlobToWireEnvelope(n.enc)
+    const next = scrubRecipientFromEncryptedData(cur, uid)
+    if (next !== cur) {
+      await client.query(
+        `UPDATE chat_names_enc
+         SET enc = $1
+         WHERE chat_id = $2 AND subject_user_id = $3`,
+        [wireEnvelopeToDbBlob(next), cid, subjectUserId],
+      )
+    }
+  }
 }
 
 export async function authCleanupExpiredUsers(now = new Date()) {
@@ -220,7 +396,7 @@ export async function authDeleteAccount(userId) {
 
 export async function authListChats(userId) {
   const chats = await query(
-    `SELECT c.id, c.chat_type, c.chat_name_enc, c.names
+    `SELECT c.id, c.chat_type, c.chat_name_enc
      FROM chats c
      INNER JOIN chat_members cm ON cm.chat_id = c.id
      WHERE cm.user_id = $1
@@ -241,13 +417,14 @@ export async function authListChats(userId) {
   )
 
   const personalByChatId = new Map(personal.rows.map((r) => [String(r.chat_id), r]))
+  const namesByChatId = await loadChatNamesByChatIds(chats.rows.map((c) => String(c.id)))
 
   return chats.rows
     .map((c) => {
     const id = String(c.id)
     const type = String(c.chat_type)
-    const chatNameEnc = typeof c.chat_name_enc === 'string' ? String(c.chat_name_enc) : ''
-    const names = c.names ?? {}
+    const chatNameEnc = dbBlobToWireEnvelope(c.chat_name_enc)
+    const names = namesByChatId[id] ?? {}
     const base = { id, type, chatNameEnc, names }
 
     if (type === 'personal') {
@@ -288,7 +465,7 @@ async function authLastMessagesForUserByChatIds(userId, chatIds) {
     chatId: String(row.chat_id),
     id: String(row.id),
     senderId: String(row.sender_id),
-    encryptedData: String(row.encrypted_data),
+    encryptedData: dbBlobToWireEnvelope(row.encrypted_data),
     signature: typeof row.signature === 'string' ? String(row.signature) : '',
   }))
 }
@@ -390,14 +567,19 @@ export async function authCreatePersonalChat(userId, otherUserId, names) {
     return { ok: false, reason: 'introvert' }
   }
 
-  const namesJson = (names && typeof names === 'object') ? names : {}
+  let nameRows = []
+  try {
+    nameRows = normalizeChatNamesPayload(names)
+  } catch {
+    return { ok: false, reason: 'bad_payload' }
+  }
 
   const created = await transaction(async (client) => {
     const chatRes = await client.query(
-      `INSERT INTO chats (chat_type, chat_name_enc, names)
-       VALUES ('personal', '', $1)
+      `INSERT INTO chats (chat_type, chat_name_enc)
+       VALUES ('personal', $1)
        RETURNING id`,
-      [namesJson],
+      [Buffer.alloc(0)],
     )
 
     const chatId = String(chatRes.rows[0].id)
@@ -407,6 +589,8 @@ export async function authCreatePersonalChat(userId, otherUserId, names) {
        VALUES ($1, $2), ($1, $3)`,
       [chatId, userId, otherId],
     )
+
+    await replaceChatNamesForChat(client, chatId, nameRows)
 
     return chatId
   })
@@ -426,14 +610,21 @@ export async function authCreateGroupChat(userId, chatNameEnc, names) {
   const enc = typeof chatNameEnc === 'string' ? chatNameEnc : ''
   if (!enc) return { ok: false, reason: 'bad_name' }
   if (enc.length > 100_000) return { ok: false, reason: 'bad_name' }
-  const namesJson = (names && typeof names === 'object') ? names : {}
+  let encBlob
+  let nameRows = []
+  try {
+    encBlob = wireEnvelopeToDbBlob(enc)
+    nameRows = normalizeChatNamesPayload(names)
+  } catch {
+    return { ok: false, reason: 'bad_payload' }
+  }
 
   const chatId = await transaction(async (client) => {
     const chatRes = await client.query(
-      `INSERT INTO chats (chat_type, chat_name_enc, names)
-       VALUES ('group', $1, $2)
+      `INSERT INTO chats (chat_type, chat_name_enc)
+       VALUES ('group', $1)
        RETURNING id`,
-      [enc, namesJson],
+      [encBlob],
     )
 
     const id = String(chatRes.rows[0].id)
@@ -443,10 +634,12 @@ export async function authCreateGroupChat(userId, chatNameEnc, names) {
        ON CONFLICT DO NOTHING`,
       [id, String(userId)],
     )
+
+    await replaceChatNamesForChat(client, id, nameRows)
     return id
   })
 
-  return { ok: true, chat: { id: String(chatId), type: 'group', chatNameEnc: enc, names: namesJson } }
+  return { ok: true, chat: { id: String(chatId), type: 'group', chatNameEnc: enc, names: (names && typeof names === 'object') ? names : {} } }
 }
 
 export async function authListChatMembers(userId, chatId) {
@@ -505,8 +698,14 @@ export async function authAddGroupMember(userId, chatId, otherUserId, names, cha
   // Introvert mode: user cannot be added to chats by others.
   if (Boolean(other.introvert_mode)) return { ok: false, reason: 'introvert' }
 
-  const namesJson = (names && typeof names === 'object') ? names : {}
-  const nextChatNameEnc = typeof chatNameEnc === 'string' ? chatNameEnc : null
+  let nameRows = []
+  let nextChatNameEnc = null
+  try {
+    nameRows = normalizeChatNamesPayload(names)
+    nextChatNameEnc = typeof chatNameEnc === 'string' ? wireEnvelopeToDbBlob(chatNameEnc) : null
+  } catch {
+    return { ok: false, reason: 'bad_payload' }
+  }
 
   const ins = await query(
     `INSERT INTO chat_members (chat_id, user_id, visible_after_message_id)
@@ -521,13 +720,15 @@ export async function authAddGroupMember(userId, chatId, otherUserId, names, cha
   )
   if (!ins.rows.length) return { ok: false, reason: 'already_member' }
 
-  await query(
-    `UPDATE chats
-     SET names = $1,
-         chat_name_enc = COALESCE($2, chat_name_enc)
-     WHERE id = $3`,
-    [namesJson, nextChatNameEnc, String(chatId)],
-  )
+  await transaction(async (client) => {
+    await client.query(
+      `UPDATE chats
+       SET chat_name_enc = COALESCE($1, chat_name_enc)
+       WHERE id = $2`,
+      [nextChatNameEnc, String(chatId)],
+    )
+    await replaceChatNamesForChat(client, String(chatId), nameRows)
+  })
 
   return {
     ok: true,
@@ -551,12 +752,18 @@ export async function authRenameGroupChat(userId, chatId, chatNameEnc) {
   const enc = typeof chatNameEnc === 'string' ? chatNameEnc : ''
   if (!enc) return { ok: false, reason: 'bad_name' }
   if (enc.length > 100_000) return { ok: false, reason: 'bad_name' }
+  let encBlob
+  try {
+    encBlob = wireEnvelopeToDbBlob(enc)
+  } catch {
+    return { ok: false, reason: 'bad_payload' }
+  }
 
   await query(
     `UPDATE chats
      SET chat_name_enc = $1
      WHERE id = $2`,
-    [enc, chatId],
+    [encBlob, chatId],
   )
 
   const members = await query(
@@ -616,13 +823,21 @@ export async function authFetchMessages(userId, chatId, limit = 50, beforeId = n
     id: String(row.id),
     chatId: String(chatId),
     senderId: String(row.sender_id),
-    encryptedData: String(row.encrypted_data),
+    encryptedData: dbBlobToWireEnvelope(row.encrypted_data),
     signature: typeof row.signature === 'string' ? String(row.signature) : '',
   }))
 }
 
 export async function authSendMessage({ senderId, chatId, encryptedData, signature = '' }) {
   await assertChatMember(senderId, chatId)
+  let encBlob
+  try {
+    encBlob = wireEnvelopeToDbBlob(encryptedData)
+  } catch (e) {
+    const err = new Error('bad_payload')
+    err.code = 'bad_payload'
+    throw err
+  }
 
   const messageId = uuidv7()
 
@@ -630,7 +845,7 @@ export async function authSendMessage({ senderId, chatId, encryptedData, signatu
     await client.query(
       `INSERT INTO messages (id, chat_id, encrypted_data, signature, sender_id)
        VALUES ($1, $2, $3, $4, $5)`,
-      [messageId, chatId, encryptedData, String(signature || ''), senderId],
+      [messageId, chatId, encBlob, String(signature || ''), senderId],
     )
 
     const members = await client.query(
@@ -747,6 +962,12 @@ export async function authUpdateMessage({ userId, chatId, messageId, encryptedDa
   await assertChatMember(userId, chatId)
   const enc = typeof encryptedData === 'string' ? encryptedData : ''
   if (!enc) return { ok: false, reason: 'bad_payload' }
+  let encBlob
+  try {
+    encBlob = wireEnvelopeToDbBlob(enc)
+  } catch {
+    return { ok: false, reason: 'bad_payload' }
+  }
 
   const result = await transaction(async (client) => {
     const m = await client.query(
@@ -772,7 +993,7 @@ export async function authUpdateMessage({ userId, chatId, messageId, encryptedDa
        SET encrypted_data = $1,
            signature = $2
        WHERE id = $3 AND chat_id = $4`,
-      [enc, String(signature || ''), String(messageId), String(chatId)],
+      [encBlob, String(signature || ''), String(messageId), String(chatId)],
     )
 
     return { ok: true, memberIds }

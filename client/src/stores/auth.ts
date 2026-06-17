@@ -2342,8 +2342,18 @@ export const useAuthStore = defineStore('auth', () => {
     const curNames = (chat.names && typeof chat.names === 'object') ? chat.names : {}
     const namesPlainByUserId: Record<string, string> = {}
     for (const [uid, enc] of Object.entries(curNames)) {
+      // Preserve the current account display name from trusted local state.
+      // This avoids propagating a raw userId when legacy/invalid encrypted
+      // metadata cannot be decrypted in this client session.
+      if (userId.value && username.value && String(uid) === String(userId.value)) {
+        namesPlainByUserId[String(uid)] = String(username.value)
+        continue
+      }
       const t = await decryptChatTextFromEnvelope(typeof enc === 'string' ? enc : '')
       namesPlainByUserId[String(uid)] = t ?? String(uid)
+    }
+    if (userId.value && username.value) {
+      namesPlainByUserId[String(userId.value)] = String(username.value)
     }
     namesPlainByUserId[other.userId] = u
 

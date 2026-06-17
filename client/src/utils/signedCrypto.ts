@@ -7,6 +7,14 @@ const PBE_IV_B64_LEN = Math.ceil(PBE_IV_BYTES / 3) * 4
 const PBE_CT_MIN_B64_LEN = Math.ceil(AES_GCM_TAG_BYTES / 3) * 4
 const PBE_BLOB_MIN_LEN = PBE_SALT_B64_LEN + PBE_IV_B64_LEN + PBE_CT_MIN_B64_LEN
 
+const ENVELOPE_IV_BYTES = 12
+const ENVELOPE_RECIPIENT_COUNT_BYTES = 2
+const ENVELOPE_RECIPIENT_ID_BYTES = 16
+const ENVELOPE_WRAPPED_KEY_BYTES = 512
+const ENVELOPE_ENTRY_BYTES = ENVELOPE_RECIPIENT_ID_BYTES + ENVELOPE_WRAPPED_KEY_BYTES
+const ENVELOPE_MIN_CT_BYTES = AES_GCM_TAG_BYTES
+const ENVELOPE_MAX_RECIPIENTS = 65_535
+
 const SIGNED_TEXT_PAD_PREFIX = 'STP'
 const SIGNED_TEXT_PAD_LEN_HEX_WIDTH = 4
 const SIGNED_TEXT_PAD_HARD_MAX_RANDOM_LEN = 4096
@@ -47,6 +55,17 @@ function unb64(s: string) {
   return u8
 }
 
+function b64Url(bytes: ArrayBuffer | Uint8Array) {
+  return b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function unb64Url(s: string) {
+  const raw = String(s ?? '').replace(/-/g, '+').replace(/_/g, '/')
+  const padLen = (4 - (raw.length % 4)) % 4
+  const padded = `${raw}${'='.repeat(padLen)}`
+  return unb64(padded)
+}
+
 function randomStringFromAlphabet(len: number, alphabet: string) {
   if (len <= 0) return ''
   const a = String(alphabet ?? '')
@@ -65,6 +84,93 @@ function randomIntInclusive(min: number, max: number) {
   if (span <= 1) return lo
   const u32 = crypto.getRandomValues(new Uint32Array(1))
   return lo + ((u32[0] ?? 0) % span)
+}
+
+function parseUuidToBytes(uuid: string) {
+  const raw = String(uuid ?? '').trim().toLowerCase()
+  const hex = raw.replace(/-/g, '')
+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error('Invalid user id in envelope')
+  const out = new Uint8Array(ENVELOPE_RECIPIENT_ID_BYTES)
+  for (let i = 0; i < ENVELOPE_RECIPIENT_ID_BYTES; i++) {
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  }
+  return out
+}
+
+function equalBytes(a: Uint8Array, b: Uint8Array) {
+  if (a.byteLength !== b.byteLength) return false
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function packMessageEnvelopeBlob(parts: {
+  iv: Uint8Array
+  ct: Uint8Array
+  keyEntries: Array<{ userIdBytes: Uint8Array; wrappedKeyBytes: Uint8Array }>
+}) {
+  const iv = parts.iv
+  const ct = parts.ct
+  const keyEntries = Array.isArray(parts.keyEntries) ? parts.keyEntries : []
+
+  if (!(iv instanceof Uint8Array) || iv.byteLength !== ENVELOPE_IV_BYTES) throw new Error('Unsupported message format')
+  if (!(ct instanceof Uint8Array) || ct.byteLength < ENVELOPE_MIN_CT_BYTES) throw new Error('Unsupported message format')
+  if (keyEntries.length <= 0 || keyEntries.length > ENVELOPE_MAX_RECIPIENTS) throw new Error('Unsupported message format')
+
+  const totalLen = ENVELOPE_IV_BYTES + ENVELOPE_RECIPIENT_COUNT_BYTES + keyEntries.length * ENVELOPE_ENTRY_BYTES + ct.byteLength
+  const out = new Uint8Array(totalLen)
+  let off = 0
+
+  out.set(iv, off)
+  off += ENVELOPE_IV_BYTES
+
+  out[off] = (keyEntries.length >> 8) & 0xff
+  out[off + 1] = keyEntries.length & 0xff
+  off += ENVELOPE_RECIPIENT_COUNT_BYTES
+
+  for (const entry of keyEntries) {
+    if (entry.userIdBytes.byteLength !== ENVELOPE_RECIPIENT_ID_BYTES) throw new Error('Unsupported message format')
+    if (entry.wrappedKeyBytes.byteLength !== ENVELOPE_WRAPPED_KEY_BYTES) throw new Error('Unsupported message format')
+    out.set(entry.userIdBytes, off)
+    off += ENVELOPE_RECIPIENT_ID_BYTES
+    out.set(entry.wrappedKeyBytes, off)
+    off += ENVELOPE_WRAPPED_KEY_BYTES
+  }
+
+  out.set(ct, off)
+  return b64Url(out)
+}
+
+function unpackMessageEnvelopeBlob(encryptedData: string) {
+  const all = unb64Url(encryptedData)
+  const min = ENVELOPE_IV_BYTES + ENVELOPE_RECIPIENT_COUNT_BYTES + ENVELOPE_MIN_CT_BYTES
+  if (all.byteLength < min) throw new Error('Unsupported message format')
+
+  let off = 0
+  const iv = all.slice(off, off + ENVELOPE_IV_BYTES)
+  off += ENVELOPE_IV_BYTES
+
+  const recipientCount = (all[off]! << 8) | all[off + 1]!
+  off += ENVELOPE_RECIPIENT_COUNT_BYTES
+  if (recipientCount <= 0) throw new Error('Unsupported message format')
+
+  const neededForKeys = recipientCount * ENVELOPE_ENTRY_BYTES
+  if (off + neededForKeys + ENVELOPE_MIN_CT_BYTES > all.byteLength) throw new Error('Unsupported message format')
+
+  const keyEntries: Array<{ userIdBytes: Uint8Array; wrappedKeyBytes: Uint8Array }> = []
+  for (let i = 0; i < recipientCount; i++) {
+    const userIdBytes = all.slice(off, off + ENVELOPE_RECIPIENT_ID_BYTES)
+    off += ENVELOPE_RECIPIENT_ID_BYTES
+    const wrappedKeyBytes = all.slice(off, off + ENVELOPE_WRAPPED_KEY_BYTES)
+    off += ENVELOPE_WRAPPED_KEY_BYTES
+    keyEntries.push({ userIdBytes, wrappedKeyBytes })
+  }
+
+  const ct = all.slice(off)
+  if (ct.byteLength < ENVELOPE_MIN_CT_BYTES) throw new Error('Unsupported message format')
+
+  return { iv, ct, keyEntries }
 }
 
 export async function generateRsaKeyPair() {
@@ -366,14 +472,17 @@ export async function encryptMessageEnvelope(params: {
 
   const rawKey = await crypto.subtle.exportKey('raw', aesKey)
 
-  const keys: Record<string, string> = {}
+  const keyEntries: Array<{ userIdBytes: Uint8Array; wrappedKeyBytes: Uint8Array }> = []
   for (const r of params.recipients) {
     const pub = await importRsaPublicKeyJwk(r.publicKeyJwk)
     const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pub, rawKey)
-    keys[String(r.userId)] = b64(wrapped)
+    keyEntries.push({
+      userIdBytes: parseUuidToBytes(String(r.userId)),
+      wrappedKeyBytes: new Uint8Array(wrapped),
+    })
   }
 
-  return JSON.stringify({ v: 1, alg: 'A256GCM+RSA-OAEP-256', ivB64: b64(iv), ctB64: b64(ct), keys })
+  return packMessageEnvelopeBlob({ iv, ct: new Uint8Array(ct), keyEntries })
 }
 
 export async function decryptMessageEnvelope(params: {
@@ -383,25 +492,26 @@ export async function decryptMessageEnvelope(params: {
   textPadMinChars: number
   textPadMaxChars: number
 }) {
-  const obj = JSON.parse(params.encryptedData) as {
-    v: number
-    ivB64: string
-    ctB64: string
-    keys: Record<string, string>
+  const myUserIdBytes = parseUuidToBytes(String(params.myUserId))
+  const obj = unpackMessageEnvelopeBlob(params.encryptedData)
+
+  let wrappedBytes: Uint8Array | null = null
+  for (const entry of obj.keyEntries) {
+    if (equalBytes(entry.userIdBytes, myUserIdBytes)) {
+      wrappedBytes = entry.wrappedKeyBytes
+      break
+    }
   }
+  if (!wrappedBytes) throw new Error('No key for recipient')
 
-  if (!obj || obj.v !== 1) throw new Error('Unsupported message format')
-
-  const wrappedB64 = obj.keys?.[String(params.myUserId)]
-  if (!wrappedB64) throw new Error('No key for recipient')
-
-  const wrapped = unb64(wrappedB64)
-  const rawKey = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, params.myPrivateKey, wrapped)
+  const rawKey = await crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    params.myPrivateKey,
+    wrappedBytes as unknown as BufferSource,
+  )
   const aesKey = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt'])
 
-  const iv = unb64(obj.ivB64)
-  const ct = unb64(obj.ctB64)
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct)
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: obj.iv }, aesKey, obj.ct)
 
   const parsed = JSON.parse(decUtf8(pt)) as {
     text: unknown

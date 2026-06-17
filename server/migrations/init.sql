@@ -21,8 +21,7 @@ CREATE INDEX idx_users_remove_date ON users(remove_date);
 CREATE TABLE IF NOT EXISTS chats (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   chat_type VARCHAR(10) NOT NULL CHECK (chat_type IN ('personal', 'group')),
-  chat_name_enc TEXT NOT NULL DEFAULT '',
-  names JSONB NOT NULL DEFAULT '{}'::jsonb
+  chat_name_enc BYTEA NOT NULL DEFAULT ''::bytea
 );
 
 CREATE INDEX idx_chats_type ON chats(chat_type);
@@ -38,12 +37,23 @@ CREATE TABLE IF NOT EXISTS chat_members (
 CREATE INDEX idx_chat_members_user ON chat_members(user_id);
 CREATE INDEX idx_chat_members_chat ON chat_members(chat_id);
 
+-- Per-subject encrypted display names for chat members.
+CREATE TABLE IF NOT EXISTS chat_names_enc (
+  chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  subject_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  enc BYTEA NOT NULL,
+  PRIMARY KEY (chat_id, subject_user_id)
+);
+
+CREATE INDEX idx_chat_names_chat ON chat_names_enc(chat_id);
+CREATE INDEX idx_chat_names_subject ON chat_names_enc(subject_user_id);
+
 -- Messages table (UUIDv7 for chronological ordering)
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY,
   chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  encrypted_data TEXT NOT NULL,
+  encrypted_data BYTEA NOT NULL,
   signature TEXT NOT NULL DEFAULT ''
 );
 
