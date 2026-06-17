@@ -1,13 +1,11 @@
-type StoredEncryptedBlobV1 = {
-  v: 1
-  kdf: 'PBKDF2-SHA256'
-  iterations: number
-  saltB64: string
-  ivB64: string
-  ctB64: string
-}
-
 export const LOCAL_KEY_PRIVATE_KEY_ITERATIONS = 612_345
+const PBE_SALT_BYTES = 16
+const PBE_IV_BYTES = 12
+const AES_GCM_TAG_BYTES = 16
+const PBE_SALT_B64_LEN = Math.ceil(PBE_SALT_BYTES / 3) * 4
+const PBE_IV_B64_LEN = Math.ceil(PBE_IV_BYTES / 3) * 4
+const PBE_CT_MIN_B64_LEN = Math.ceil(AES_GCM_TAG_BYTES / 3) * 4
+const PBE_BLOB_MIN_LEN = PBE_SALT_B64_LEN + PBE_IV_B64_LEN + PBE_CT_MIN_B64_LEN
 
 const SIGNED_TEXT_PAD_PREFIX = 'STP'
 const SIGNED_TEXT_PAD_LEN_HEX_WIDTH = 4
@@ -108,39 +106,56 @@ async function deriveAesKeyFromPassword(password: string, salt: Uint8Array, iter
   )
 }
 
-export async function encryptStringWithPassword(params: { plaintext: string; password: string; iterations?: number }) {
-  const iterations = typeof params.iterations === 'number' && Number.isFinite(params.iterations)
-    ? Math.max(1, Math.floor(params.iterations))
-    : 250_000
+function packPbeBlob(parts: { salt: Uint8Array; iv: Uint8Array; ct: ArrayBuffer | Uint8Array }) {
+  return `${b64(parts.salt)}${b64(parts.iv)}${b64(parts.ct)}`
+}
 
-  let salt = crypto.getRandomValues(new Uint8Array(16))
-  let iv = crypto.getRandomValues(new Uint8Array(12))
+function unpackPbeBlob(blob: string) {
+  const raw = String(blob ?? '')
+  if (raw.length < PBE_BLOB_MIN_LEN) throw new Error('Unsupported encrypted blob format')
 
-  const aesKey = await deriveAesKeyFromPassword(params.password, salt, iterations)
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encUtf8(params.plaintext))
+  const saltB64 = raw.slice(0, PBE_SALT_B64_LEN)
+  const ivB64 = raw.slice(PBE_SALT_B64_LEN, PBE_SALT_B64_LEN + PBE_IV_B64_LEN)
+  const ctB64 = raw.slice(PBE_SALT_B64_LEN + PBE_IV_B64_LEN)
+  if (!ctB64) throw new Error('Unsupported encrypted blob format')
 
-  const stored: StoredEncryptedBlobV1 = {
-    v: 1,
-    kdf: 'PBKDF2-SHA256',
-    iterations,
-    saltB64: b64(salt),
-    ivB64: b64(iv),
-    ctB64: b64(ct),
+  let salt: Uint8Array
+  let iv: Uint8Array
+  let ct: Uint8Array
+  try {
+    salt = unb64(saltB64)
+    iv = unb64(ivB64)
+    ct = unb64(ctB64)
+  } catch {
+    throw new Error('Unsupported encrypted blob format')
   }
 
-  return JSON.stringify(stored)
+  if (salt.byteLength !== PBE_SALT_BYTES) throw new Error('Unsupported encrypted blob format')
+  if (iv.byteLength !== PBE_IV_BYTES) throw new Error('Unsupported encrypted blob format')
+  if (ct.byteLength < AES_GCM_TAG_BYTES) throw new Error('Unsupported encrypted blob format')
+
+  return { salt, iv, ct }
+}
+
+export async function encryptStringWithPassword(params: { plaintext: string; password: string }) {
+  const salt = crypto.getRandomValues(new Uint8Array(PBE_SALT_BYTES))
+  const iv = crypto.getRandomValues(new Uint8Array(PBE_IV_BYTES))
+
+  const aesKey = await deriveAesKeyFromPassword(params.password, salt, LOCAL_KEY_PRIVATE_KEY_ITERATIONS)
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encUtf8(params.plaintext))
+
+  return packPbeBlob({ salt, iv, ct })
 }
 
 export async function decryptStringWithPassword(params: { encrypted: string; password: string }) {
-  const parsed = JSON.parse(params.encrypted) as StoredEncryptedBlobV1
-  if (!parsed || parsed.v !== 1) throw new Error('Unsupported format')
+  const { salt, iv, ct } = unpackPbeBlob(params.encrypted)
 
-  const salt = unb64(parsed.saltB64)
-  const iv = unb64(parsed.ivB64)
-  const ct = unb64(parsed.ctB64)
-
-  const aesKey = await deriveAesKeyFromPassword(params.password, salt, parsed.iterations)
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct)
+  const aesKey = await deriveAesKeyFromPassword(params.password, salt, LOCAL_KEY_PRIVATE_KEY_ITERATIONS)
+  const pt = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+    aesKey,
+    ct as unknown as BufferSource,
+  )
   return decUtf8(pt)
 }
 

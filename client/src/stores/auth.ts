@@ -22,7 +22,6 @@ import {
   importRsaPssPrivateKeyJwk,
   importRsaPssPublicKeyJwk,
   importRsaPrivateKeyJwk,
-  LOCAL_KEY_PRIVATE_KEY_ITERATIONS,
   publicJwkFromPrivateJwk,
   signEnvelope,
   verifyEnvelope,
@@ -940,7 +939,6 @@ export const useAuthStore = defineStore('auth', () => {
     const d = await encryptStringWithPassword({
       plaintext: JSON.stringify(payload),
       password: params.password,
-      iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS,
     })
 
     const cur = loadKeyEntries()
@@ -1137,14 +1135,6 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
-
-    // Now that the password is known, ensure we persist only the low-profile entry.
-    await saveLocalKeyForUser({
-      username: u,
-      password: params.password,
-      privateKeyMaterial: privateJwk,
-      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
-    })
 
     // After unlock: load server state and connect realtime.
     if (token.value) {
@@ -2834,14 +2824,6 @@ export const useAuthStore = defineStore('auth', () => {
     // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
 
-    // Migrate/ensure low-profile local storage now that we have the password.
-    await saveLocalKeyForUser({
-      username: u,
-      password: params.password,
-      privateKeyMaterial: privateJwk,
-      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
-    })
-
     await refreshChats()
     await connectWs()
     void maybeAddChatFromUrl()
@@ -2927,14 +2909,6 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Variant B: if stay mode is enabled, persist auto-unlock blob from private JWK.
     void persistStayUnlockBlobFromPrivateJwk(privateJwk)
-
-    // Ensure low-profile local storage now that we have the password.
-    await saveLocalKeyForUser({
-      username: u,
-      password: params.password,
-      privateKeyMaterial: privateJwk,
-      signingKeyMaterial: signingJwk !== privateJwk ? signingJwk : undefined,
-    })
 
     await refreshChats()
     await connectWs()

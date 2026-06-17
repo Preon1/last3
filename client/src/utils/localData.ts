@@ -70,6 +70,12 @@ function b64Decode(b64: string): Uint8Array {
   return out
 }
 
+const STAY_IV_BYTES = 12
+const STAY_AES_GCM_TAG_BYTES = 16
+const STAY_IV_B64_LEN = Math.ceil(STAY_IV_BYTES / 3) * 4
+const STAY_CT_MIN_B64_LEN = Math.ceil(STAY_AES_GCM_TAG_BYTES / 3) * 4
+const STAY_BLOB_MIN_LEN = STAY_IV_B64_LEN + STAY_CT_MIN_B64_LEN
+
 function cookieGet(name: string): string | null {
   if (!isBrowser()) return null
   try {
@@ -651,18 +657,32 @@ export class LocalData {
 
   async encryptStayString(plaintext: string): Promise<string> {
     const key = await this.getOrCreateStayDeviceKey()
-    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const iv = crypto.getRandomValues(new Uint8Array(STAY_IV_BYTES))
     const pt = new TextEncoder().encode(String(plaintext ?? ''))
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt)
-    return `${b64Encode(iv)}.${b64Encode(new Uint8Array(ct))}`
+    return `${b64Encode(iv)}${b64Encode(new Uint8Array(ct))}`
   }
 
   async decryptStayString(blob: string): Promise<string> {
     const raw = String(blob ?? '')
-    const parts = raw.split('.')
-    if (parts.length !== 2) throw new Error('Bad stay blob')
-    const iv = b64Decode(parts[0] ?? '')
-    const ct = b64Decode(parts[1] ?? '')
+    if (raw.length < STAY_BLOB_MIN_LEN) throw new Error('Bad stay blob')
+
+    const ivB64 = raw.slice(0, STAY_IV_B64_LEN)
+    const ctB64 = raw.slice(STAY_IV_B64_LEN)
+    if (!ctB64) throw new Error('Bad stay blob')
+
+    let iv: Uint8Array
+    let ct: Uint8Array
+    try {
+      iv = b64Decode(ivB64)
+      ct = b64Decode(ctB64)
+    } catch {
+      throw new Error('Bad stay blob')
+    }
+
+    if (iv.byteLength !== STAY_IV_BYTES) throw new Error('Bad stay blob')
+    if (ct.byteLength < STAY_AES_GCM_TAG_BYTES) throw new Error('Bad stay blob')
+
     const key = await this.getOrCreateStayDeviceKey()
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, new Uint8Array(ct).buffer)
     return new TextDecoder().decode(pt)

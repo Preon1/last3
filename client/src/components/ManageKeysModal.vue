@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
-import { decryptStringWithPassword, encryptStringWithPassword, LOCAL_KEY_PRIVATE_KEY_ITERATIONS } from '../utils/signedCrypto'
+import { decryptStringWithPassword, encryptStringWithPassword } from '../utils/signedCrypto'
 import { LocalEntity, localData } from '../utils/localData'
 
 type StoredKeyV3 = {
@@ -409,7 +409,7 @@ async function applyPasswordChange() {
   chBusy.value = true
   try {
     const raw = JSON.stringify({ ...payload, n: u })
-    const d = await encryptStringWithPassword({ plaintext: raw, password: pw1, iterations: LOCAL_KEY_PRIVATE_KEY_ITERATIONS })
+    const d = await encryptStringWithPassword({ plaintext: raw, password: pw1 })
     const updated: StoredKeyV3 = { v: 3, d }
 
     const existing = keyEntries.value
