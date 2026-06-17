@@ -536,7 +536,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Add per-encryption random salt so ciphertext changes even when the
     // user keeps the same settings.
-    const saltLen = randomIntInclusive(4, 16)
+    const saltLen = randomIntInclusive(0, 8)
     const saltBytes = crypto.getRandomValues(new Uint8Array(saltLen))
     const s = bytesToB64(saltBytes)
 
