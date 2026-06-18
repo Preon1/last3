@@ -6,7 +6,6 @@ import { storeToRefs } from 'pinia'
 import { cycleLocale } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
-import { voprfNameToken } from '../utils/voprfNames'
 
 const ui = useUiStore()
 const toast = useToastStore()
@@ -151,6 +150,7 @@ function toUserError(e: any): string {
   const msg = typeof e?.message === 'string' ? e.message : String(e)
   if (msg === 'No local key found') return String(t('errNoLocalKey'))
   if (msg === 'Invalid credentials') return String(t('errInvalidCredentials'))
+  if (msg === 'Username already exists') return String(t('errUsernameExists'))
   if (msg === 'Username contains unsafe characters') return String(t('errUsernameUnsafe'))
   if (msg === 'Unauthorized') return String(t('errUnauthorized'))
   if (msg === 'Request failed') return String(t('genericError'))
@@ -249,28 +249,6 @@ async function onRegister() {
 
   const u = username.value.trim()
   if (!u) return
-
-  // Check name availability before triggering register.
-  busy.value = true
-  try {
-    const nameToken = await voprfNameToken({ kind: 'user', input: u })
-    const r = await fetch('/api/auth/check-name-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nameToken }),
-    })
-    const j = await r.json().catch(() => ({} as any))
-    if (!r.ok) throw new Error(typeof (j as any)?.error === 'string' ? String((j as any).error) : 'Request failed')
-    if ((j as any)?.exists === true) {
-      err.value = String(t('errUsernameExists'))
-      return
-    }
-  } catch (e: any) {
-    err.value = toUserError(e)
-    return
-  } finally {
-    busy.value = false
-  }
 
   // Register directly (no entropy collection step).
   err.value = ''
