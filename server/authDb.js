@@ -1,5 +1,6 @@
 import { query, transaction } from './db.js'
 import { v7 as uuidv7 } from 'uuid'
+import { normalizePublicKeyJwkString } from './auth.js'
 
 const AES_GCM_TAG_BYTES = 16
 const ENVELOPE_IV_BYTES = 12
@@ -141,6 +142,16 @@ function mapRowsToNamesObject(rows) {
     out[chatId][subjectUserId] = dbBlobToWireEnvelope(row.enc)
   }
   return out
+}
+
+function normalizePublicKeyForApi(value) {
+  const normalized = normalizePublicKeyJwkString(String(value ?? ''))
+  if (!normalized) {
+    const err = new Error('bad_payload')
+    err.code = 'bad_payload'
+    throw err
+  }
+  return normalized
 }
 
 async function replaceChatNamesForChat(client, chatId, nameRows) {
@@ -433,7 +444,7 @@ export async function authListChats(userId) {
         return {
           ...base,
           otherUserId: String(p.other_user_id),
-          otherPublicKey: String(p.other_public_key),
+          otherPublicKey: normalizePublicKeyForApi(p.other_public_key),
         }
       }
 
@@ -556,7 +567,7 @@ export async function authCreatePersonalChat(userId, otherUserId, names) {
         id: String(existing.rows[0].id),
         type: 'personal',
         otherUserId: otherId,
-        otherPublicKey: String(other.public_key),
+        otherPublicKey: normalizePublicKeyForApi(other.public_key),
       },
     }
   }
@@ -601,7 +612,7 @@ export async function authCreatePersonalChat(userId, otherUserId, names) {
       id: String(created),
       type: 'personal',
       otherUserId: otherId,
-      otherPublicKey: String(other.public_key),
+      otherPublicKey: normalizePublicKeyForApi(other.public_key),
     },
   }
 }
@@ -670,7 +681,7 @@ export async function authListChatMembers(userId, chatId) {
 
   return r.rows.map((row) => ({
     userId: String(row.id),
-    publicKey: String(row.public_key),
+    publicKey: normalizePublicKeyForApi(row.public_key),
   }))
 }
 
@@ -732,7 +743,7 @@ export async function authAddGroupMember(userId, chatId, otherUserId, names, cha
 
   return {
     ok: true,
-    member: { userId: otherId, publicKey: String(other.public_key) },
+    member: { userId: otherId, publicKey: normalizePublicKeyForApi(other.public_key) },
   }
 }
 

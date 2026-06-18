@@ -19,6 +19,10 @@ const ENVELOPE_TEXT_COMPRESS_MAX_RATIO = 0.9
 const ENVELOPE_TEXT_MAX_DECOMPRESSED_BYTES = 64 * 1024
 
 const ENVELOPE_PAD_HARD_MAX_RANDOM_LEN = 4096
+const RSA_PUBLIC_EXPONENT_B64URL = 'AQAB'
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
+const RSA_MODULUS_MIN_LEN = 128
+const RSA_MODULUS_MAX_LEN = 2048
 
 const TEXT_PAD_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~!@#$%^&*()-_=+[]{};:,.<>/?'
@@ -32,6 +36,22 @@ function isStringFromAlphabet(s: string, alphabetSet: Set<string>) {
     if (!alphabetSet.has(ch)) return false
   }
   return true
+}
+
+function isLikelyRsaModulus(value: unknown) {
+  if (typeof value !== 'string') return false
+  if (!BASE64URL_RE.test(value)) return false
+  if (value.length < RSA_MODULUS_MIN_LEN || value.length > RSA_MODULUS_MAX_LEN) return false
+  return true
+}
+
+function parsePublicKeyInputToRsaJwk(publicKey: string) {
+  const raw = String(publicKey ?? '').trim()
+  if (!raw) throw new Error('Invalid public key')
+
+  // Strict compact format: only RSA modulus n.
+  if (!isLikelyRsaModulus(raw)) throw new Error('Invalid public key')
+  return { kty: 'RSA', n: raw, e: RSA_PUBLIC_EXPONENT_B64URL }
 }
 
 function encUtf8(s: string) {
@@ -190,10 +210,17 @@ export async function generateRsaKeyPair() {
   const publicJwk = await crypto.subtle.exportKey('jwk', kp.publicKey)
   const privateJwk = await crypto.subtle.exportKey('jwk', kp.privateKey)
 
+  const modulus = typeof (publicJwk as any)?.n === 'string' ? (publicJwk as any).n : null
+  const exponent = typeof (publicJwk as any)?.e === 'string' ? (publicJwk as any).e : null
+  if (!isLikelyRsaModulus(modulus) || exponent !== RSA_PUBLIC_EXPONENT_B64URL) {
+    throw new Error('Invalid generated public key')
+  }
+
   return {
     publicKey: kp.publicKey,
     privateKey: kp.privateKey,
-    publicJwk: JSON.stringify(publicJwk),
+    // Send/store only modulus to minimize payload size in API and chat metadata.
+    publicJwk: modulus,
     privateJwk: JSON.stringify(privateJwk),
   }
 }
@@ -399,15 +426,16 @@ export function publicJwkFromPrivateJwk(privateJwkJson: string) {
   const kty = typeof jwk?.kty === 'string' ? jwk.kty : null
   const n = typeof jwk?.n === 'string' ? jwk.n : null
   const e = typeof jwk?.e === 'string' ? jwk.e : null
-  if (kty !== 'RSA' || !n || !e) throw new Error('Invalid private JWK')
+  if (kty !== 'RSA' || !isLikelyRsaModulus(n) || e !== RSA_PUBLIC_EXPONENT_B64URL) {
+    throw new Error('Invalid private JWK')
+  }
 
-  // Minimal RSA public JWK; WebCrypto import accepts this for RSA-OAEP.
-  const pub = { kty: 'RSA', n, e, ext: true, key_ops: ['encrypt'] }
-  return JSON.stringify(pub)
+  // Compact public key format: only the unique modulus n.
+  return n
 }
 
 export async function importRsaPublicKeyJwk(jwkJson: string) {
-  const jwk = JSON.parse(jwkJson)
+  const jwk = parsePublicKeyInputToRsaJwk(jwkJson)
   return crypto.subtle.importKey(
     'jwk',
     jwk,
@@ -427,7 +455,7 @@ function stripJwkOps(jwk: any) {
 }
 
 export async function importRsaPssPublicKeyJwk(jwkJson: string) {
-  const jwk = stripJwkOps(JSON.parse(jwkJson))
+  const jwk = stripJwkOps(parsePublicKeyInputToRsaJwk(jwkJson))
   return crypto.subtle.importKey(
     'jwk',
     jwk,

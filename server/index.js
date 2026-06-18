@@ -20,7 +20,14 @@ import {
   deleteSubscriptionsByEndpoint,
 } from './pushDb.js';
 import { initDatabase, query, runMigrations } from './db.js';
-import { registerUser, findUserByNameTokenAndPublicKey, userTokenExists, getUserByNameToken } from './auth.js';
+import {
+  registerUser,
+  findUserByNameTokenAndPublicKey,
+  userTokenExists,
+  getUserByNameToken,
+  normalizePublicKeyJwkString,
+  publicKeyStringToRsaEncryptJwk,
+} from './auth.js';
 import { issueToken, rotateToken, getSessionForToken, requireAuthSession, parseAuthTokenFromReq, revokeAllTokensForUser, revokeToken } from './authSession.js';
 import {
   authListChats,
@@ -125,22 +132,8 @@ function cleanupLoginChallenges() {
 
 setInterval(cleanupLoginChallenges, 30_000).unref?.();
 
-function parseRsaPublicJwkString(jwkString) {
-  if (!jwkString || typeof jwkString !== 'string') return null;
-  try {
-    const jwk = JSON.parse(jwkString);
-    const kty = typeof jwk?.kty === 'string' ? jwk.kty : null;
-    const n = typeof jwk?.n === 'string' ? jwk.n : null;
-    const e = typeof jwk?.e === 'string' ? jwk.e : null;
-    if (kty !== 'RSA' || !n || !e) return null;
-    return { kty: 'RSA', n, e, ext: true, key_ops: ['encrypt'] };
-  } catch {
-    return null;
-  }
-}
-
 function encryptWithUserPublicKey(publicKeyJwkString, plaintext) {
-  const jwk = parseRsaPublicJwkString(publicKeyJwkString);
+  const jwk = publicKeyStringToRsaEncryptJwk(publicKeyJwkString);
   if (!jwk) throw new Error('Invalid public key');
   const keyObj = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const ct = crypto.publicEncrypt(
@@ -849,7 +842,10 @@ app.post('/api/users/lookup', requireAuthSession, async (req, res) => {
       });
     }
 
-    res.json({ success: true, userId: String(row.id), publicKey: String(row.public_key ?? '') });
+    const normalizedPublicKey = normalizePublicKeyJwkString(String(row.public_key ?? ''));
+    if (!normalizedPublicKey) return res.status(404).json({ error: 'not_found' });
+
+    res.json({ success: true, userId: String(row.id), publicKey: normalizedPublicKey });
   } catch {
     res.status(500).json({ error: 'Server error' });
   }

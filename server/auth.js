@@ -1,28 +1,39 @@
 import { query } from './db.js'
 
-function parseRsaPublicJwk(jwkString) {
-  if (!jwkString || typeof jwkString !== 'string') return null
-  try {
-    const jwk = JSON.parse(jwkString)
-    const kty = typeof jwk?.kty === 'string' ? jwk.kty : null
-    const n = typeof jwk?.n === 'string' ? jwk.n : null
-    const e = typeof jwk?.e === 'string' ? jwk.e : null
-    if (kty !== 'RSA' || !n || !e) return null
-    return { kty: 'RSA', n, e }
-  } catch {
-    return null
-  }
+const RSA_PUBLIC_EXPONENT_B64U = 'AQAB'
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
+const RSA_MODULUS_MIN_LEN = 128
+const RSA_MODULUS_MAX_LEN = 2048
+
+function isLikelyRsaModulus(value) {
+  if (!value || typeof value !== 'string') return false
+  if (!BASE64URL_RE.test(value)) return false
+  if (value.length < RSA_MODULUS_MIN_LEN || value.length > RSA_MODULUS_MAX_LEN) return false
+  return true
 }
 
-function normalizeRsaPublicJwkString(jwkString) {
-  const parsed = parseRsaPublicJwk(jwkString)
-  if (!parsed) return null
-  // Store a minimal, stable public JWK representation.
-  return JSON.stringify({ kty: 'RSA', n: parsed.n, e: parsed.e, ext: true, key_ops: ['encrypt'] })
+function extractRsaPublicModulus(publicKeyString) {
+  if (!publicKeyString || typeof publicKeyString !== 'string') return null
+  const raw = publicKeyString.trim()
+  if (!raw) return null
+
+  // Strict compact format: only RSA modulus n in base64url.
+  if (!isLikelyRsaModulus(raw)) return null
+  return raw
+}
+
+function normalizeRsaPublicJwkString(publicKeyString) {
+  return extractRsaPublicModulus(publicKeyString)
 }
 
 export function normalizePublicKeyJwkString(jwkString) {
   return normalizeRsaPublicJwkString(jwkString)
+}
+
+export function publicKeyStringToRsaEncryptJwk(publicKeyString) {
+  const n = extractRsaPublicModulus(publicKeyString)
+  if (!n) return null
+  return { kty: 'RSA', n, e: RSA_PUBLIC_EXPONENT_B64U }
 }
 
 /**
